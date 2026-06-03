@@ -1,6 +1,1354 @@
-<!DOCTYPE html>
-<html>
-<body>
-<h1>테스트</h1>
-</body>
-</html>
+import { useState, useMemo, useCallback, useRef } from "react";
+import * as XLSX from "xlsx";
+
+/* ══════════════════════════════════════════════════════════════
+   FACIL — 시설물 정밀안전점검 현장 일정·관리 대시보드
+   · 연도/반기별 현장 분리
+   · 영구 캘린더 (드래그로 일정 변경 → 현장관리 자동 반영)
+   · 팀(4팀) 색상 구분 + 팀원 배정
+   · 엑셀 가져오기/내보내기 (원본 형식)
+══════════════════════════════════════════════════════════════ */
+
+/* ── 색상 시스템 ── */
+const C = {
+  bg:"#F0F2F5", surface:"#FFFFFF", surfaceL:"#F7F9FB", surfaceD:"#ECEEF2",
+  border:"#E2E6ED", borderD:"#CDD2DB",
+  t1:"#1A2332", t2:"#4A5568", t3:"#8A94A6", t4:"#BCC3CE",
+  team1:"#1D6FF2", team1b:"#EBF2FF", team1c:"#1058CC",
+  team2:"#0A9260", team2b:"#E6F7F2", team2c:"#077A4F",
+  team3:"#D93B2B", team3b:"#FDF0EE", team3c:"#B02E20",
+  team4:"#7C3AED", team4b:"#F3EFFE", team4c:"#5B21B6",
+  green:"#0D9B6C", greenL:"#E8F7F2",
+  red:"#D93B2B",   redL:"#FDF0EE",
+  orange:"#E07A20",orangeL:"#FDF3E8",
+  purple:"#7C3AED",purpleL:"#F3EFFE",
+  blue:"#1D6FF2",  blueL:"#EBF2FF",
+  yellow:"#B58A00",yellowL:"#FDF8E8",
+};
+
+/* ── 팀 메타 ── */
+const TC = {
+  "1팀":{a:C.team1,b:C.team1b,c:C.team1c},
+  "2팀":{a:C.team2,b:C.team2b,c:C.team2c},
+  "3팀":{a:C.team3,b:C.team3b,c:C.team3c},
+  "4팀":{a:C.team4,b:C.team4b,c:C.team4c},
+};
+const TEAM_LIST = ["1팀","2팀","3팀","4팀"];
+
+/* ── 팀원 명단 (실제 명단으로 교체 가능) ── */
+const TEAM_MEMBERS = {
+  "1팀": ["김동영","한범용","권태민","김유빈"],
+  "2팀": ["정도혁","윤종현","이동현","관우남"],
+  "3팀": ["한상오","장민태","채승준","함예린"],
+  "4팀": ["이준혁","박서연","최민준","윤지현"],
+};
+
+/* ── 기준일 & D-day ── */
+const BASE_DATE = "2026-05-26";
+const calcDday = (end, base = BASE_DATE) => {
+  if (!end) return null;
+  const [y,m,d]   = end.split("-").map(Number);
+  const [by,bm,bd]= base.split("-").map(Number);
+  return Math.floor((new Date(y,m-1,d) - new Date(by,bm-1,bd)) / 86400000);
+};
+const ddC = d => d===null ? C.t3 : d>=0 ? C.green : d>=-7 ? C.red : d>=-30 ? C.orange : C.t3;
+const ddL = d => d===null ? "-" : d>=0 ? `D+${d}` : `D${d}`;
+const fd  = s => s ? s.slice(5).replace("-","/") : "-";
+
+const BD = `1px solid ${C.border}`;
+const F  = `'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif`;
+
+const MENUS = [
+  { id:"schedule", icon:"📅", label:"현장 일정" },
+  { id:"sites",    icon:"🏫", label:"현장 관리" },
+  { id:"urgent",   icon:"🚨", label:"긴급 보고서" },
+  { id:"done",     icon:"✅", label:"완료 보고서" },
+  { id:"export",   icon:"📤", label:"엑셀 관리" },
+];
+
+/* ══════════════════════════════════════════════════════════════
+   초기 데이터 — { 연도: { 반기: [학교...] } }
+   학교: { id, school, team, region, no, kind, field, start, end,
+           headcount, assignees, buildings:[{ b,floor,area,fms,flag,note,rep,fmsD,delivery }] }
+══════════════════════════════════════════════════════════════ */
+const DB = {
+  "2026": {
+    "상반기": [
+      { id:"26u1", school:"김포양곡중학교",       team:"3팀", region:"김포",    no:"32", kind:"정기점검", field:"2026-05-26", start:"2026-04-29", end:"2026-05-22",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사동",      floor:"5",    area:3631.5,  fms:"sh00009125m // sh00009125mkor!", flag:"●", note:"031-981-0147. 우측 인방 크랙 → 드론 촬영 요청", rep:false, fmsD:false, delivery:null},
+          {b:"체육관",      floor:"-1/2", area:1258.9,  fms:null, flag:"●", note:"오후 12시 입장 → 체육관 먼저 점검 후 식사", rep:false, fmsD:false, delivery:null},
+          {b:"급식소/교사", floor:"4",    area:2280,    fms:null, flag:"●", note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26u2", school:"선부고등학교",          team:"3팀", region:"안산",    no:"27", kind:"정기점검", field:"2026-05-27", start:"2026-04-07", end:"2026-05-05",
+        headcount:2, assignees:[], buildings:[
+          {b:"본관동",     floor:"5",   area:12818.92, fms:"SH00001548 // qwertyui*1", flag:null, note:"담당자 070-4445-9204", rep:false, fmsD:false, delivery:null},
+          {b:"보강토옹벽", floor:null,  area:null,     fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26u3", school:"개군중학교",            team:"1팀", region:"양평",    no:"25", kind:"정기점검", field:"2026-05-29", start:"2026-04-09", end:"2026-05-06",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사동", floor:"2",    area:17710, fms:"sh00010202m // sh00010202mkor!", flag:null, note:"김수연 031-772-8005", rep:false, fmsD:false, delivery:null},
+          {b:"체육관", floor:"-1/2", area:1893,  fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26u4", school:"수지고등학교",          team:"2팀", region:"용인",    no:"37", kind:"정기점검", field:"2026-06-04", start:"2026-04-13", end:"2026-05-08",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사동", floor:"-1/5", area:11924.51, fms:"missc502 // tnwl000**", flag:null, note:"031-260-5307", rep:true, fmsD:true, delivery:"직납"},
+          {b:"옹벽1",  floor:null,   area:null,     fms:null, flag:null, note:null, rep:true, fmsD:true, delivery:"직납"},
+        ]},
+      { id:"26u5", school:"덕소고등학교",          team:"1팀", region:"남양주",  no:"29", kind:"정기점검", field:"2026-06-10", start:"2026-03-26", end:"2026-11-30",
+        headcount:2, assignees:[], buildings:[
+          {b:"사랑성실관", floor:"5", area:4837.86, fms:"sh00007021m // sh00007021mkor!", flag:"1년", note:"계약담당 070-7714-2402", rep:true, fmsD:false, delivery:"직납"},
+          {b:"근면관",     floor:"4", area:3084.62, fms:null, flag:"1년", note:"시설주무관 010-7936-9339", rep:true, fmsD:false, delivery:"직납"},
+        ]},
+      { id:"26u7", school:"오산세교중학교",          team:"4팀", region:"오산",    no:"41", kind:"정기점검", field:"2026-06-03", start:"2026-05-20", end:"2026-07-15",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사동",  floor:"-1/5", area:9230,   fms:"sh00041001m // sh00041001mkor!", flag:null, note:"031-370-0177. 지하층 습기 누수 발생 확인 요망", rep:false, fmsD:false, delivery:null},
+          {b:"체육관",  floor:"2",    area:2100,   fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+          {b:"급식소",  floor:"1",    area:980,    fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26u8", school:"화성능동초등학교",        team:"4팀", region:"화성",    no:"42", kind:"정기점검", field:"2026-06-10", start:"2026-06-01", end:"2026-08-31",
+        headcount:2, assignees:[], buildings:[
+          {b:"본관동",  floor:"4",    area:6540,   fms:"sh00042001m // sh00042001mkor!", flag:"●", note:"행정실 031-000-1234. 드론 촬영 요청", rep:false, fmsD:false, delivery:null},
+          {b:"별관동",  floor:"3",    area:3200,   fms:null, flag:"●", note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26u6", school:"의왕부곡초등학교",      team:"2팀", region:"의왕",    no:"8",  kind:"정기점검", field:"2026-05-28", start:"2026-03-09", end:"2026-04-02",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사1호동", floor:"-1/4", area:3282, fms:"khohyun1 // bugok7562!", flag:null, note:"031-8084-6992 깐깐함. 인방 탈락 위험", rep:true, fmsD:true, delivery:"직납"},
+          {b:"교사2호동", floor:"3",    area:2652, fms:null, flag:null, note:"크랙팁 부착", rep:true, fmsD:true, delivery:"직납"},
+        ]},
+    ],
+    "하반기": [
+      { id:"26d1", school:"은혜고등학교",          team:"1팀", region:"고양",    no:"1",  kind:"정기점검", field:"2026-07-08", start:"2026-07-01", end:"2026-09-30",
+        headcount:2, assignees:[], buildings:[
+          {b:"본관교사동", floor:"4",   area:8420,  fms:null, flag:null, note:"행정실 031-000-0000", rep:false, fmsD:false, delivery:null},
+          {b:"성신관",     floor:"3",   area:3200,  fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+          {b:"급식소",     floor:"1",   area:980,   fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26d2", school:"칠보중학교",            team:"2팀", region:"수원",    no:"2",  kind:"정기점검", field:"2026-07-15", start:"2026-07-10", end:"2026-10-15",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사1호동", floor:"-1/5", area:9100,  fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+          {b:"교사2호동", floor:"3",    area:4300,  fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26d3", school:"일산고등학교",          team:"1팀", region:"고양",    no:"3",  kind:"정기점검", field:"2026-08-05", start:"2026-08-01", end:"2026-10-31",
+        headcount:2, assignees:[], buildings:[
+          {b:"고등학교실습동",       floor:"3", area:2800,  fms:null, flag:"●", note:"드론 촬영 예정", rep:false, fmsD:false, delivery:null},
+          {b:"고등학교신관",         floor:"5", area:6500,  fms:null, flag:"●", note:null, rep:false, fmsD:false, delivery:null},
+          {b:"주차장·태권도연습실", floor:"1", area:1200,  fms:null, flag:"●", note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26d4", school:"진위고등학교",          team:"2팀", region:"평택",    no:"4",  kind:"정기점검", field:"2026-09-01", start:"2026-09-01", end:"2026-11-20",
+        headcount:2, assignees:[], buildings:[
+          {b:"A동(고교구관)",    floor:"3",    area:3553.85, fms:"sh00009319m // sh00009319mkor!", flag:"1년", note:"행정실 031-646-0155", rep:false, fmsD:false, delivery:null},
+          {b:"D동(급식소)",      floor:"4",    area:1397,    fms:null, flag:"1년", note:null, rep:false, fmsD:false, delivery:null},
+          {b:"M동(강당/체육관)", floor:"2",    area:1741.14, fms:null, flag:"1년", note:null, rep:false, fmsD:false, delivery:null},
+          {b:"E동(교사동)",      floor:"-1/3", area:2340.15, fms:null, flag:"1년", note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26d6", school:"오산초등학교",            team:"4팀", region:"오산",    no:"6",  kind:"정기점검", field:"2026-09-15", start:"2026-09-10", end:"2026-11-30",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사1호동", floor:"-1/4", area:7800, fms:null, flag:null, note:"행정실 031-370-0001", rep:false, fmsD:false, delivery:null},
+          {b:"교사2호동", floor:"3",    area:3400, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+      { id:"26d5", school:"청명고등학교",          team:"3팀", region:"수원",    no:"5",  kind:"정기점검", field:"2026-08-20", start:"2026-08-15", end:"2026-11-30",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사1호동", floor:"-1/5", area:8900, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+          {b:"교사2호동", floor:"4",    area:4200, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null},
+        ]},
+    ],
+  },
+  "2025": {
+    "상반기": [
+      { id:"25u1", school:"의왕초등학교",          team:"2팀", region:"의왕",    no:"7",  kind:"정기점검", field:"2025-03-17", start:"2025-03-16", end:"2025-06-30",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사동", floor:"-1/5", area:11244.98, fms:"sh00005800m // sh00005800mkor!", flag:"1년", note:"행정실 031-457-4121", rep:true, fmsD:true, delivery:"직납"},
+          {b:"옹벽1",  floor:null,   area:null,     fms:null, flag:"1년", note:null, rep:true, fmsD:true, delivery:"직납"},
+        ]},
+    ],
+    "하반기": [
+      { id:"25d1", school:"은혜고등학교",          team:"1팀", region:"고양",    no:"2",  kind:"정기점검", field:"2025-08-10", start:"2025-08-01", end:"2025-10-31",
+        headcount:2, assignees:[], buildings:[
+          {b:"본관교사동", floor:"4", area:8420, fms:null, flag:null, note:null, rep:true, fmsD:true, delivery:"직납"},
+          {b:"성신관",     floor:"3", area:3200, fms:null, flag:null, note:null, rep:true, fmsD:true, delivery:"직납"},
+        ]},
+      { id:"25d2", school:"여주자영농업고등학교",   team:"1팀", region:"여주",    no:"6",  kind:"정기점검", field:"2025-09-05", start:"2025-09-01", end:"2025-11-30",
+        headcount:2, assignees:[], buildings:[
+          {b:"교사(본관건물)", floor:"3",   area:5200, fms:null, flag:null, note:null, rep:true, fmsD:true, delivery:"직납"},
+          {b:"체육관",         floor:"2",   area:2800, fms:null, flag:null, note:null, rep:true, fmsD:true, delivery:"직납"},
+          {b:"기숙사(북성관)", floor:"5",   area:3100, fms:null, flag:null, note:null, rep:true, fmsD:true, delivery:"직납"},
+        ]},
+      { id:"25d3", school:"덕소고등학교",          team:"1팀", region:"남양주",  no:"5",  kind:"정기점검", field:"2025-07-28", start:"2025-07-20", end:"2025-10-20",
+        headcount:2, assignees:[], buildings:[
+          {b:"사랑성실관", floor:"5", area:4837.86, fms:"sh00007021m // sh00007021mkor!", flag:"1년", note:"계약담당 070-7714-2402", rep:true, fmsD:true, delivery:"직납"},
+          {b:"근면관",     floor:"4", area:3084.62, fms:null, flag:"1년", note:null, rep:true, fmsD:true, delivery:"직납"},
+        ]},
+    ],
+  },
+};
+
+/* ══════════════════════════════════════════════════════════════
+   공통 UI 헬퍼
+══════════════════════════════════════════════════════════════ */
+function Tag({ children, bg, color, border }) {
+  return <span style={{ fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4,
+    background:bg, color, border:border||"none", lineHeight:1.6, whiteSpace:"nowrap" }}>{children}</span>;
+}
+function Pill({ children, active, ac, onClick, style={} }) {
+  return <button onClick={onClick} style={{ padding:"5px 11px",borderRadius:20,fontSize:12,fontWeight:600,
+    border:`1.5px solid ${active?ac:C.border}`, background:active?ac+"18":"transparent",
+    color:active?ac:C.t3, cursor:"pointer", whiteSpace:"nowrap", ...style }}>{children}</button>;
+}
+function Toast({ msg }) {
+  if (!msg) return null;
+  return <div style={{ position:"fixed",bottom:28,left:"50%",transform:"translateX(-50%)",
+    background:C.surface,border:`1px solid ${C.green}`,borderRadius:10,padding:"11px 20px",
+    fontSize:12,color:C.green,fontWeight:700,boxShadow:"0 8px 24px rgba(0,0,0,.15)",
+    zIndex:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:8 }}>
+    <span>✓</span>{msg}
+  </div>;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   엑셀 파싱 / 내보내기
+   엑셀 열: 1팀 2No 3종류 4지역 5학교 6시설 7층 8연면적 9높이 10길이
+            11종별 12현장조사 13착수 14완수 15기간 16FMS 17플래그
+            18특기 19보고서완료(◎) 20납품 21FMS등록(◎)
+══════════════════════════════════════════════════════════════ */
+function parseSheetName(name) {
+  const m = name.match(/(\d{2})년\s*\(\s*([상하])\s*\)/);
+  if (!m) return null;
+  return { year:`20${m[1]}`, half:m[2]==="상"?"상반기":"하반기" };
+}
+function parseExcelDate(v) {
+  if (!v) return null;
+  if (v instanceof Date) {
+    const tz = v.getTimezoneOffset()*60000;
+    return new Date(v - tz).toISOString().slice(0,10);
+  }
+  if (typeof v === "number") {
+    const d = new Date(Math.round((v-25569)*86400*1000));
+    return d.toISOString().slice(0,10);
+  }
+  if (typeof v === "string") {
+    const m = v.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+  }
+  return null;
+}
+function parseSheet(ws) {
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+  const teamMap = {}, schoolMap = {};
+  for (let i=2; i<rows.length; i++) {
+    const r = rows[i]; if (!r) continue;
+    const no = r[1]; if (no==null) continue;
+    const noStr = String(no).trim();
+    const team  = r[0] ? String(r[0]).trim() : null;
+    if (team) teamMap[noStr] = team;
+    if (!schoolMap[noStr]) {
+      schoolMap[noStr] = {
+        id:`imp-${noStr}-${Math.random().toString(36).slice(2,8)}`,
+        no:noStr, school:r[4]?String(r[4]).trim():"", region:r[3]?String(r[3]).trim():"",
+        kind:r[2]?String(r[2]).trim():"정기점검", team:null,
+        field:parseExcelDate(r[11]), start:parseExcelDate(r[12]), end:parseExcelDate(r[13]),
+        headcount:2, assignees:[], buildings:[],
+      };
+    }
+    schoolMap[noStr].buildings.push({
+      b:r[5]?String(r[5]).trim():"", floor:r[6]?String(r[6]).trim():null,
+      area:typeof r[7]==="number"?r[7]:(r[7]?parseFloat(String(r[7]).replace(/,/g,""))||null:null),
+      fms:r[15]?String(r[15]).trim():null, flag:r[16]?String(r[16]).trim():null,
+      note:r[17]?String(r[17]).trim():null,
+      rep:r[18]==="◎"||r[18]==="○"||r[18]===true,
+      fmsD:r[20]==="◎"||r[20]==="○"||r[20]===true,
+      delivery:r[19]?String(r[19]).trim():null,
+    });
+  }
+  Object.entries(schoolMap).forEach(([no,s]) => { s.team = teamMap[no] || "미지정"; });
+  return Object.values(schoolMap);
+}
+function buildSheet(schools) {
+  const today = new Date();
+  const rows = [
+    ["","","","","","","","","","","","현장완료","","","","","","","보고서완료","납품방법","FMS"],
+    ["담당팀","No.","점검종류","지역","학교명","시설명","층수","연면적(㎡)","높이(m)","길이(m)",
+     "종별","현장조사","착수일","완수일","용역기간","FMS아이디/비번","드론/피난/1년",
+     "특기사항","보고서완료","납품방법","FMS등록"],
+  ];
+  schools.forEach(s => {
+    let first = true;
+    s.buildings.forEach(b => {
+      const end = s.end ? new Date(s.end) : null;
+      const d   = end ? Math.floor((end-today)/86400000) : null;
+      const dd  = d===null ? "" : d>=0 ? `D+${d}` : `D${d}`;
+      rows.push([
+        first?s.team:"", first?s.no:"", first?s.kind:"", first?s.region:"", first?s.school:"",
+        b.b||"", b.floor||"", b.area||"", "", "", "",
+        first?(s.field||""):"", first?(s.start||""):"", first?(s.end||""):"", first?dd:"",
+        b.fms||"", b.flag||"", b.note||"", b.rep?"◎":"", b.delivery||"", b.fmsD?"◎":"",
+      ]);
+      first = false;
+    });
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [6,5,10,8,22,20,6,11,8,8,18,11,11,11,9,26,11,42,10,9,8].map(w=>({wch:w}));
+  return ws;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   날짜 클릭 상세 패널 (현장조사 · 완수일)
+══════════════════════════════════════════════════════════════ */
+function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose }) {
+  const [pickerId, setPickerId] = useState(null);
+
+  const fieldSchools = allSchools.filter(s => s.field===dateStr && (teamF==="전체"||s.team===teamF));
+  const endSchools   = allSchools.filter(s => s.end===dateStr   && (teamF==="전체"||s.team===teamF));
+  const total = fieldSchools.length + endSchools.length;
+
+  const toggleAssignee = (sid, name) => {
+    if (!setDb) return;
+    const sc = allSchools.find(s=>s.id===sid);
+    if (!sc?._year || !sc?._half) return;
+    setDb(prev => {
+      const next = {...prev};
+      next[sc._year] = {...prev[sc._year]};
+      next[sc._year][sc._half] = prev[sc._year][sc._half].map(s => {
+        if (s.id!==sid) return s;
+        const cur = s.assignees||[];
+        const upd = cur.includes(name) ? cur.filter(n=>n!==name) : [...cur,name];
+        return {...s, assignees:upd, headcount:upd.length||s.headcount||1};
+      });
+      return next;
+    });
+  };
+
+  const FieldCard = ({ s }) => {
+    const tc = TC[s.team]||{a:C.t3,b:C.surfaceL,c:C.t2};
+    const assignees = s.assignees||[];
+    const available = (TEAM_MEMBERS[s.team]||[]).filter(n=>!assignees.includes(n));
+    const open = pickerId===s.id;
+    return (
+      <div style={{ padding:"10px 11px",background:C.surface,borderRadius:9,
+        border:`1px solid ${C.border}`,borderLeft:`3px solid ${tc.a}`,marginBottom:6 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:8 }}>
+          <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
+          <span style={{ fontSize:11,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
+          <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
+        </div>
+
+        {/* 팀(이름) 배정 */}
+        <div style={{ padding:"8px 9px",background:tc.b,borderRadius:9,border:`1px solid ${tc.a}25` }}>
+          <div style={{ display:"flex",alignItems:"center",flexWrap:"wrap",gap:5 }}>
+            <span style={{ fontSize:11,fontWeight:800,color:tc.a,background:C.surface,
+              padding:"4px 9px",borderRadius:20,border:`1.5px solid ${tc.a}`,whiteSpace:"nowrap" }}>{s.team}</span>
+            {assignees.map(name => (
+              <span key={name} style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,
+                color:"#fff",background:tc.a,padding:"4px 9px",borderRadius:20,whiteSpace:"nowrap",boxShadow:`0 2px 6px ${tc.a}40` }}>
+                {name}
+                <button onClick={()=>toggleAssignee(s.id,name)} style={{ width:14,height:14,borderRadius:"50%",border:"none",
+                  background:"rgba(255,255,255,.3)",color:"#fff",fontSize:10,fontWeight:900,cursor:"pointer",
+                  lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",padding:0 }}>×</button>
+              </span>
+            ))}
+            {available.length>0 && (
+              <button onClick={()=>setPickerId(open?null:s.id)} style={{ width:26,height:26,borderRadius:"50%",
+                border:`1.5px solid ${tc.a}`,background:open?tc.a:C.surface,color:open?"#fff":tc.a,
+                fontSize:16,fontWeight:700,cursor:"pointer",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>+</button>
+            )}
+            {assignees.length===0 && !open && <span style={{ fontSize:10,color:tc.c,opacity:.7 }}>+ 버튼으로 인원 추가</span>}
+          </div>
+          {open && (
+            <div style={{ marginTop:8,padding:8,background:C.surface,borderRadius:8,border:`1px solid ${tc.a}30`,display:"flex",flexWrap:"wrap",gap:5 }}>
+              {available.map(name => (
+                <button key={name} onClick={()=>{ toggleAssignee(s.id,name); setPickerId(null); }}
+                  style={{ padding:"5px 12px",borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",
+                    background:tc.b,color:tc.c,border:`1.5px solid ${tc.a}50` }}>{name}</button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 동 목록 */}
+        <div style={{ display:"flex",flexWrap:"wrap",gap:3,marginTop:7 }}>
+          {s.buildings.map((b,i)=>(
+            <span key={i} style={{ fontSize:9,padding:"1px 6px",borderRadius:3,background:C.surfaceL,border:BD,color:C.t2,whiteSpace:"nowrap" }}>
+              {b.b}{b.floor?` (${b.floor}층)`:""}
+            </span>
+          ))}
+        </div>
+        {s.buildings.some(b=>b.note) && (
+          <div style={{ marginTop:6,fontSize:9,color:C.t3,padding:"3px 8px",background:C.yellowL,borderRadius:4,
+            borderLeft:`2px solid ${C.yellow}`,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+            ⚠ {s.buildings.find(b=>b.note)?.note}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const EndCard = ({ s }) => {
+    const tc = TC[s.team]||{a:C.t3,b:C.surfaceL};
+    const repAll = s.buildings.every(b=>b.rep);
+    const fmsAll = s.buildings.every(b=>b.fmsD);
+    const delAll = s.buildings.every(b=>b.delivery);
+    const ok = repAll && fmsAll && delAll;
+    return (
+      <div style={{ padding:"10px 11px",background:C.surface,borderRadius:9,
+        border:`1px solid ${ok?C.green+"40":C.orange+"40"}`,borderLeft:`3px solid ${ok?C.green:C.orange}`,marginBottom:6 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:7 }}>
+          <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
+          <span style={{ fontSize:11,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
+          <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
+        </div>
+        <div style={{ display:"flex",gap:4 }}>
+          {[{k:"보고서",v:repAll,ac:C.purple},{k:"FMS",v:fmsAll,ac:C.blue},
+            {k:s.buildings.find(b=>b.delivery)?.delivery||"납품",v:delAll,ac:C.green}].map(x=>(
+            <div key={x.k} style={{ flex:1,padding:"4px 0",borderRadius:6,textAlign:"center",
+              background:x.v?x.ac+"12":C.surfaceD,border:`1px solid ${x.v?x.ac+"35":C.border}` }}>
+              <div style={{ fontSize:12,color:x.v?x.ac:C.t4 }}>{x.v?"✓":"○"}</div>
+              <div style={{ fontSize:8,color:x.v?x.ac:C.t4,fontWeight:600,marginTop:1 }}>{x.k}</div>
+            </div>
+          ))}
+        </div>
+        {!repAll && <div style={{ marginTop:5,fontSize:9,color:C.red,fontWeight:600 }}>⚠ 보고서 미완 {s.buildings.filter(b=>!b.rep).length}동</div>}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ width:248,flexShrink:0 }}>
+      <div style={{ background:C.surface,border:BD,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",position:"sticky",top:0 }}>
+        <div style={{ padding:"13px 15px",borderBottom:BD,background:C.blueL,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+          <div>
+            <div style={{ fontSize:18,fontWeight:900,color:C.blue,lineHeight:1 }}>{label}</div>
+            <div style={{ fontSize:10,color:C.blue+"bb",marginTop:3 }}>현장 {fieldSchools.length} · 완수 {endSchools.length} · 총 {total}건</div>
+          </div>
+          <button onClick={onClose} style={{ width:22,height:22,borderRadius:"50%",background:`${C.blue}20`,
+            border:`1px solid ${C.blue}40`,color:C.blue,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>×</button>
+        </div>
+        <div style={{ maxHeight:"calc(100vh - 240px)",overflowY:"auto",padding:"12px 13px" }}>
+          {total===0 && <div style={{ textAlign:"center",padding:"32px 0",color:C.t4 }}><div style={{ fontSize:24,marginBottom:8 }}>—</div><div style={{ fontSize:11 }}>등록된 일정 없음</div></div>}
+          {fieldSchools.length>0 && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:5,marginBottom:8,padding:"5px 8px",background:C.blueL,borderRadius:6 }}>
+                <span style={{ fontSize:13 }}>📍</span><span style={{ fontSize:11,fontWeight:700,color:C.blue }}>현장조사</span>
+                <span style={{ marginLeft:"auto",background:C.blue,color:"#fff",padding:"1px 7px",borderRadius:10,fontSize:10,fontWeight:700 }}>{fieldSchools.length}</span>
+              </div>
+              {fieldSchools.map(s=><FieldCard key={s.id} s={s}/>)}
+            </div>
+          )}
+          {endSchools.length>0 && (
+            <div>
+              <div style={{ display:"flex",alignItems:"center",gap:5,marginBottom:8,padding:"5px 8px",background:C.orangeL,borderRadius:6 }}>
+                <span style={{ fontSize:13 }}>📦</span><span style={{ fontSize:11,fontWeight:700,color:C.orange }}>완수일</span>
+                <span style={{ marginLeft:"auto",background:C.orange,color:"#fff",padding:"1px 7px",borderRadius:10,fontSize:10,fontWeight:700 }}>{endSchools.length}</span>
+              </div>
+              {endSchools.map(s=><EndCard key={s.id} s={s}/>)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   현장 일정 — 영구 캘린더 (드래그로 일정 변경)
+══════════════════════════════════════════════════════════════ */
+function Calendar({ allSchools, setDb, globalTeam="전체" }) {
+  const today = new Date(2026, 4, 26);
+  const [yr, setYr] = useState(2026);
+  const [mo, setMo] = useState(5);
+  const [teamF, setTeamF] = useState(globalTeam);
+  const [dragging, setDragging] = useState(null);
+  const [overDay, setOverDay] = useState(null);
+  const [selDay, setSelDay] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const prevGT = useRef(globalTeam);
+  if (prevGT.current !== globalTeam) { prevGT.current = globalTeam; if (teamF!==globalTeam) setTeamF(globalTeam); }
+
+  const showToast = m => { setToast(m); setTimeout(()=>setToast(null), 2200); };
+  const pad = n => String(n).padStart(2,"0");
+  const toStr = day => `${yr}-${pad(mo)}-${pad(day)}`;
+
+  const prevMonth = () => { if(mo===1){setYr(y=>y-1);setMo(12);}else setMo(m=>m-1); setSelDay(null); };
+  const nextMonth = () => { if(mo===12){setYr(y=>y+1);setMo(1);}else setMo(m=>m+1); setSelDay(null); };
+  const goToday   = () => { setYr(today.getFullYear()); setMo(today.getMonth()+1); setSelDay(today.getDate()); };
+
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const firstDow = new Date(yr, mo-1, 1).getDay();
+  const cells = [...Array(firstDow).fill(null), ...Array.from({length:daysInMonth},(_,i)=>i+1)];
+  while (cells.length%7) cells.push(null);
+  const weeks = Array.from({length:cells.length/7},(_,i)=>cells.slice(i*7,i*7+7));
+  const isToday = d => yr===today.getFullYear() && mo===today.getMonth()+1 && d===today.getDate();
+
+  const eventsByDay = useMemo(() => {
+    const map = {};
+    allSchools.forEach(s => {
+      [["field","현장"],["end","완수"]].forEach(([f,lbl]) => {
+        const ds = s[f]; if (!ds) return;
+        const [y,m,d] = ds.split("-").map(Number);
+        if (y!==yr || m!==mo) return;
+        (map[d] = map[d]||[]).push({ schoolId:s.id, school:s.school, field:f, label:lbl,
+          team:s.team, headcount:s.headcount||2, assignees:s.assignees||[] });
+      });
+    });
+    return map;
+  }, [allSchools, yr, mo]);
+
+  const handleDrop = useCallback(targetDay => {
+    if (!dragging || !targetDay) return;
+    const { schoolId, field, fromDay } = dragging;
+    if (fromDay===targetDay) { setDragging(null); setOverDay(null); return; }
+    const nd = toStr(targetDay);
+    const sc = allSchools.find(s=>s.id===schoolId);
+    if (sc?._year && sc?._half) {
+      setDb(prev => {
+        const next = {...prev};
+        next[sc._year] = {...prev[sc._year]};
+        next[sc._year][sc._half] = prev[sc._year][sc._half].map(s => s.id!==schoolId ? s : {...s,[field]:nd});
+        return next;
+      });
+    }
+    showToast(`${sc?.school} ${field==="field"?"현장조사일":"완수일"} → ${mo}/${targetDay} · 현장관리 반영`);
+    setDragging(null); setOverDay(null);
+  }, [dragging, allSchools, yr, mo, setDb]);
+
+  const evColor = (f,team) => f==="field" ? (TC[team]?.a||C.blue) : C.yellow;
+  const DOW = ["일","월","화","수","목","금","토"];
+  const selLabel = selDay ? `${mo}월 ${selDay}일 (${DOW[new Date(yr,mo-1,selDay).getDay()]})` : "";
+
+  return (
+    <div>
+      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
+        <div>
+          <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>SCHEDULE</div>
+          <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>현장 일정</h1>
+        </div>
+        <div style={{ display:"flex",gap:6 }}>
+          {["전체",...TEAM_LIST].map(t => (
+            <Pill key={t} active={teamF===t} ac={t==="전체"?C.t2:TC[t]?.a} onClick={()=>setTeamF(t)}>{t}</Pill>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding:"9px 14px",background:C.blueL,border:`1px solid ${C.blue}30`,borderRadius:8,
+        fontSize:11,color:C.blue,fontWeight:600,marginBottom:14,display:"flex",alignItems:"center",gap:8 }}>
+        🖱 일정 카드를 드래그해 날짜 변경 · 날짜 클릭 시 우측에 상세 표시
+      </div>
+
+      <div style={{ display:"flex",gap:16 }}>
+        <div style={{ flex:1,minWidth:0 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap" }}>
+            <button onClick={prevMonth} style={{ width:30,height:30,borderRadius:7,border:BD,background:C.surface,color:C.t2,fontSize:16,cursor:"pointer" }}>‹</button>
+            <div style={{ fontSize:18,fontWeight:800,color:C.t1,minWidth:120,textAlign:"center" }}>{yr}년 {mo}월</div>
+            <button onClick={nextMonth} style={{ width:30,height:30,borderRadius:7,border:BD,background:C.surface,color:C.t2,fontSize:16,cursor:"pointer" }}>›</button>
+            <button onClick={goToday} style={{ padding:"5px 12px",borderRadius:7,border:`1.5px solid ${C.blue}`,background:C.blueL,color:C.blue,fontSize:11,fontWeight:700,cursor:"pointer" }}>오늘</button>
+            <div style={{ display:"flex",gap:4,marginLeft:6 }}>
+              {[2024,2025,2026,2027].map(y=>(
+                <button key={y} onClick={()=>setYr(y)} style={{ padding:"4px 9px",borderRadius:6,border:`1px solid ${yr===y?C.blue:C.border}`,
+                  background:yr===y?C.blueL:"transparent",color:yr===y?C.blue:C.t3,fontSize:11,fontWeight:600,cursor:"pointer" }}>{y}</button>
+              ))}
+            </div>
+            <div style={{ display:"flex",gap:3 }}>
+              {Array.from({length:12},(_,i)=>i+1).map(m=>(
+                <button key={m} onClick={()=>setMo(m)} style={{ width:24,height:24,borderRadius:5,border:`1px solid ${mo===m?C.blue:C.border}`,
+                  background:mo===m?C.blueL:"transparent",color:mo===m?C.blue:C.t3,fontSize:10,fontWeight:600,cursor:"pointer" }}>{m}</button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ background:C.surface,border:BD,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,.06)" }}>
+            <table style={{ width:"100%",borderCollapse:"collapse",tableLayout:"fixed" }}>
+              <colgroup>{[0,1,2,3,4,5,6].map(i=><col key={i}/>)}</colgroup>
+              <thead>
+                <tr style={{ background:C.surfaceL,borderBottom:`1.5px solid ${C.borderD}` }}>
+                  {DOW.map((d,i)=>(
+                    <th key={d} style={{ padding:"10px 0",textAlign:"center",fontSize:11,fontWeight:700,
+                      color:i===0?C.red:C.t3,letterSpacing:1,borderRight:i<6?BD:"none",fontFamily:F }}>{d}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {weeks.map((week,wi)=>(
+                  <tr key={wi} style={{ borderBottom:wi<weeks.length-1?BD:"none" }}>
+                    {week.map((day,di)=>{
+                      const evs = (day?eventsByDay[day]||[]:[]).filter(e=>teamF==="전체"||e.team===teamF);
+                      const over = overDay===day && !!day;
+                      const sel  = selDay===day && !!day;
+                      return (
+                        <td key={di}
+                          onClick={()=>day&&setSelDay(sel?null:day)}
+                          onDragOver={e=>{e.preventDefault();setOverDay(day);}}
+                          onDragLeave={()=>setOverDay(null)}
+                          onDrop={()=>handleDrop(day)}
+                          style={{ padding:"6px 6px 5px",verticalAlign:"top",height:90,width:"14.285%",
+                            borderRight:di<6?BD:"none",cursor:day?"pointer":"default",
+                            background:sel?"rgba(29,111,242,.11)":over?"rgba(29,111,242,.09)":isToday(day)?"rgba(29,111,242,.05)":"transparent",
+                            outline:sel?`2px solid ${C.blue}`:over?`2px dashed ${C.blue}`:"none",outlineOffset:-2,
+                            transition:"background .1s",position:"relative" }}>
+                          {day && <>
+                            <div style={{ width:24,height:24,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:"50%",
+                              background:isToday(day)?C.blue:"transparent",color:isToday(day)?"#fff":di===0?C.red:C.t2,
+                              fontSize:12,fontWeight:isToday(day)?700:500,marginBottom:4 }}>{day}</div>
+                            {over && <div style={{ position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-60%)",
+                              fontSize:9,color:C.blue,fontWeight:700,pointerEvents:"none",zIndex:2,background:C.blueL,
+                              padding:"2px 7px",borderRadius:4,border:`1px solid ${C.blue}30` }}>놓기</div>}
+                            <div style={{ display:"flex",flexDirection:"column",gap:2 }}>
+                              {evs.slice(0,2).map((e,ei)=>(
+                                <div key={ei} draggable
+                                  onDragStart={()=>setDragging({schoolId:e.schoolId,field:e.field,fromDay:day})}
+                                  onDragEnd={()=>{setDragging(null);setOverDay(null);}}
+                                  title={`${e.school} · ${e.label} · ${e.assignees.length>0?e.assignees.join(","):e.headcount+"명"}`}
+                                  style={{ padding:"2px 5px",borderRadius:4,background:`${evColor(e.field,e.team)}15`,
+                                    borderLeft:`2.5px solid ${evColor(e.field,e.team)}`,fontSize:9,color:evColor(e.field,e.team),
+                                    fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"grab",
+                                    boxShadow:"0 1px 3px rgba(0,0,0,.07)",
+                                    opacity:dragging?.schoolId===e.schoolId&&dragging?.field===e.field?0.4:1 }}>
+                                  <span>{e.school.length>4?e.school.slice(0,4)+"…":e.school}</span>
+                                  {e.label==="완수" && <span> 📦</span>}
+                                  {e.label==="현장" && <span style={{opacity:.85,fontSize:8}}>{e.assignees.length>0?` (${e.assignees.map(n=>n[0]).join("·")})`:` ${e.headcount}명`}</span>}
+                                </div>
+                              ))}
+                              {evs.length>2 && <div style={{ fontSize:9,color:C.t4,paddingLeft:4 }}>+{evs.length-2}건</div>}
+                            </div>
+                          </>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display:"flex",gap:14,marginTop:10,padding:"9px 14px",background:C.surface,border:BD,borderRadius:8,alignItems:"center",flexWrap:"wrap" }}>
+            {[["팀색 = 현장조사일",C.blue],["노랑 = 완수일",C.yellow]].map(([k,v])=>(
+              <div key={k} style={{ display:"flex",alignItems:"center",gap:5 }}>
+                <div style={{ width:10,height:10,borderRadius:2,background:v }}/><span style={{ fontSize:10,color:C.t3 }}>{k}</span>
+              </div>
+            ))}
+            {Object.entries(TC).map(([t,v])=>(
+              <div key={t} style={{ display:"flex",alignItems:"center",gap:5 }}>
+                <div style={{ width:9,height:9,borderRadius:"50%",background:v.a }}/><span style={{ fontSize:10,color:C.t3 }}>{t}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {selDay
+          ? <DayPanel dateStr={toStr(selDay)} label={selLabel} allSchools={allSchools} teamF={teamF} setDb={setDb} onClose={()=>setSelDay(null)}/>
+          : <div style={{ width:248,flexShrink:0 }}>
+              <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"32px 16px",textAlign:"center",color:C.t4,boxShadow:"0 2px 8px rgba(0,0,0,.05)" }}>
+                <div style={{ fontSize:32,marginBottom:8 }}>📅</div>
+                <div style={{ fontSize:11,lineHeight:1.6 }}>날짜를 클릭하면<br/>현장·완수·인원 정보가<br/>표시됩니다</div>
+              </div>
+            </div>}
+      </div>
+      <Toast msg={toast}/>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   현장 수정 슬라이드 패널 (학교 + 동별)
+══════════════════════════════════════════════════════════════ */
+function EditPanel({ sc, yr, half, setDb, onClose }) {
+  const tc = TC[sc.team]||{a:C.t3,b:C.surfaceL,c:C.t2};
+  const [f, setF] = useState({
+    team:sc.team||"", region:sc.region||"", kind:sc.kind||"정기점검",
+    field:sc.field||"", start:sc.start||"", end:sc.end||"", assignees:sc.assignees||[],
+  });
+  const [bf, setBf] = useState(sc.buildings.map(b=>({
+    b:b.b||"", floor:b.floor||"", area:b.area?String(b.area):"",
+    fms:b.fms||"", flag:b.flag||"", note:b.note||"",
+    rep:!!b.rep, fmsD:!!b.fmsD, delivery:b.delivery||"",
+  })));
+  const [saved, setSaved] = useState(false);
+
+  const save = () => {
+    setDb(prev => {
+      const next = {...prev};
+      next[yr] = {...prev[yr]};
+      next[yr][half] = prev[yr][half].map(s => {
+        if (s.id!==sc.id) return s;
+        return { ...s, team:f.team, region:f.region, kind:f.kind, field:f.field, start:f.start, end:f.end,
+          assignees:f.assignees, headcount:f.assignees.length||s.headcount,
+          buildings: bf.map((b,i)=>({ ...(sc.buildings[i]||{}), b:b.b, floor:b.floor,
+            area:b.area?parseFloat(b.area):null, fms:b.fms||null, flag:b.flag||null, note:b.note||null,
+            rep:b.rep, fmsD:b.fmsD, delivery:b.delivery||null })) };
+      });
+      return next;
+    });
+    setSaved(true);
+    setTimeout(()=>{ setSaved(false); onClose(); }, 1100);
+  };
+
+  const LI = ({ label, val, on, type="text", col }) => (
+    <div style={{ display:"flex",flexDirection:"column",gap:3 }}>
+      <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>{label}</label>
+      <input type={type} value={val} onChange={e=>on(e.target.value)}
+        style={{ padding:"7px 9px",background:C.surfaceL,border:BD,borderRadius:6,color:col||C.t1,fontSize:11,outline:"none",width:"100%" }}/>
+    </div>
+  );
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(30,35,50,.35)",backdropFilter:"blur(2px)",zIndex:300 }}/>
+      <div style={{ position:"fixed",top:0,right:0,width:520,maxWidth:"94vw",height:"100vh",background:C.surface,
+        borderLeft:`3px solid ${tc.a}`,zIndex:301,display:"flex",flexDirection:"column",boxShadow:"-8px 0 32px rgba(0,0,0,.16)" }}>
+        <div style={{ padding:"18px 22px 14px",borderBottom:BD,flexShrink:0,display:"flex",alignItems:"flex-start",justifyContent:"space-between" }}>
+          <div>
+            <div style={{ fontSize:10,color:tc.a,fontWeight:700,marginBottom:3 }}>✏ 현장 수정 · {yr} {half}</div>
+            <div style={{ fontSize:16,fontWeight:900,color:C.t1 }}>{sc.school}</div>
+            <div style={{ fontSize:11,color:C.t3,marginTop:2 }}>{sc.region} · {sc.buildings.length}동 · No.{sc.no}</div>
+          </div>
+          <button onClick={onClose} style={{ width:28,height:28,borderRadius:"50%",background:C.surfaceL,border:BD,color:C.t3,fontSize:16,cursor:"pointer" }}>×</button>
+        </div>
+
+        <div style={{ flex:1,overflowY:"auto",padding:"16px 22px" }}>
+          <div style={{ padding:14,background:C.surfaceL,borderRadius:10,border:BD,marginBottom:16 }}>
+            <div style={{ fontSize:10,fontWeight:700,color:C.t2,marginBottom:12 }}>🏫 학교 기본 정보</div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div style={{ gridColumn:"span 2",display:"flex",flexDirection:"column",gap:4 }}>
+                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>담당팀</label>
+                <div style={{ display:"flex",gap:6 }}>
+                  {TEAM_LIST.map(t=>(
+                    <button key={t} onClick={()=>setF(p=>({...p,team:t,assignees:[]}))} style={{ flex:1,padding:"7px 0",borderRadius:7,fontSize:12,fontWeight:700,
+                      border:`1.5px solid ${f.team===t?TC[t].a:C.border}`,background:f.team===t?TC[t].b:"transparent",color:f.team===t?TC[t].a:C.t3,cursor:"pointer" }}>{t}</button>
+                  ))}
+                </div>
+              </div>
+              <LI label="지역" val={f.region} on={v=>setF(p=>({...p,region:v}))}/>
+              <div style={{ display:"flex",flexDirection:"column",gap:3 }}>
+                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>점검종류</label>
+                <select value={f.kind} onChange={e=>setF(p=>({...p,kind:e.target.value}))}
+                  style={{ padding:"7px 9px",background:C.surfaceL,border:BD,borderRadius:6,color:C.t1,fontSize:11,outline:"none" }}>
+                  {["정기점검","정밀점검","내진성능","구조감리","내진보강설계","구조검토"].map(k=><option key={k}>{k}</option>)}
+                </select>
+              </div>
+              <LI label="현장조사일" val={f.field} on={v=>setF(p=>({...p,field:v}))} type="date" col={tc.a}/>
+              <LI label="착수일" val={f.start} on={v=>setF(p=>({...p,start:v}))} type="date"/>
+              <LI label="완수일" val={f.end} on={v=>setF(p=>({...p,end:v}))} type="date" col={C.orange}/>
+              <div style={{ gridColumn:"span 2",display:"flex",flexDirection:"column",gap:5 }}>
+                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>투입 인원 <span style={{ marginLeft:6,color:tc.a }}>{f.assignees.length>0?`${f.assignees.length}명`:"미선택"}</span></label>
+                <div style={{ display:"flex",flexWrap:"wrap",gap:5,padding:10,background:tc.b,borderRadius:8,border:`1px solid ${tc.a}25` }}>
+                  {(TEAM_MEMBERS[f.team]||[]).map(name=>{
+                    const on=f.assignees.includes(name);
+                    return <button key={name} onClick={()=>setF(p=>({...p,assignees:on?p.assignees.filter(n=>n!==name):[...p.assignees,name]}))}
+                      style={{ padding:"6px 12px",borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",
+                        background:on?tc.a:C.surface,color:on?"#fff":tc.c,border:`1.5px solid ${on?tc.a:tc.a+"40"}` }}>{on&&"✓ "}{name}</button>;
+                  })}
+                  {!(TEAM_MEMBERS[f.team]||[]).length && <span style={{ fontSize:10,color:C.t4 }}>팀을 먼저 선택하세요</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ fontSize:10,fontWeight:700,color:C.t2,marginBottom:10 }}>🏗 동별 수정</div>
+          {bf.map((b,bi)=>(
+            <div key={bi} style={{ padding:14,background:C.surface,borderRadius:10,border:`1px solid ${C.border}`,borderLeft:`3px solid ${tc.a}`,marginBottom:10 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
+                <div style={{ width:20,height:20,borderRadius:"50%",background:tc.b,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:tc.a }}>{bi+1}</div>
+                <span style={{ fontSize:13,fontWeight:700,color:C.t1,flex:1 }}>{b.b||`${bi+1}번 동`}</span>
+                <div style={{ display:"flex",gap:4 }}>
+                  {[{k:"보고서",f:"rep",ac:C.purple,bc:C.purpleL},{k:"FMS",f:"fmsD",ac:C.blue,bc:C.blueL}].map(x=>(
+                    <button key={x.f} onClick={()=>setBf(p=>p.map((v,i)=>i!==bi?v:{...v,[x.f]:!v[x.f]}))}
+                      style={{ padding:"3px 8px",borderRadius:5,fontSize:9,fontWeight:700,cursor:"pointer",
+                        border:`1px solid ${b[x.f]?x.ac+"60":C.border}`,background:b[x.f]?x.bc:C.surfaceL,color:b[x.f]?x.ac:C.t4 }}>{b[x.f]?"✓ ":""}{x.k}</button>
+                  ))}
+                  {["직납","우편"].map(dv=>(
+                    <button key={dv} onClick={()=>setBf(p=>p.map((v,i)=>i!==bi?v:{...v,delivery:v.delivery===dv?"":dv}))}
+                      style={{ padding:"3px 7px",borderRadius:5,fontSize:9,fontWeight:700,cursor:"pointer",
+                        border:`1px solid ${b.delivery===dv?C.green+"60":C.border}`,background:b.delivery===dv?C.greenL:C.surfaceL,color:b.delivery===dv?C.green:C.t4 }}>{dv[0]}</button>
+                  ))}
+                  <button onClick={()=>setBf(p=>p.filter((_,i)=>i!==bi))} style={{ padding:"3px 6px",borderRadius:5,fontSize:10,cursor:"pointer",border:`1px solid ${C.red}30`,background:C.redL,color:C.red,fontWeight:700 }}>✕</button>
+                </div>
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8 }}>
+                <LI label="동명" val={b.b} on={v=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,b:v}))}/>
+                <LI label="층수" val={b.floor} on={v=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,floor:v}))}/>
+                <LI label="연면적㎡" val={b.area} on={v=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,area:v}))} type="number"/>
+              </div>
+              <div style={{ marginBottom:8 }}>
+                <label style={{ fontSize:9,color:C.t3,fontWeight:700,display:"block",marginBottom:3 }}>FMS 계정 (아이디 // 비밀번호)</label>
+                <input value={b.fms} onChange={e=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,fms:e.target.value}))} placeholder="아이디 // 비밀번호"
+                  style={{ width:"100%",padding:"7px 9px",background:C.surfaceL,border:BD,borderRadius:6,color:C.blue,fontSize:11,outline:"none",fontFamily:"monospace" }}/>
+              </div>
+              <div style={{ display:"flex",gap:5,marginBottom:8,alignItems:"center",flexWrap:"wrap" }}>
+                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>플래그</label>
+                {[["","없음"],["●","🚁 드론"],["1년","📅 1년"],["피난","🚪 피난"]].map(([val,lb])=>(
+                  <button key={val} onClick={()=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,flag:val}))}
+                    style={{ padding:"3px 9px",borderRadius:5,fontSize:9,fontWeight:600,cursor:"pointer",
+                      border:`1px solid ${b.flag===val?C.orange+"60":C.border}`,background:b.flag===val?C.orangeL:C.surfaceL,color:b.flag===val?C.orange:C.t3 }}>{lb}</button>
+                ))}
+              </div>
+              <div>
+                <label style={{ fontSize:9,color:C.t3,fontWeight:700,display:"block",marginBottom:3 }}>특이사항 / 메모</label>
+                <textarea value={b.note} onChange={e=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,note:e.target.value}))} placeholder="담당자 연락처, 주의사항..." rows={2}
+                  style={{ width:"100%",padding:"7px 9px",background:C.surfaceL,border:BD,borderRadius:6,color:C.t1,fontSize:11,outline:"none",resize:"vertical",lineHeight:1.5 }}/>
+              </div>
+            </div>
+          ))}
+          <button onClick={()=>setBf(p=>[...p,{b:"",floor:"",area:"",fms:"",flag:"",note:"",rep:false,fmsD:false,delivery:""}])}
+            style={{ width:"100%",padding:9,borderRadius:8,border:`1.5px dashed ${C.border}`,background:"transparent",color:C.t3,fontSize:12,cursor:"pointer",marginBottom:8 }}>+ 동 추가</button>
+        </div>
+
+        <div style={{ padding:"14px 22px",borderTop:BD,flexShrink:0,display:"flex",gap:8 }}>
+          <button onClick={onClose} style={{ flex:1,padding:11,borderRadius:9,border:BD,background:"transparent",color:C.t3,fontSize:13,cursor:"pointer" }}>취소</button>
+          <button onClick={save} style={{ flex:2,padding:11,borderRadius:9,background:saved?C.green:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",transition:"background .3s",boxShadow:`0 4px 14px ${(saved?C.green:C.blue)}40` }}>
+            {saved?"✓ 저장됨!":"✓ 저장 · 캘린더 자동 반영"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   현장 관리 — 연도/반기 탭 + 테이블
+══════════════════════════════════════════════════════════════ */
+function SitesManager({ db, setDb, globalTeam="전체" }) {
+  const [yr, setYr] = useState("2026");
+  const [half, setHalf] = useState("상반기");
+  const [teamF, setTeamF] = useState(globalTeam);
+  const [stF, setStF] = useState("전체");
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(new Set());
+  const [copied, setCopied] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const prevGT = useRef(globalTeam);
+  if (prevGT.current !== globalTeam) { prevGT.current = globalTeam; if (teamF!==globalTeam) setTeamF(globalTeam); }
+
+  const showToast = m => { setToast(m); setTimeout(()=>setToast(null), 2000); };
+  const copy = (t,id) => { navigator.clipboard?.writeText(t).catch(()=>{}); setCopied(id); setTimeout(()=>setCopied(null),1500); };
+
+  const schools = useMemo(()=>db[yr]?.[half]||[], [db,yr,half]);
+
+  const updDate = (sid,field,v) => {
+    setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
+      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,[field]:v}); return n; });
+    showToast("날짜 변경됨 · 캘린더 자동 반영");
+  };
+  const toggleB = (sid,bi,field) => setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
+    n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,buildings:s.buildings.map((b,j)=>j!==bi?b:{...b,[field]:!b[field]})}); return n; });
+  const setDel = (sid,bi,v) => setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
+    n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,buildings:s.buildings.map((b,j)=>j!==bi?b:{...b,delivery:b.delivery===v?null:v})}); return n; });
+
+  const filtered = useMemo(()=>schools.filter(s=>{
+    if (teamF!=="전체" && s.team!==teamF) return false;
+    if (search && !s.school.includes(search) && !(s.region||"").includes(search)) return false;
+    if (stF==="보고서 미완") return s.buildings.some(b=>!b.rep);
+    if (stF==="FMS 미완")   return s.buildings.some(b=>!b.fmsD);
+    if (stF==="납품 미정")  return s.buildings.some(b=>b.rep&&!b.delivery);
+    if (stF==="완료")       return s.buildings.every(b=>b.rep&&b.fmsD);
+    return true;
+  }).sort((a,b)=>{
+    const da=calcDday(a.end)??9999, dbb=calcDday(b.end)??9999;
+    if(da<0&&dbb>=0)return -1; if(da>=0&&dbb<0)return 1;
+    if(da<0&&dbb<0)return dbb-da; return da-dbb;
+  }), [schools,teamF,stF,search]);
+
+  const allB = filtered.flatMap(s=>s.buildings);
+  const st = { total:allB.length, rep:allB.filter(b=>b.rep).length, fms:allB.filter(b=>b.fmsD).length, noD:allB.filter(b=>b.rep&&!b.delivery).length };
+  const years = Object.keys(db).sort((a,b)=>b-a);
+  const editSc = editId ? schools.find(s=>s.id===editId) : null;
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+        <div>
+          <div style={{ fontSize:11,color:C.t3,letterSpacing:2,marginBottom:3,fontWeight:600 }}>SITES MANAGEMENT</div>
+          <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>현장 관리</h1>
+        </div>
+      </div>
+
+      {/* 연도/반기 탭 */}
+      <div style={{ display:"flex",alignItems:"center",background:C.surface,border:BD,borderRadius:12,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,.05)" }}>
+        <div style={{ display:"flex",borderRight:`2px solid ${C.border}` }}>
+          {years.map(y=>(
+            <button key={y} onClick={()=>{ setYr(y); setHalf(Object.keys(db[y]||{})[0]||"상반기"); }}
+              style={{ padding:"12px 20px",border:"none",borderBottom:`3px solid ${yr===y?C.blue:"transparent"}`,
+                background:yr===y?C.blueL:"transparent",color:yr===y?C.blue:C.t3,fontSize:14,fontWeight:yr===y?800:500,cursor:"pointer",whiteSpace:"nowrap" }}>
+              {y}년 {yr===y && <span style={{ fontSize:10,marginLeft:5,color:C.t4 }}>{(db[y]?.상반기||[]).length+(db[y]?.하반기||[]).length}건</span>}
+            </button>
+          ))}
+        </div>
+        <div style={{ display:"flex",padding:"0 8px" }}>
+          {["상반기","하반기"].map(h=>{
+            const cnt=(db[yr]?.[h]||[]).length, on=half===h, hc=h==="상반기"?C.blue:C.orange;
+            return <button key={h} onClick={()=>setHalf(h)} style={{ padding:"12px 18px",border:"none",borderBottom:`3px solid ${on?hc:"transparent"}`,
+              background:on?hc+"12":"transparent",color:on?hc:C.t3,fontSize:13,fontWeight:on?700:500,cursor:"pointer",display:"flex",alignItems:"center",gap:7 }}>
+              <span style={{ fontSize:15 }}>{h==="상반기"?"🌱":"🍂"}</span>{h}
+              <span style={{ fontSize:10,padding:"1px 6px",borderRadius:10,background:on?hc+"20":C.surfaceL,color:on?hc:C.t4,fontWeight:700 }}>{cnt}</span>
+            </button>;
+          })}
+        </div>
+        <div style={{ marginLeft:"auto",padding:"0 16px",fontSize:11,color:C.t3,fontWeight:600,whiteSpace:"nowrap" }}>
+          {yr}년 {half} · {filtered.length}개 / {filtered.flatMap(s=>s.buildings).length}동
+        </div>
+      </div>
+
+      {/* 통계 카드 */}
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10 }}>
+        {[{label:"전체 동",val:st.total,c:C.t2,f:"전체"},
+          {label:"📄 보고서 완료",val:`${st.rep}/${st.total}`,c:C.purple,f:"보고서 미완"},
+          {label:"🖥 FMS 완료",val:`${st.fms}/${st.total}`,c:C.blue,f:"FMS 미완"},
+          {label:"📦 납품 미정",val:st.noD,c:C.orange,f:"납품 미정"}].map(x=>(
+          <button key={x.label} onClick={()=>setStF(x.f)} style={{ padding:"12px 14px",background:stF===x.f?x.c+"08":C.surface,
+            border:`1.5px solid ${stF===x.f?x.c+"60":C.border}`,borderTop:`3px solid ${x.c}`,borderRadius:10,textAlign:"left",cursor:"pointer",boxShadow:"0 1px 6px rgba(0,0,0,.04)" }}>
+            <div style={{ fontSize:21,fontWeight:900,color:x.c,lineHeight:1 }}>{x.val}</div>
+            <div style={{ fontSize:10,color:C.t3,marginTop:5,fontWeight:600 }}>{x.label}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* 필터 */}
+      <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",padding:"10px 14px",background:C.surface,border:BD,borderRadius:10 }}>
+        <div style={{ display:"flex",background:C.surfaceL,border:BD,borderRadius:7,padding:"6px 11px",gap:7,alignItems:"center",width:190 }}>
+          <span style={{ color:C.t4 }}>⌕</span>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="학교명·지역"
+            style={{ background:"transparent",border:"none",color:C.t1,fontSize:13,outline:"none",flex:1 }}/>
+          {search && <button onClick={()=>setSearch("")} style={{ background:"transparent",border:"none",color:C.t4,fontSize:15,padding:0,cursor:"pointer" }}>×</button>}
+        </div>
+        {["전체",...TEAM_LIST].map(t=><Pill key={t} active={teamF===t} ac={t==="전체"?C.t2:TC[t]?.a} onClick={()=>setTeamF(t)}>{t}</Pill>)}
+        <div style={{ width:1,height:18,background:C.border }}/>
+        {["전체","보고서 미완","FMS 미완","납품 미정","완료"].map(ff=>(
+          <Pill key={ff} active={stF===ff} ac={C.purple} onClick={()=>setStF(ff)} style={{ fontSize:11 }}>{ff}</Pill>
+        ))}
+      </div>
+
+      {/* 테이블 */}
+      <div style={{ background:C.surface,border:BD,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,.05)" }}>
+        <div style={{ display:"grid",gridTemplateColumns:"2fr 110px 110px 70px 116px 50px",background:C.surfaceL,borderBottom:`1.5px solid ${C.borderD}`,padding:"10px 16px",gap:8 }}>
+          {["학교 · 시설명","현장조사일","완수일","D-day","보고서·FMS·납품","수정"].map((h,i)=>(
+            <div key={i} style={{ fontSize:10,color:C.t3,fontWeight:700,letterSpacing:.5,textAlign:i>=1?"center":"left" }}>{h}</div>
+          ))}
+        </div>
+
+        {filtered.map((s,si)=>{
+          const tc=TC[s.team]||{a:C.t3,b:C.surfaceL};
+          const isOpen=open.has(s.id);
+          const repAll=s.buildings.every(b=>b.rep), fmsAll=s.buildings.every(b=>b.fmsD);
+          const allDone=repAll&&fmsAll&&s.buildings.every(b=>b.delivery);
+          const dd=calcDday(s.end), urgent=dd!==null&&dd<0&&dd>=-7;
+          return (
+            <div key={s.id} style={{ borderBottom:BD }}>
+              <div onClick={()=>setOpen(p=>{const n=new Set(p);n.has(s.id)?n.delete(s.id):n.add(s.id);return n;})}
+                style={{ display:"grid",gridTemplateColumns:"2fr 110px 110px 70px 116px 50px",gap:8,padding:"12px 16px",cursor:"pointer",userSelect:"none",
+                  background:urgent?C.redL+"80":allDone?C.greenL+"50":si%2===0?C.surface:C.surfaceL,
+                  borderLeft:`3px solid ${urgent?C.red:allDone?C.green:"transparent"}` }}>
+                <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                  <span style={{ color:C.t4,fontSize:11,display:"inline-block",transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s" }}>›</span>
+                  <span style={{ fontWeight:800,fontSize:14,color:C.t1 }}>{s.school}</span>
+                  <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
+                  <span style={{ fontSize:10,color:C.t3 }}>{s.region}</span>
+                  {urgent && <Tag bg={C.redL} color={C.red} border={`1px solid ${C.red}30`}>⚡긴급</Tag>}
+                  {s.buildings.some(b=>b.flag==="●") && <span style={{ fontSize:10,color:C.orange }}>🚁</span>}
+                  {s.buildings.some(b=>b.flag==="1년") && <Tag bg={C.blueL} color={C.blue}>1년</Tag>}
+                  {(s.assignees||[]).length>0 && <span style={{ fontSize:9,color:tc.c }}>👤 {s.assignees.join("·")}</span>}
+                  <span style={{ fontSize:10,color:C.t4 }}>{s.buildings.length}동</span>
+                </div>
+                <div onClick={e=>e.stopPropagation()} style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
+                  <input type="date" value={s.field||""} onChange={e=>updDate(s.id,"field",e.target.value)}
+                    style={{ background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,color:tc.a,fontSize:11,padding:"3px 5px",outline:"none",width:"100%",textAlign:"center",fontWeight:600 }}/>
+                </div>
+                <div onClick={e=>e.stopPropagation()} style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
+                  <input type="date" value={s.end||""} onChange={e=>updDate(s.id,"end",e.target.value)}
+                    style={{ background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,color:C.orange,fontSize:11,padding:"3px 5px",outline:"none",width:"100%",textAlign:"center",fontWeight:600 }}/>
+                </div>
+                <div style={{ fontSize:13,fontWeight:800,color:ddC(dd),textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center" }}>{ddL(dd)}</div>
+                <div style={{ display:"flex",gap:4,alignItems:"center",justifyContent:"center" }}>
+                  {[{k:"보",v:repAll,c:C.purple},{k:"F",v:fmsAll,c:C.blue},{k:"납",v:s.buildings.every(b=>b.delivery),c:C.green}].map(x=>(
+                    <div key={x.k} style={{ width:26,height:20,borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center",
+                      background:x.v?x.c+"18":C.surfaceL,border:`1px solid ${x.v?x.c+"50":C.border}`,fontSize:9,fontWeight:700,color:x.v?x.c:C.t4 }}>{x.v?"✓":x.k}</div>
+                  ))}
+                </div>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
+                  <button onClick={e=>{e.stopPropagation();setEditId(s.id);}} style={{ padding:"3px 9px",borderRadius:5,fontSize:9,fontWeight:700,background:C.blueL,border:`1px solid ${C.blue}40`,color:C.blue,cursor:"pointer" }}>✏</button>
+                </div>
+              </div>
+
+              {isOpen && s.buildings.map((b,bi)=>{
+                const iid=`${s.id}-${bi}`;
+                return (
+                  <div key={bi} style={{ display:"grid",gridTemplateColumns:"2fr 110px 110px 70px 116px 50px",gap:8,padding:"8px 16px 8px 38px",background:C.surfaceL,borderTop:`1px solid ${C.border}`,
+                    borderLeft:`3px solid ${b.rep&&b.fmsD&&b.delivery?C.green+"40":"transparent"}` }}>
+                    <div>
+                      <div style={{ display:"flex",alignItems:"center",gap:7,flexWrap:"wrap" }}>
+                        <span style={{ fontSize:13,color:C.t1,fontWeight:600 }}>{b.b}</span>
+                        {b.floor && <span style={{ fontSize:10,color:C.t4 }}>{b.floor}층</span>}
+                        {b.area && <span style={{ fontSize:10,color:C.t4 }}>{b.area.toLocaleString()}㎡</span>}
+                        {b.flag==="●" && <span style={{ fontSize:10,color:C.orange,fontWeight:600 }}>🚁 드론</span>}
+                        {b.flag==="1년" && <span style={{ fontSize:10,color:C.blue,fontWeight:600 }}>📅 1년</span>}
+                        {b.flag==="피난" && <span style={{ fontSize:10,color:C.purple,fontWeight:600 }}>🚪 피난</span>}
+                      </div>
+                      {b.note && <div style={{ fontSize:10,color:C.t2,marginTop:3,padding:"3px 9px",background:C.yellowL,borderRadius:4,borderLeft:`2px solid ${C.yellow}`,maxWidth:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }} title={b.note}>{b.note}</div>}
+                    </div>
+                    <div style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
+                      {b.fms ? <button onClick={()=>copy(b.fms,`f-${iid}`)} style={{ padding:"4px 8px",borderRadius:5,fontSize:9,fontWeight:700,
+                        border:`1px solid ${copied===`f-${iid}`?C.green:C.border}`,background:copied===`f-${iid}`?C.greenL:C.surfaceL,color:copied===`f-${iid}`?C.green:C.blue,cursor:"pointer" }}>{copied===`f-${iid}`?"✓ 복사":"🔐 FMS"}</button>
+                        : <span style={{ fontSize:10,color:C.t4 }}>-</span>}
+                    </div>
+                    <div style={{ display:"flex",alignItems:"center",justifyContent:"center" }}><span style={{ fontSize:10,color:C.t3 }}>{fd(s.end)}</span></div>
+                    <div style={{ display:"flex",alignItems:"center",justifyContent:"center" }}><span style={{ fontSize:11,fontWeight:700,color:ddC(dd) }}>{ddL(dd)}</span></div>
+                    <div style={{ display:"flex",gap:3,alignItems:"center",justifyContent:"center" }}>
+                      {[{v:b.rep,f:"rep",l:"보",ac:C.purple,bc:C.purpleL},{v:b.fmsD,f:"fmsD",l:"F",ac:C.blue,bc:C.blueL}].map(x=>(
+                        <button key={x.f} onClick={()=>toggleB(s.id,bi,x.f)} style={{ width:26,height:22,borderRadius:4,fontSize:9,fontWeight:700,
+                          border:`1px solid ${x.v?x.ac+"60":C.border}`,background:x.v?x.bc:C.surfaceL,color:x.v?x.ac:C.t4,cursor:"pointer" }}>{x.v?"✓":x.l}</button>
+                      ))}
+                      {["직납","우편"].map(dv=>(
+                        <button key={dv} onClick={()=>setDel(s.id,bi,dv)} style={{ height:22,padding:"0 5px",borderRadius:4,fontSize:9,fontWeight:700,
+                          border:`1px solid ${b.delivery===dv?C.green+"60":C.border}`,background:b.delivery===dv?C.greenL:C.surfaceL,color:b.delivery===dv?C.green:C.t4,cursor:"pointer" }}>{dv[0]}</button>
+                      ))}
+                    </div>
+                    <div/>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+        {filtered.length===0 && <div style={{ textAlign:"center",padding:48,color:C.t4 }}>해당 기간 현장 없음</div>}
+      </div>
+
+      {editSc && <EditPanel sc={editSc} yr={yr} half={half} setDb={setDb} onClose={()=>setEditId(null)}/>}
+      <Toast msg={toast}/>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   엑셀 가져오기 / 내보내기 페이지
+══════════════════════════════════════════════════════════════ */
+function ExportImportPage({ db, setDb }) {
+  const [dragOver, setDragOver] = useState(false);
+  const [parsed, setParsed] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState(null);
+  const fileRef = useRef();
+
+  const processFile = (file) => {
+    setErr(null); setParsed(null); setDone(false);
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type:"array", cellDates:true });
+        const sheets = [];
+        wb.SheetNames.forEach(name => {
+          const info = parseSheetName(name); if (!info) return;
+          const schools = parseSheet(wb.Sheets[name]); if (!schools.length) return;
+          sheets.push({ name, year:info.year, half:info.half, schools, count:schools.length,
+            bCount:schools.reduce((a,s)=>a+s.buildings.length,0) });
+        });
+        if (!sheets.length) { setErr('인식된 시트가 없어요. 시트 이름이 "26년(상)" 형식인지 확인해주세요.'); return; }
+        setParsed({ sheets, fileName:file.name });
+      } catch(e) { setErr("파일 읽기 오류: "+e.message); }
+    };
+    r.readAsArrayBuffer(file);
+  };
+
+  const doImport = () => {
+    if (!parsed) return;
+    setImporting(true);
+    setTimeout(() => {
+      setDb(prev => {
+        const next = {...prev};
+        parsed.sheets.forEach(sh => { if (!next[sh.year]) next[sh.year]={}; next[sh.year][sh.half]=sh.schools; });
+        return next;
+      });
+      setImporting(false); setDone(true); setParsed(null);
+    }, 400);
+  };
+
+  const doExport = (yr, half) => {
+    const schools = db[yr]?.[half]; if (!schools) return;
+    const wb = XLSX.utils.book_new();
+    const sn = `${yr.slice(2)}년(${half==="상반기"?"상":"하"})`;
+    XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn);
+    XLSX.writeFile(wb, `시설물_리스트_${yr}_${half}.xlsx`);
+  };
+  const doExportAll = () => {
+    const wb = XLSX.utils.book_new();
+    Object.entries(db).forEach(([yr,hs]) => Object.entries(hs).forEach(([half,schools]) => {
+      XLSX.utils.book_append_sheet(wb, buildSheet(schools), `${yr.slice(2)}년(${half==="상반기"?"상":"하"})`);
+    }));
+    XLSX.writeFile(wb, "시설물_리스트_전체.xlsx");
+  };
+
+  const totalS = Object.values(db).flatMap(h=>Object.values(h)).flatMap(s=>s).length;
+  const totalB = Object.values(db).flatMap(h=>Object.values(h)).flatMap(s=>s).flatMap(s=>s.buildings).length;
+
+  return (
+    <div style={{ maxWidth:720,margin:"0 auto" }}>
+      <div style={{ marginBottom:24 }}>
+        <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>IMPORT / EXPORT</div>
+        <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>엑셀 가져오기 · 내보내기</h1>
+        <div style={{ fontSize:12,color:C.t3,marginTop:4 }}>기존 엑셀을 올리면 팀·연도·상하반기를 자동 인식해서 반영해요</div>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:24 }}>
+        {[{l:"저장된 학교",v:totalS,c:C.blue},{l:"저장된 동",v:totalB,c:C.green},{l:"관리 기간",v:Object.values(db).flatMap(h=>Object.keys(h)).length,c:C.orange}].map(x=>(
+          <div key={x.l} style={{ padding:"14px 16px",background:C.surface,border:BD,borderTop:`2px solid ${x.c}`,borderRadius:10 }}>
+            <div style={{ fontSize:22,fontWeight:900,color:x.c }}>{x.v}</div>
+            <div style={{ fontSize:11,color:C.t3,marginTop:4 }}>{x.l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ background:C.surface,border:BD,borderRadius:14,overflow:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,.05)",marginBottom:18 }}>
+        <div style={{ padding:"16px 20px",borderBottom:BD,display:"flex",alignItems:"center",gap:10 }}>
+          <span style={{ fontSize:20 }}>📥</span>
+          <div><div style={{ fontSize:14,fontWeight:800,color:C.t1 }}>엑셀 업로드</div>
+            <div style={{ fontSize:11,color:C.t3,marginTop:1 }}>시트 이름이 "26년(상)" 형식이면 자동 인식</div></div>
+        </div>
+        <div style={{ padding:20 }}>
+          {!parsed && !done && (
+            <div onDragOver={e=>{e.preventDefault();setDragOver(true);}} onDragLeave={()=>setDragOver(false)}
+              onDrop={e=>{e.preventDefault();setDragOver(false);processFile(e.dataTransfer.files[0]);}}
+              onClick={()=>fileRef.current?.click()}
+              style={{ padding:"36px 20px",borderRadius:12,cursor:"pointer",textAlign:"center",
+                border:`2px dashed ${dragOver?C.blue:C.borderD}`,background:dragOver?C.blueL:C.surfaceL,transition:"all .15s" }}>
+              <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }} onChange={e=>processFile(e.target.files[0])}/>
+              <div style={{ fontSize:36,marginBottom:10 }}>📂</div>
+              <div style={{ fontSize:14,fontWeight:700,color:dragOver?C.blue:C.t1,marginBottom:4 }}>{dragOver?"여기에 놓으세요!":"엑셀 파일을 드래그하거나 클릭"}</div>
+              <div style={{ fontSize:11,color:C.t3 }}>.xlsx / .xls · 기존 엑셀 그대로 올리면 돼요</div>
+            </div>
+          )}
+          {parsed && (
+            <div>
+              <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:14,padding:"10px 14px",background:C.greenL,borderRadius:8,border:`1px solid ${C.green}30` }}>
+                <span>✓</span><div style={{ flex:1 }}><div style={{ fontSize:12,fontWeight:700,color:C.green }}>{parsed.fileName} 파싱 완료</div>
+                  <div style={{ fontSize:11,color:C.t2,marginTop:1 }}>{parsed.sheets.length}개 시트 인식 · 확인 후 가져오기</div></div>
+                <button onClick={()=>setParsed(null)} style={{ padding:"4px 10px",borderRadius:6,border:BD,background:"transparent",color:C.t3,fontSize:11,cursor:"pointer" }}>취소</button>
+              </div>
+              {parsed.sheets.map((sh,i)=>{
+                const hc=sh.half==="상반기"?C.blue:C.orange, teams={};
+                sh.schools.forEach(s=>{teams[s.team]=(teams[s.team]||0)+1;});
+                return (
+                  <div key={i} style={{ padding:"14px 16px",background:C.surfaceL,borderRadius:10,border:`1px solid ${hc}30`,borderLeft:`3px solid ${hc}`,marginBottom:8 }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:8 }}>
+                      <span>{sh.half==="상반기"?"🌱":"🍂"}</span>
+                      <span style={{ fontSize:14,fontWeight:800,color:C.t1 }}>{sh.year}년 {sh.half}</span>
+                      <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:hc+"18",color:hc,fontWeight:700 }}>{sh.count}개 학교 · {sh.bCount}개 동</span>
+                    </div>
+                    <div style={{ display:"flex",gap:5,flexWrap:"wrap",marginBottom:6 }}>
+                      {Object.entries(teams).map(([t,n])=>(
+                        <span key={t} style={{ fontSize:10,padding:"2px 8px",borderRadius:5,background:TC[t]?.b||C.surfaceD,color:TC[t]?.a||C.t3,fontWeight:600,border:`1px solid ${(TC[t]?.a||C.border)}30` }}>{t} {n}건</span>
+                      ))}
+                    </div>
+                    <div style={{ display:"flex",flexWrap:"wrap",gap:3 }}>
+                      {sh.schools.slice(0,10).map(s=><span key={s.id} style={{ fontSize:9,color:C.t2,padding:"1px 6px",borderRadius:3,background:C.surface,border:BD }}>{s.school}</span>)}
+                      {sh.schools.length>10 && <span style={{ fontSize:9,color:C.t4,padding:"1px 6px" }}>+{sh.schools.length-10}개</span>}
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{ display:"flex",gap:10,marginTop:4 }}>
+                <button onClick={()=>setParsed(null)} style={{ flex:1,padding:11,borderRadius:9,border:BD,background:"transparent",color:C.t3,fontSize:13,cursor:"pointer" }}>취소</button>
+                <button onClick={doImport} style={{ flex:2,padding:11,borderRadius:9,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 14px ${C.blue}40`,opacity:importing?.7:1 }}>{importing?"가져오는 중...":"✓ 웹에 가져오기 · 현장관리 자동 반영"}</button>
+              </div>
+            </div>
+          )}
+          {done && (
+            <div style={{ textAlign:"center",padding:24,background:C.greenL,borderRadius:10,border:`1px solid ${C.green}30` }}>
+              <div style={{ fontSize:28,marginBottom:8 }}>✅</div>
+              <div style={{ fontSize:14,fontWeight:800,color:C.green,marginBottom:4 }}>가져오기 완료!</div>
+              <div style={{ fontSize:12,color:C.t2,marginBottom:16 }}>현장관리·캘린더에 즉시 반영됐어요</div>
+              <button onClick={()=>setDone(false)} style={{ padding:"8px 20px",borderRadius:8,border:`1px solid ${C.green}`,background:"transparent",color:C.green,fontSize:12,fontWeight:700,cursor:"pointer" }}>다른 파일 올리기</button>
+            </div>
+          )}
+          {err && (
+            <div style={{ padding:"14px 16px",background:C.redL,borderRadius:9,border:`1px solid ${C.red}30`,marginTop:12,display:"flex",alignItems:"center",gap:10 }}>
+              <span>⚠</span><div style={{ flex:1,fontSize:12,color:C.red }}>{err}</div>
+              <button onClick={()=>setErr(null)} style={{ background:"transparent",border:"none",color:C.red,fontSize:16,cursor:"pointer" }}>×</button>
+            </div>
+          )}
+          <div style={{ marginTop:14,padding:"12px 14px",background:C.surfaceL,borderRadius:8,border:BD }}>
+            <div style={{ fontSize:10,fontWeight:700,color:C.t2,marginBottom:7 }}>📋 자동 인식 컬럼</div>
+            <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+              {["시트명 26년(상)/(하)","1열 팀","5열 학교","6열 시설","12열 현장조사","14열 완수","16열 FMS","17열 플래그","18열 특기","19열 보고서◎","20열 납품","21열 FMS◎"].map(t=>(
+                <span key={t} style={{ fontSize:9,padding:"2px 7px",borderRadius:4,background:C.surface,border:BD,color:C.t2 }}>{t}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ background:C.surface,border:BD,borderRadius:14,overflow:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,.05)" }}>
+        <div style={{ padding:"16px 20px",borderBottom:BD,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            <span style={{ fontSize:20 }}>📤</span>
+            <div><div style={{ fontSize:14,fontWeight:800,color:C.t1 }}>엑셀 내보내기</div><div style={{ fontSize:11,color:C.t3,marginTop:1 }}>원본 엑셀 형식으로 저장</div></div>
+          </div>
+          <button onClick={doExportAll} style={{ padding:"9px 18px",background:C.green,border:"none",borderRadius:9,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 12px ${C.green}40` }}>↗ 전체 다운로드</button>
+        </div>
+        <div style={{ padding:"16px 20px",display:"flex",flexDirection:"column",gap:8 }}>
+          {Object.entries(db).sort((a,b)=>b[0]-a[0]).flatMap(([yr,hs])=>Object.entries(hs).map(([half,schools])=>{
+            const hc=half==="상반기"?C.blue:C.orange, bC=schools.flatMap(s=>s.buildings).length, rep=schools.flatMap(s=>s.buildings).filter(b=>b.rep).length;
+            return (
+              <div key={`${yr}-${half}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:C.surfaceL,borderRadius:10,border:`1px solid ${hc}25`,borderLeft:`3px solid ${hc}` }}>
+                <span style={{ fontSize:18 }}>{half==="상반기"?"🌱":"🍂"}</span>
+                <div style={{ flex:1 }}><div style={{ fontSize:13,fontWeight:800,color:C.t1 }}>{yr}년 {half}</div>
+                  <div style={{ fontSize:11,color:C.t3,marginTop:2 }}>{schools.length}개 학교 · {bC}개 동 · <span style={{ color:C.purple }}>보고서 {rep}/{bC}</span></div></div>
+                <div style={{ display:"flex",gap:5 }}>
+                  {TEAM_LIST.map(t=>{ const c=schools.filter(s=>s.team===t).length; return c?<span key={t} style={{ fontSize:9,padding:"2px 7px",borderRadius:5,background:TC[t].b,color:TC[t].a,fontWeight:700,border:`1px solid ${TC[t].a}30` }}>{t} {c}</span>:null; })}
+                </div>
+                <button onClick={()=>doExport(yr,half)} style={{ padding:"8px 16px",borderRadius:8,background:hc+"15",border:`1.5px solid ${hc}40`,color:hc,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}>↗ 다운로드</button>
+              </div>
+            );
+          }))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   메인 앱 — 사이드바 + 라우팅
+══════════════════════════════════════════════════════════════ */
+export default function App() {
+  const [db, setDb] = useState(DB);
+  const [sideOpen, setSideOpen] = useState(true);
+  const [menu, setMenu] = useState("schedule");
+  const [globalTeam, setGlobalTeam] = useState("전체");
+
+  const allSchools = useMemo(() => {
+    const list = [];
+    Object.entries(db).forEach(([yr,halves]) =>
+      Object.entries(halves).forEach(([half,schools]) =>
+        schools.forEach(s => list.push({ ...s, _year:yr, _half:half }))));
+    return list;
+  }, [db]);
+
+  const urgent = allSchools.filter(s => { const d=calcDday(s.end); return d!==null&&d<0&&d>=-7; });
+
+  const pages = {
+    schedule: <Calendar allSchools={allSchools} setDb={setDb} globalTeam={globalTeam}/>,
+    sites:    <SitesManager db={db} setDb={setDb} globalTeam={globalTeam}/>,
+    urgent: (
+      <div>
+        <div style={{ fontSize:11,color:C.t3,letterSpacing:2,marginBottom:3,fontWeight:600 }}>URGENT</div>
+        <h1 style={{ margin:"0 0 16px",fontSize:22,fontWeight:900,color:C.t1 }}>긴급 보고서 <span style={{ fontSize:14,color:C.red,fontWeight:400 }}>D-7 이내 {urgent.length}건</span></h1>
+        {urgent.length===0 && <div style={{ color:C.t4,padding:32,textAlign:"center" }}>긴급 현장 없음</div>}
+        {urgent.map(s=>(
+          <div key={s.id} style={{ background:C.redL,border:`1.5px solid ${C.red}30`,borderLeft:`4px solid ${C.red}`,borderRadius:"0 12px 12px 0",padding:"14px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:12 }}>
+            <div style={{ fontSize:20,fontWeight:900,color:C.red,minWidth:50 }}>{ddL(calcDday(s.end))}</div>
+            <div style={{ flex:1 }}><div style={{ fontWeight:700,color:C.t1,fontSize:14 }}>{s.school}</div>
+              <div style={{ fontSize:11,color:C.t2 }}>{s.region} · {s.team} · {s._year} {s._half} · {s.buildings.length}동</div></div>
+            <Tag bg={TC[s.team]?.b} color={TC[s.team]?.a}>{s.team}</Tag>
+          </div>
+        ))}
+      </div>
+    ),
+    done: (
+      <div>
+        <div style={{ fontSize:11,color:C.t3,letterSpacing:2,marginBottom:3,fontWeight:600 }}>COMPLETED</div>
+        <h1 style={{ margin:"0 0 16px",fontSize:22,fontWeight:900,color:C.t1 }}>완료 보고서</h1>
+        {allSchools.filter(s=>s.buildings.every(b=>b.rep&&b.fmsD)).map(s=>(
+          <div key={s.id} style={{ background:C.greenL,border:`1.5px solid ${C.green}30`,borderLeft:`4px solid ${C.green}`,borderRadius:"0 10px 10px 0",padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12 }}>
+            <div style={{ fontSize:16,color:C.green }}>✓</div>
+            <div style={{ flex:1 }}><div style={{ fontWeight:700,color:C.t1 }}>{s.school}</div>
+              <div style={{ fontSize:11,color:C.t2 }}>{s.region} · {s.team} · {s._year} {s._half} · 완수 {fd(s.end)}</div></div>
+            <Tag bg={TC[s.team]?.b} color={TC[s.team]?.a}>{s.team}</Tag>
+          </div>
+        ))}
+      </div>
+    ),
+    export: <ExportImportPage db={db} setDb={setDb}/>,
+  };
+
+  return (
+    <div style={{ fontFamily:F,background:C.bg,minHeight:"100vh",display:"flex",color:C.t1,fontSize:13 }}>
+      <style>{`*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:${C.surfaceL}}::-webkit-scrollbar-thumb{background:${C.borderD};border-radius:4px}input::placeholder,textarea::placeholder{color:${C.t4}}button{cursor:pointer;transition:all .12s}button:hover{opacity:.85}input[type="date"]{color-scheme:light}`}</style>
+
+      <aside style={{ width:sideOpen?214:0,minWidth:sideOpen?214:0,background:C.surface,borderRight:BD,overflow:"hidden",
+        transition:"width .22s,min-width .22s",position:"fixed",top:0,left:0,height:"100vh",zIndex:100,display:"flex",flexDirection:"column",boxShadow:"2px 0 12px rgba(0,0,0,.06)" }}>
+        <div style={{ padding:"20px 18px 14px",borderBottom:BD,whiteSpace:"nowrap" }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+            <div><div style={{ fontSize:18,fontWeight:900,color:C.t1,letterSpacing:-.5 }}><span style={{ color:C.blue }}>◈</span> FACIL</div>
+              <div style={{ fontSize:9,color:C.t4,marginTop:2,letterSpacing:2,fontWeight:600 }}>현장조사팀</div></div>
+            <button onClick={()=>setSideOpen(false)} style={{ background:"transparent",border:"none",color:C.t4,fontSize:18,padding:"2px 4px" }}>☰</button>
+          </div>
+          <div style={{ display:"flex",alignItems:"center",gap:5,marginTop:10,fontSize:10,color:C.green,fontWeight:600 }}>
+            <div style={{ width:6,height:6,borderRadius:"50%",background:C.green,boxShadow:`0 0 5px ${C.green}` }}/>캘린더 ↔ 현장관리 연동
+          </div>
+        </div>
+
+        <div style={{ padding:"10px 16px 8px",borderBottom:BD }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7 }}>
+            <span style={{ fontSize:9,color:C.t4,letterSpacing:1,fontWeight:700 }}>팀 구분 (클릭 필터)</span>
+            {globalTeam!=="전체" && <button onClick={()=>setGlobalTeam("전체")} style={{ fontSize:9,color:C.t3,background:"transparent",border:"none",cursor:"pointer",textDecoration:"underline",padding:0 }}>전체</button>}
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6 }}>
+            {Object.entries(TC).map(([t,v])=>{
+              const active=globalTeam===t;
+              return (
+                <button key={t} onClick={()=>setGlobalTeam(active?"전체":t)} style={{ padding:"7px 0",borderRadius:7,textAlign:"center",cursor:"pointer",
+                  background:active?v.a:v.b,border:`1.5px solid ${active?v.a:v.a+"40"}`,boxShadow:active?`0 2px 8px ${v.a}50`:"none",transition:"all .15s" }}>
+                  <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:5 }}>
+                    <div style={{ width:7,height:7,borderRadius:"50%",background:active?"#fff":v.a }}/>
+                    <span style={{ fontSize:11,fontWeight:700,color:active?"#fff":v.a }}>{t}</span>
+                    <span style={{ fontSize:9,color:active?"rgba(255,255,255,.7)":v.c }}>{allSchools.filter(s=>s.team===t).length}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <nav style={{ flex:1,padding:"8px 0",overflowY:"auto" }}>
+          <div style={{ padding:"8px 16px 3px",fontSize:9,color:C.t4,letterSpacing:1.5,fontWeight:700 }}>MAIN</div>
+          {MENUS.slice(0,2).map(m=>(
+            <button key={m.id} onClick={()=>setMenu(m.id)} style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"12px 18px",
+              background:menu===m.id?C.blueL:"transparent",borderLeft:`3px solid ${menu===m.id?C.blue:"transparent"}`,border:"none",
+              color:menu===m.id?C.blue:C.t2,fontSize:13,fontWeight:menu===m.id?700:500,textAlign:"left",whiteSpace:"nowrap" }}>
+              <span style={{ fontSize:15 }}>{m.icon}</span><span style={{ flex:1 }}>{m.label}</span>
+            </button>
+          ))}
+          <div style={{ height:1,background:C.border,margin:"8px 14px" }}/>
+          <div style={{ padding:"6px 16px 3px",fontSize:9,color:C.t4,letterSpacing:1.5,fontWeight:700 }}>REPORT</div>
+          {MENUS.slice(2).map(m=>(
+            <button key={m.id} onClick={()=>setMenu(m.id)} style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 18px",
+              background:menu===m.id?C.blueL:"transparent",borderLeft:`3px solid ${menu===m.id?C.blue:"transparent"}`,border:"none",
+              color:menu===m.id?C.blue:C.t3,fontSize:12,fontWeight:menu===m.id?700:400,textAlign:"left",whiteSpace:"nowrap" }}>
+              <span style={{ fontSize:13 }}>{m.icon}</span><span style={{ flex:1 }}>{m.label}</span>
+              {m.id==="urgent"&&urgent.length>0 && <span style={{ background:C.red,color:"#fff",fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:10 }}>{urgent.length}</span>}
+            </button>
+          ))}
+        </nav>
+
+        <div style={{ padding:"12px 16px",borderTop:BD }}>
+          <div style={{ fontSize:9,color:C.t4,marginBottom:8,letterSpacing:1,fontWeight:700 }}>연도별 현장</div>
+          {Object.entries(db).sort((a,b)=>b[0]-a[0]).map(([y,hs])=>(
+            <div key={y} style={{ marginBottom:6 }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.t2,marginBottom:3 }}>{y}년</div>
+              <div style={{ display:"flex",gap:5 }}>
+                {Object.entries(hs).map(([h,ss])=>(
+                  <div key={h} style={{ fontSize:10,color:h==="상반기"?C.blue:C.orange,background:h==="상반기"?C.blueL:C.orangeL,padding:"2px 7px",borderRadius:5,fontWeight:600 }}>
+                    {h==="상반기"?"🌱":"🍂"} {ss.length}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <main style={{ marginLeft:sideOpen?214:0,flex:1,transition:"margin .22s",display:"flex",flexDirection:"column",minWidth:0 }}>
+        <header style={{ height:52,background:C.surface,borderBottom:`1.5px solid ${C.borderD}`,display:"flex",alignItems:"center",padding:"0 22px",gap:12,position:"sticky",top:0,zIndex:50,boxShadow:"0 1px 6px rgba(0,0,0,.06)" }}>
+          <button onClick={()=>setSideOpen(v=>!v)} style={{ width:34,height:34,borderRadius:8,background:C.surfaceL,border:BD,color:C.t2,fontSize:17,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",flexShrink:0 }}>
+            ☰{!sideOpen&&urgent.length>0 && <span style={{ position:"absolute",top:-4,right:-4,background:C.red,color:"#fff",fontSize:8,fontWeight:700,padding:"1px 4px",borderRadius:8 }}>{urgent.length}</span>}
+          </button>
+          <div style={{ fontSize:14,fontWeight:800,color:C.t1 }}>{MENUS.find(m=>m.id===menu)?.icon} {MENUS.find(m=>m.id===menu)?.label}</div>
+          <div style={{ flex:1 }}/>
+          <div style={{ fontSize:10,color:C.t3 }}>기준일 {BASE_DATE} · 연도/반기별 분리</div>
+          <button onClick={()=>setMenu("schedule")} style={{ padding:"6px 13px",background:menu==="schedule"?C.blueL:"transparent",border:`1.5px solid ${menu==="schedule"?C.blue:C.border}`,borderRadius:8,color:menu==="schedule"?C.blue:C.t3,fontSize:11,fontWeight:700 }}>📅 현장일정</button>
+          <button onClick={()=>setMenu("sites")} style={{ padding:"6px 13px",background:menu==="sites"?C.greenL:"transparent",border:`1.5px solid ${menu==="sites"?C.green:C.border}`,borderRadius:8,color:menu==="sites"?C.green:C.t3,fontSize:11,fontWeight:700 }}>🏫 현장관리</button>
+        </header>
+        <div style={{ padding:22,overflowY:"auto",flex:1 }}>{pages[menu]}</div>
+      </main>
+    </div>
+  );
+}
