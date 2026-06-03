@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 
 /* ══════════════════════════════════════════════════════════════
@@ -1206,6 +1206,39 @@ function ExportImportPage({ db, setDb }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   Firebase 실시간 데이터베이스 연동
+══════════════════════════════════════════════════════════════ */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAZ-uIrJ_x01So8qVC2sIJm9C93BirMeqY",
+  authDomain: "ston1130.firebaseapp.com",
+  databaseURL: "https://ston1130-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "ston1130",
+  storageBucket: "ston1130.firebasestorage.app",
+  messagingSenderId: "462390983896",
+  appId: "1:462390983896:web:a43c8acf2d236203c36bad",
+  measurementId: "G-82RR7G869R",
+};
+const FB_PATH = "facil/db";   // Realtime Database 저장 경로
+
+/* Firebase 가 비우는 빈 배열/객체-키 복원 → 항상 배열 형태 보장 */
+const toArr = v => Array.isArray(v) ? v : (v && typeof v==="object" ? Object.values(v) : []);
+function normalizeDb(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const out = {};
+  Object.entries(raw).forEach(([yr, halves]) => {
+    out[yr] = {};
+    Object.entries(halves||{}).forEach(([half, schools]) => {
+      out[yr][half] = toArr(schools).filter(Boolean).map(s => ({
+        ...s,
+        assignees: toArr(s.assignees),
+        buildings: toArr(s.buildings).filter(Boolean),
+      }));
+    });
+  });
+  return out;
+}
+
+/* ══════════════════════════════════════════════════════════════
    메인 앱 — 사이드바 + 라우팅
 ══════════════════════════════════════════════════════════════ */
 export default function App() {
@@ -1213,6 +1246,54 @@ export default function App() {
   const [sideOpen, setSideOpen] = useState(true);
   const [menu, setMenu] = useState("schedule");
   const [globalTeam, setGlobalTeam] = useState("전체");
+
+  /* ── Firebase 상태 ── */
+  const [fbStatus, setFbStatus] = useState("연결 중...");   // 연결 중 / 실시간 연결됨 / 오프라인(로컬)
+  const fbRef     = useRef(null);    // { dbRef, set }
+  const fbReady   = useRef(false);   // 최초 로드 완료 여부
+  const skipWrite = useRef(false);   // 원격→로컬 반영 시 재저장 방지(에코 차단)
+
+  /* 1) Firebase 초기화 + 실시간 구독 */
+  useEffect(() => {
+    let unsub = null, cancelled = false;
+    (async () => {
+      try {
+        const { initializeApp } = await import("https://esm.sh/firebase@11/app");
+        const { getDatabase, ref, onValue, set } =
+          await import("https://esm.sh/firebase@11/database");
+        if (cancelled) return;
+        const app = initializeApp(FIREBASE_CONFIG);
+        const database = getDatabase(app);
+        const dbRef = ref(database, FB_PATH);
+        fbRef.current = { dbRef, set };
+
+        unsub = onValue(dbRef, (snap) => {
+          const val = normalizeDb(snap.val());
+          if (val && Object.keys(val).length) {
+            skipWrite.current = true;     // 이 setDb 는 원격 반영이므로 재저장 금지
+            setDb(val);
+          } else {
+            set(dbRef, DB).catch(()=>{}); // DB 비어있으면 초기 데이터 시드
+          }
+          fbReady.current = true;
+          setFbStatus("실시간 연결됨");
+        }, () => {
+          setFbStatus("오프라인 (로컬)");
+        });
+      } catch (e) {
+        setFbStatus("오프라인 (로컬)");   // 모듈 로드 실패 시 로컬 전용 동작
+      }
+    })();
+    return () => { cancelled = true; if (unsub) unsub(); };
+  }, []);
+
+  /* 2) 로컬 db 변경 → Firebase 저장 (에코 차단) */
+  useEffect(() => {
+    if (!fbReady.current || !fbRef.current) return;
+    if (skipWrite.current) { skipWrite.current = false; return; }
+    const { dbRef, set } = fbRef.current;
+    set(dbRef, db).catch(()=>{});
+  }, [db]);
 
   const allSchools = useMemo(() => {
     const list = [];
@@ -1271,8 +1352,12 @@ export default function App() {
               <div style={{ fontSize:9,color:C.t4,marginTop:2,letterSpacing:2,fontWeight:600 }}>현장조사팀</div></div>
             <button onClick={()=>setSideOpen(false)} style={{ background:"transparent",border:"none",color:C.t4,fontSize:18,padding:"2px 4px" }}>☰</button>
           </div>
-          <div style={{ display:"flex",alignItems:"center",gap:5,marginTop:10,fontSize:10,color:C.green,fontWeight:600 }}>
-            <div style={{ width:6,height:6,borderRadius:"50%",background:C.green,boxShadow:`0 0 5px ${C.green}` }}/>캘린더 ↔ 현장관리 연동
+          <div style={{ display:"flex",alignItems:"center",gap:5,marginTop:10,fontSize:10,
+            color:fbStatus==="실시간 연결됨"?C.green:fbStatus==="연결 중..."?C.orange:C.t3,fontWeight:600 }}>
+            <div style={{ width:6,height:6,borderRadius:"50%",
+              background:fbStatus==="실시간 연결됨"?C.green:fbStatus==="연결 중..."?C.orange:C.t4,
+              boxShadow:fbStatus==="실시간 연결됨"?`0 0 5px ${C.green}`:"none" }}/>
+            Firebase {fbStatus}
           </div>
         </div>
 
