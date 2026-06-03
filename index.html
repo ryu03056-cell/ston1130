@@ -4,12 +4,18 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>FACIL — 현장 일정·관리</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" rel="stylesheet"/>
+
+<!-- React + Babel + XLSX -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Firebase (compat 전역 SDK) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
 <style>
   html,body,#root{margin:0;padding:0;height:100%;}
   body{font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;}
@@ -32,7 +38,7 @@
   </div>
 </div>
 
-<script type="text/babel" data-type="module" data-presets="react">
+<script type="text/babel" data-presets="react">
 const { useState, useMemo, useCallback, useRef, useEffect } = React;
 
 /* ══════════════════════════════════════════════════════════════
@@ -1287,46 +1293,44 @@ function App() {
   const fbReady   = useRef(false);   // 최초 로드 완료 여부
   const skipWrite = useRef(false);   // 원격→로컬 반영 시 재저장 방지(에코 차단)
 
-  /* 1) Firebase 초기화 + 실시간 구독 */
+  /* 1) Firebase 초기화 + 실시간 구독 (compat 전역 SDK) */
   useEffect(() => {
-    let unsub = null, cancelled = false;
-    (async () => {
-      try {
-        const { initializeApp } = await import("https://esm.sh/firebase@11/app");
-        const { getDatabase, ref, onValue, set } =
-          await import("https://esm.sh/firebase@11/database");
-        if (cancelled) return;
-        const app = initializeApp(FIREBASE_CONFIG);
-        const database = getDatabase(app);
-        const dbRef = ref(database, FB_PATH);
-        fbRef.current = { dbRef, set };
+    let off = null;
+    try {
+      if (typeof firebase === "undefined") { setFbStatus("오프라인 (SDK 없음)"); return; }
+      if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+      const dbRef = firebase.database().ref(FB_PATH);
+      fbRef.current = dbRef;
 
-        unsub = onValue(dbRef, (snap) => {
-          const val = normalizeDb(snap.val());
-          if (val && Object.keys(val).length) {
-            skipWrite.current = true;     // 이 setDb 는 원격 반영이므로 재저장 금지
-            setDb(val);
-          } else {
-            set(dbRef, DB).catch(()=>{}); // DB 비어있으면 초기 데이터 시드
-          }
-          fbReady.current = true;
-          setFbStatus("실시간 연결됨");
-        }, () => {
-          setFbStatus("오프라인 (로컬)");
-        });
-      } catch (e) {
-        setFbStatus("오프라인 (로컬)");   // 모듈 로드 실패 시 로컬 전용 동작
-      }
-    })();
-    return () => { cancelled = true; if (unsub) unsub(); };
+      const onData = (snap) => {
+        const val = normalizeDb(snap.val());
+        if (val && Object.keys(val).length) {
+          skipWrite.current = true;       // 원격 반영 → 재저장 금지
+          setDb(val);
+        } else {
+          dbRef.set(DB).catch(()=>{});    // 비어있으면 초기 시드
+        }
+        fbReady.current = true;
+        setFbStatus("실시간 연결됨");
+      };
+      const onErr = (err) => {
+        console.error("[Firebase] 구독 오류:", err);
+        setFbStatus("오프라인 (권한 확인)");
+      };
+      dbRef.on("value", onData, onErr);
+      off = () => dbRef.off("value", onData);
+    } catch (e) {
+      console.error("[Firebase] 초기화 실패:", e);
+      setFbStatus("오프라인 (로컬)");
+    }
+    return () => { if (off) off(); };
   }, []);
 
   /* 2) 로컬 db 변경 → Firebase 저장 (에코 차단) */
   useEffect(() => {
     if (!fbReady.current || !fbRef.current) return;
     if (skipWrite.current) { skipWrite.current = false; return; }
-    const { dbRef, set } = fbRef.current;
-    set(dbRef, db).catch(()=>{});
+    fbRef.current.set(db).catch(e => console.error("[Firebase] 저장 실패:", e));
   }, [db]);
 
   const allSchools = useMemo(() => {
@@ -1473,9 +1477,7 @@ function App() {
 }
 
 
-const container = document.getElementById('root');
-const root = ReactDOM.createRoot(container);
-root.render(<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 </body>
 </html>
