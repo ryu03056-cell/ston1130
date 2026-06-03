@@ -5,39 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>FACIL — 현장 일정·관리</title>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" rel="stylesheet"/>
-
-<!-- React + Babel + XLSX -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-
-<!-- Firebase (compat 전역 SDK) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-
 <style>
   html,body,#root{margin:0;padding:0;height:100%;}
   body{font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;}
-  #loading{display:flex;align-items:center;justify-content:center;height:100vh;
+  #boot{display:flex;align-items:center;justify-content:center;height:100vh;
     flex-direction:column;gap:14px;color:#8A94A6;background:#F0F2F5;}
-  #loading .logo{font-size:28px;font-weight:900;color:#1A2332;letter-spacing:-0.5px;}
-  #loading .logo span{color:#1D6FF2;}
-  #loading .bar{width:120px;height:4px;border-radius:4px;background:#E2E6ED;overflow:hidden;}
-  #loading .bar i{display:block;height:100%;width:40%;background:#1D6FF2;border-radius:4px;
+  #boot .logo{font-size:28px;font-weight:900;color:#1A2332;letter-spacing:-0.5px;}
+  #boot .logo span{color:#1D6FF2;}
+  #boot .bar{width:120px;height:4px;border-radius:4px;background:#E2E6ED;overflow:hidden;}
+  #boot .bar i{display:block;height:100%;width:40%;background:#1D6FF2;border-radius:4px;
     animation:slide 1s ease-in-out infinite;}
   @keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
 </style>
 </head>
 <body>
 <div id="root">
-  <div id="loading">
+  <div id="boot">
     <div class="logo">◈ FACIL</div>
     <div style="font-size:13px;">현장 일정·관리 시스템 불러오는 중...</div>
     <div class="bar"><i></i></div>
   </div>
 </div>
-
 <script type="text/babel" data-presets="react">
 const { useState, useMemo, useCallback, useRef, useEffect } = React;
 
@@ -1258,24 +1252,68 @@ const FIREBASE_CONFIG = {
   appId: "1:462390983896:web:a43c8acf2d236203c36bad",
   measurementId: "G-82RR7G869R",
 };
-const FB_PATH = "facil/db";   // Realtime Database 저장 경로
+const FB_DATA     = "facil/data";      // 학교 데이터 (ID로 키잉 → 부분 저장)
+const FB_META     = "facil/meta";      // 마지막 수정자/시각
+const FB_PRESENCE = "facil/presence";  // 동시 접속자
 
-/* Firebase 가 비우는 빈 배열/객체-키 복원 → 항상 배열 형태 보장 */
+/* 객체-키 ↔ 배열 변환 */
 const toArr = v => Array.isArray(v) ? v : (v && typeof v==="object" ? Object.values(v) : []);
-function normalizeDb(raw) {
+
+/* Firebase(키잉 객체) → 화면용 배열 db */
+function fbToDb(raw) {
   if (!raw || typeof raw !== "object") return null;
   const out = {};
   Object.entries(raw).forEach(([yr, halves]) => {
     out[yr] = {};
-    Object.entries(halves||{}).forEach(([half, schools]) => {
-      out[yr][half] = toArr(schools).filter(Boolean).map(s => ({
+    Object.entries(halves||{}).forEach(([half, schoolsObj]) => {
+      out[yr][half] = toArr(schoolsObj).filter(Boolean).map(s => ({
         ...s,
         assignees: toArr(s.assignees),
         buildings: toArr(s.buildings).filter(Boolean),
-      }));
+      })).sort((a,b) => {
+        const na = parseInt(a.no,10), nb = parseInt(b.no,10);
+        if (!isNaN(na) && !isNaN(nb) && na!==nb) return na-nb;
+        return String(a.id).localeCompare(String(b.id));
+      });
     });
   });
   return out;
+}
+
+/* 화면용 배열 db → Firebase(키잉 객체) — 초기 시드용 */
+function dbToFb(db) {
+  const out = {};
+  Object.entries(db).forEach(([yr, halves]) => {
+    out[yr] = {};
+    Object.entries(halves).forEach(([half, schools]) => {
+      out[yr][half] = {};
+      schools.forEach(s => { out[yr][half][s.id] = s; });
+    });
+  });
+  return out;
+}
+
+/* 두 db를 학교 단위로 비교 → 변경된 경로만 추출 (부분 저장용)
+   결과: { "2026/상반기/26u1": {school} | null(삭제) } */
+function diffDb(prev, next) {
+  const updates = {};
+  const pv = prev || {};
+  Object.entries(next).forEach(([yr, halves]) => {
+    Object.entries(halves).forEach(([half, schools]) => {
+      const prevArr = pv[yr]?.[half] || [];
+      const prevById = {};
+      prevArr.forEach(s => { prevById[s.id] = s; });
+      schools.forEach(s => {
+        const before = prevById[s.id];
+        if (!before || JSON.stringify(before) !== JSON.stringify(s)) {
+          updates[`${yr}/${half}/${s.id}`] = s;
+        }
+        delete prevById[s.id];
+      });
+      Object.keys(prevById).forEach(id => { updates[`${yr}/${half}/${id}`] = null; });
+    });
+  });
+  return updates;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1288,50 +1326,130 @@ function App() {
   const [globalTeam, setGlobalTeam] = useState("전체");
 
   /* ── Firebase 상태 ── */
-  const [fbStatus, setFbStatus] = useState("연결 중...");   // 연결 중 / 실시간 연결됨 / 오프라인(로컬)
-  const fbRef     = useRef(null);    // { dbRef, set }
-  const fbReady   = useRef(false);   // 최초 로드 완료 여부
-  const skipWrite = useRef(false);   // 원격→로컬 반영 시 재저장 방지(에코 차단)
+  const [fbStatus, setFbStatus] = useState("연결 중...");
+  const [online,   setOnline]   = useState(false);   // .info/connected
+  const [syncing,  setSyncing]  = useState(false);    // 저장 중 표시
+  const [loaded,   setLoaded]   = useState(false);    // 첫 데이터 도착
+  const [users,    setUsers]    = useState(0);        // 동시 접속자
+  const [meta,     setMeta]     = useState(null);     // { at, by }
+  const [editor,   setEditor]   = useState(() => {
+    try { return localStorage.getItem("facil_editor") || ""; } catch { return ""; }
+  });
+  const saveName = n => { setEditor(n); try { localStorage.setItem("facil_editor", n); } catch {} };
 
-  /* 1) Firebase 초기화 + 실시간 구독 (compat 전역 SDK) */
+  const dataRef    = useRef(null);
+  const metaRef    = useRef(null);
+  const lastSynced = useRef(null);    // 마지막으로 FB와 일치한 db
+  const skipWrite  = useRef(false);   // 원격 반영분 재저장 차단
+  const fbReady    = useRef(false);
+  const editorRef  = useRef(editor);
+  editorRef.current = editor;
+  const saveTimer  = useRef(null);
+
+  /* 1) 초기화 + 실시간 구독 + 접속 상태 + presence */
   useEffect(() => {
-    let off = null;
+    let offData=null, offConn=null, offPres=null, offMeta=null, presNode=null;
     try {
       if (typeof firebase === "undefined") { setFbStatus("오프라인 (SDK 없음)"); return; }
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-      const dbRef = firebase.database().ref(FB_PATH);
-      fbRef.current = dbRef;
+      const rootDb = firebase.database();
+      const dRef = rootDb.ref(FB_DATA);
+      const mRef = rootDb.ref(FB_META);
+      dataRef.current = dRef;
+      metaRef.current = mRef;
 
+      /* 접속 상태 */
+      const connRef = rootDb.ref(".info/connected");
+      const onConn = (s) => {
+        const c = s.val()===true;
+        setOnline(c);
+        setFbStatus(c ? "실시간 연결됨" : "재연결 중...");
+      };
+      connRef.on("value", onConn);
+      offConn = () => connRef.off("value", onConn);
+
+      /* 데이터 구독 */
       const onData = (snap) => {
-        const val = normalizeDb(snap.val());
+        const val = fbToDb(snap.val());
         if (val && Object.keys(val).length) {
-          skipWrite.current = true;       // 원격 반영 → 재저장 금지
+          skipWrite.current = true;
+          lastSynced.current = val;
           setDb(val);
         } else {
-          dbRef.set(DB).catch(()=>{});    // 비어있으면 초기 시드
+          dRef.set(dbToFb(DB)).catch(()=>{});   // 비어있으면 시드
+          lastSynced.current = DB;
         }
         fbReady.current = true;
-        setFbStatus("실시간 연결됨");
+        setLoaded(true);
       };
-      const onErr = (err) => {
-        console.error("[Firebase] 구독 오류:", err);
-        setFbStatus("오프라인 (권한 확인)");
-      };
-      dbRef.on("value", onData, onErr);
-      off = () => dbRef.off("value", onData);
+      const onErr = (err) => { console.error("[Firebase] 구독 오류:", err); setFbStatus("오프라인 (권한 확인)"); setLoaded(true); };
+      dRef.on("value", onData, onErr);
+      offData = () => dRef.off("value", onData);
+
+      /* 마지막 수정 메타 */
+      const onMeta = (s) => { const m=s.val(); if(m) setMeta(m); };
+      mRef.on("value", onMeta);
+      offMeta = () => mRef.off("value", onMeta);
+
+      /* presence — 동시 접속자 */
+      const presRef = rootDb.ref(FB_PRESENCE);
+      presNode = presRef.push();
+      presNode.set({ name: editorRef.current || "익명", ts: Date.now() });
+      presNode.onDisconnect().remove();
+      const onPres = (s) => setUsers(s.numChildren());
+      presRef.on("value", onPres);
+      offPres = () => presRef.off("value", onPres);
     } catch (e) {
       console.error("[Firebase] 초기화 실패:", e);
       setFbStatus("오프라인 (로컬)");
+      setLoaded(true);
     }
-    return () => { if (off) off(); };
+    return () => {
+      if (offData) offData(); if (offConn) offConn();
+      if (offPres) offPres(); if (offMeta) offMeta();
+      if (presNode) presNode.remove().catch(()=>{});
+    };
   }, []);
 
-  /* 2) 로컬 db 변경 → Firebase 저장 (에코 차단) */
+  /* 2) 로컬 db 변경 → 변경된 학교만 부분 저장 (디바운스 + 에코 차단) */
   useEffect(() => {
-    if (!fbReady.current || !fbRef.current) return;
-    if (skipWrite.current) { skipWrite.current = false; return; }
-    fbRef.current.set(db).catch(e => console.error("[Firebase] 저장 실패:", e));
+    if (!fbReady.current || !dataRef.current) return;
+    if (skipWrite.current) { skipWrite.current = false; lastSynced.current = db; return; }
+
+    const updates = diffDb(lastSynced.current, db);
+    const keys = Object.keys(updates);
+    if (keys.length === 0) { lastSynced.current = db; return; }
+
+    setSyncing(true);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      dataRef.current.update(updates)
+        .then(() => {
+          metaRef.current?.set({ at: Date.now(), by: editorRef.current || "익명",
+            cnt: keys.length }).catch(()=>{});
+          lastSynced.current = db;
+        })
+        .catch(e => console.error("[Firebase] 저장 실패:", e))
+        .finally(() => setSyncing(false));
+    }, 300);
   }, [db]);
+
+  /* presence 이름 갱신 */
+  useEffect(() => {
+    if (!fbReady.current) return;
+    try {
+      const presRef = firebase.database().ref(FB_PRESENCE);
+      // 이름이 바뀌면 메타에만 반영 (presence 노드는 세션 단위라 생략)
+    } catch {}
+  }, [editor]);
+
+  const fmtMeta = (ts) => {
+    if (!ts) return "";
+    const d = new Date(ts), now = new Date();
+    const sameDay = d.toDateString()===now.toDateString();
+    const hh = String(d.getHours()).padStart(2,"0"), mm = String(d.getMinutes()).padStart(2,"0");
+    return sameDay ? `오늘 ${hh}:${mm}` : `${d.getMonth()+1}/${d.getDate()} ${hh}:${mm}`;
+  };
 
   const allSchools = useMemo(() => {
     const list = [];
@@ -1380,7 +1498,15 @@ function App() {
 
   return (
     <div style={{ fontFamily:F,background:C.bg,minHeight:"100vh",display:"flex",color:C.t1,fontSize:13 }}>
-      <style>{`*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:${C.surfaceL}}::-webkit-scrollbar-thumb{background:${C.borderD};border-radius:4px}input::placeholder,textarea::placeholder{color:${C.t4}}button{cursor:pointer;transition:all .12s}button:hover{opacity:.85}input[type="date"]{color-scheme:light}`}</style>
+      <style>{`*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:${C.surfaceL}}::-webkit-scrollbar-thumb{background:${C.borderD};border-radius:4px}input::placeholder,textarea::placeholder{color:${C.t4}}button{cursor:pointer;transition:all .12s}button:hover{opacity:.85}input[type="date"]{color-scheme:light}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+
+      {!loaded && (
+        <div style={{ position:"fixed",inset:0,background:C.bg,zIndex:9999,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16 }}>
+          <div style={{ fontSize:26,fontWeight:900,color:C.t1 }}><span style={{ color:C.blue }}>◈</span> FACIL</div>
+          <div style={{ width:30,height:30,border:`3px solid ${C.border}`,borderTopColor:C.blue,borderRadius:"50%",animation:"spin .8s linear infinite" }}/>
+          <div style={{ fontSize:12,color:C.t3 }}>Firebase 실시간 데이터 불러오는 중…</div>
+        </div>
+      )}
 
       <aside style={{ width:sideOpen?214:0,minWidth:sideOpen?214:0,background:C.surface,borderRight:BD,overflow:"hidden",
         transition:"width .22s,min-width .22s",position:"fixed",top:0,left:0,height:"100vh",zIndex:100,display:"flex",flexDirection:"column",boxShadow:"2px 0 12px rgba(0,0,0,.06)" }}>
@@ -1390,12 +1516,45 @@ function App() {
               <div style={{ fontSize:9,color:C.t4,marginTop:2,letterSpacing:2,fontWeight:600 }}>현장조사팀</div></div>
             <button onClick={()=>setSideOpen(false)} style={{ background:"transparent",border:"none",color:C.t4,fontSize:18,padding:"2px 4px" }}>☰</button>
           </div>
-          <div style={{ display:"flex",alignItems:"center",gap:5,marginTop:10,fontSize:10,
-            color:fbStatus==="실시간 연결됨"?C.green:fbStatus==="연결 중..."?C.orange:C.t3,fontWeight:600 }}>
-            <div style={{ width:6,height:6,borderRadius:"50%",
-              background:fbStatus==="실시간 연결됨"?C.green:fbStatus==="연결 중..."?C.orange:C.t4,
-              boxShadow:fbStatus==="실시간 연결됨"?`0 0 5px ${C.green}`:"none" }}/>
-            Firebase {fbStatus}
+
+          {/* 연결 상태 + 저장 표시 */}
+          <div style={{ display:"flex",alignItems:"center",gap:6,marginTop:11 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:5,fontSize:10,fontWeight:700,
+              color:online?C.green:fbStatus==="연결 중..."?C.orange:C.t3 }}>
+              <div style={{ width:7,height:7,borderRadius:"50%",
+                background:online?C.green:fbStatus==="연결 중..."?C.orange:C.t4,
+                boxShadow:online?`0 0 6px ${C.green}`:"none" }}/>
+              {online ? "실시간 연결됨" : fbStatus}
+            </div>
+            {syncing && <span style={{ fontSize:9,color:C.blue,fontWeight:600,marginLeft:"auto" }}>저장 중…</span>}
+            {!syncing && online && <span style={{ fontSize:9,color:C.t4,marginLeft:"auto" }}>✓ 저장됨</span>}
+          </div>
+
+          {/* 동시 접속자 + 마지막 수정 */}
+          <div style={{ marginTop:8,padding:"7px 9px",background:C.surfaceL,borderRadius:7,border:BD }}>
+            <div style={{ display:"flex",alignItems:"center",gap:5,fontSize:9,color:C.t2,fontWeight:600 }}>
+              <span style={{ width:5,height:5,borderRadius:"50%",background:users>0?C.green:C.t4 }}/>
+              동시 접속 {users}명
+            </div>
+            {meta?.at && (
+              <div style={{ fontSize:9,color:C.t3,marginTop:4,whiteSpace:"normal",lineHeight:1.4 }}>
+                마지막 수정 · <b style={{ color:C.t2 }}>{meta.by||"익명"}</b>님 {fmtMeta(meta.at)}
+              </div>
+            )}
+          </div>
+
+          {/* 내 이름 */}
+          <div style={{ marginTop:8 }}>
+            <select value={editor} onChange={e=>saveName(e.target.value)}
+              style={{ width:"100%",padding:"6px 8px",background:C.surface,border:BD,borderRadius:6,
+                color:editor?C.t1:C.t4,fontSize:11,outline:"none",fontWeight:600 }}>
+              <option value="">내 이름 선택 (수정 기록용)</option>
+              {Object.entries(TEAM_MEMBERS).map(([t,arr])=>(
+                <optgroup key={t} label={t}>
+                  {arr.map(n=><option key={n} value={n}>{n}</option>)}
+                </optgroup>
+              ))}
+            </select>
           </div>
         </div>
 
