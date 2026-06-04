@@ -70,6 +70,19 @@ const TEAM_MEMBERS = {
   "4팀": ["이준혁","박서연","최민준","윤지현"],
 };
 
+/* ── 업무 진행 8단계 (순서 고정) ── */
+const STEPS = ["착수계","현장조사","기타자료","보고서","검토","제본","납품","완수"];
+const STEP_ICON = { 착수계:"📝", 현장조사:"📍", 기타자료:"📎", 보고서:"📄", 검토:"🔍", 제본:"📚", 납품:"📦", 완수:"🏁" };
+const STEP_SPECIAL = { 검토:true, 제본:true };   // 별도 강조
+/* 진행도 계산: done(완료 개수), pos(앞에서부터 연속 완료=현재 위치), pct(%) */
+function getProgress(s) {
+  const p = (s && s.progress) || {};
+  const done = STEPS.filter(k => p[k]).length;
+  let pos = 0;
+  for (const k of STEPS) { if (p[k]) pos++; else break; }
+  return { p, done, pos, pct: Math.round(done / STEPS.length * 100), total: STEPS.length };
+}
+
 /* ── 기준일 & D-day ── */
 const BASE_DATE = "2026-05-26";
 const calcDday = (end, base = BASE_DATE) => {
@@ -221,6 +234,34 @@ function Pill({ children, active, ac, onClick, style={} }) {
   return <button onClick={onClick} style={{ padding:"5px 11px",borderRadius:20,fontSize:12,fontWeight:600,
     border:`1.5px solid ${active?ac:C.border}`, background:active?ac+"18":"transparent",
     color:active?ac:C.t3, cursor:"pointer", whiteSpace:"nowrap", ...style }}>{children}</button>;
+}
+
+/* 8단계 진행바 (목록용 컴팩트 / 상세용) */
+function StepBar({ progress, compact }) {
+  const { p, done, pct } = getProgress({ progress });
+  const segH = compact ? 7 : 9;
+  return (
+    <div style={{ display:"flex",alignItems:"center",gap:compact?3:4,flexWrap:"wrap" }}>
+      <div style={{ display:"flex",gap:compact?2:3 }}>
+        {STEPS.map((k) => {
+          const on = !!p[k];
+          const sp = STEP_SPECIAL[k];
+          const col = sp ? C.purple : C.blue;
+          return (
+            <div key={k} title={`${STEP_ICON[k]} ${k}${on?" ✓":""}`}
+              style={{ width:compact?15:22, height:segH, borderRadius:3,
+                background:on?col:C.surfaceD,
+                border:sp ? `1.5px solid ${on?col:col+"55"}` : `1px solid ${on?col:"transparent"}`,
+                boxSizing:"border-box" }}/>
+          );
+        })}
+      </div>
+      <span style={{ fontSize:compact?9:11,fontWeight:800,color:done===STEPS.length?C.green:C.t2,marginLeft:3 }}>
+        {done}/{STEPS.length}
+        <span style={{ fontSize:compact?8:10,fontWeight:600,color:C.t4,marginLeft:3 }}>{pct}%</span>
+      </span>
+    </div>
+  );
 }
 function Toast({ msg }) {
   if (!msg) return null;
@@ -743,7 +784,12 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
     fms:b.fms||"", flag:b.flag||"", note:b.note||"",
     rep:!!b.rep, fmsD:!!b.fmsD, delivery:b.delivery||"",
   })));
+  const [prog, setProg] = useState(() => {
+    const o = {}; STEPS.forEach(k => { o[k] = !!(sc.progress && sc.progress[k]); }); return o;
+  });
   const [saved, setSaved] = useState(false);
+  const progDone = STEPS.filter(k=>prog[k]).length;
+  const toggleStep = (k) => setProg(p => ({ ...p, [k]: !p[k] }));
 
   const save = () => {
     setDb(prev => {
@@ -752,7 +798,7 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
       next[yr][half] = prev[yr][half].map(s => {
         if (s.id!==sc.id) return s;
         return { ...s, team:f.team, region:f.region, kind:f.kind, field:f.field, start:f.start, end:f.end,
-          assignees:f.assignees, headcount:f.assignees.length||s.headcount,
+          assignees:f.assignees, headcount:f.assignees.length||s.headcount, progress:{...prog},
           buildings: bf.map((b,i)=>({ ...(sc.buildings[i]||{}), b:b.b, floor:b.floor,
             area:b.area?parseFloat(b.area):null, fms:b.fms||null, flag:b.flag||null, note:b.note||null,
             rep:b.rep, fmsD:b.fmsD, delivery:b.delivery||null })) };
@@ -822,6 +868,48 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* 업무 진행 8단계 */}
+          <div style={{ padding:14,background:C.surfaceL,borderRadius:10,border:BD,marginBottom:16 }}>
+            <div style={{ display:"flex",alignItems:"center",marginBottom:10 }}>
+              <div style={{ fontSize:10,fontWeight:700,color:C.t2 }}>📋 업무 진행 단계</div>
+              <div style={{ marginLeft:"auto",fontSize:12,fontWeight:800,color:progDone===STEPS.length?C.green:tc.a }}>
+                {progDone}/{STEPS.length}
+                <span style={{ fontSize:10,color:C.t4,marginLeft:4,fontWeight:600 }}>{Math.round(progDone/STEPS.length*100)}%</span>
+              </div>
+            </div>
+
+            {/* 진행 바 */}
+            <div style={{ display:"flex",gap:3,marginBottom:12 }}>
+              {STEPS.map((k)=>{
+                const on=prog[k], sp=STEP_SPECIAL[k], col=sp?C.purple:C.blue;
+                return <div key={k} style={{ flex:1,height:8,borderRadius:3,
+                  background:on?col:C.surfaceD,
+                  border:sp?`1.5px solid ${on?col:col+"55"}`:"none",boxSizing:"border-box" }}/>;
+              })}
+            </div>
+
+            {/* 단계 토글 (순서대로) */}
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:7 }}>
+              {STEPS.map((k,i)=>{
+                const on=prog[k], sp=STEP_SPECIAL[k], col=sp?C.purple:(k==="완수"?C.green:C.blue);
+                return (
+                  <button key={k} onClick={()=>toggleStep(k)} style={{
+                    display:"flex",alignItems:"center",gap:8,padding:"9px 11px",borderRadius:8,cursor:"pointer",
+                    background:on?col+"12":C.surface,
+                    border:`1.5px solid ${on?col:(sp?col+"40":C.border)}`,textAlign:"left" }}>
+                    <span style={{ width:20,height:20,borderRadius:"50%",flexShrink:0,
+                      display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,
+                      background:on?col:C.surfaceD,color:on?"#fff":C.t4 }}>{on?"✓":i+1}</span>
+                    <span style={{ fontSize:13 }}>{STEP_ICON[k]}</span>
+                    <span style={{ fontSize:12,fontWeight:700,color:on?col:C.t2,flex:1 }}>{k}</span>
+                    {sp && <span style={{ fontSize:8,fontWeight:700,color:C.purple,background:C.purpleL,padding:"1px 5px",borderRadius:3 }}>중요</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:9,color:C.t4,marginTop:8 }}>* 단계를 눌러 완료/미완료를 전환하세요. 검토·제본은 별도 강조됩니다.</div>
           </div>
 
           <div style={{ fontSize:10,fontWeight:700,color:C.t2,marginBottom:10 }}>🏗 동별 수정</div>
@@ -1022,16 +1110,38 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
                 style={{ display:"grid",gridTemplateColumns:"2fr 110px 110px 70px 116px 50px",gap:8,padding:"12px 16px",cursor:"pointer",userSelect:"none",
                   background:urgent?C.redL+"80":allDone?C.greenL+"50":si%2===0?C.surface:C.surfaceL,
                   borderLeft:`3px solid ${urgent?C.red:allDone?C.green:"transparent"}` }}>
-                <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
-                  <span style={{ color:C.t4,fontSize:11,display:"inline-block",transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s" }}>›</span>
-                  <span style={{ fontWeight:800,fontSize:14,color:C.t1 }}>{s.school}</span>
-                  <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
-                  <span style={{ fontSize:10,color:C.t3 }}>{s.region}</span>
-                  {urgent && <Tag bg={C.redL} color={C.red} border={`1px solid ${C.red}30`}>⚡긴급</Tag>}
-                  {s.buildings.some(b=>b.flag==="●") && <span style={{ fontSize:10,color:C.orange }}>🚁</span>}
-                  {s.buildings.some(b=>b.flag==="1년") && <Tag bg={C.blueL} color={C.blue}>1년</Tag>}
-                  {(s.assignees||[]).length>0 && <span style={{ fontSize:9,color:tc.c }}>👤 {s.assignees.join("·")}</span>}
-                  <span style={{ fontSize:10,color:C.t4 }}>{s.buildings.length}동</span>
+                <div style={{ display:"flex",flexDirection:"column",gap:5,minWidth:0 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                    <span style={{ color:C.t4,fontSize:11,display:"inline-block",transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s" }}>›</span>
+                    <span style={{ fontWeight:800,fontSize:14,color:C.t1 }}>{s.school}</span>
+                    <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
+                    <span style={{ fontSize:10,color:C.t3 }}>{s.region}</span>
+                    {urgent && <Tag bg={C.redL} color={C.red} border={`1px solid ${C.red}30`}>⚡긴급</Tag>}
+                    {s.buildings.some(b=>b.flag==="●") && <span style={{ fontSize:10,color:C.orange }}>🚁</span>}
+                    {s.buildings.some(b=>b.flag==="1년") && <Tag bg={C.blueL} color={C.blue}>1년</Tag>}
+                    {(s.assignees||[]).length>0 && <span style={{ fontSize:9,color:tc.c }}>👤 {s.assignees.join("·")}</span>}
+                    <span style={{ fontSize:10,color:C.t4 }}>{s.buildings.length}동</span>
+                  </div>
+                  {/* 8단계 진행바 + 강조 */}
+                  <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",paddingLeft:19 }} onClick={e=>e.stopPropagation()}>
+                    <StepBar progress={s.progress} compact/>
+                    {(() => {
+                      const p = (s.progress)||{};
+                      const chip = (label, on, col) => (
+                        <span style={{ fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,
+                          background:on?col+"18":C.surfaceL, color:on?col:C.t4,
+                          border:`1px solid ${on?col+"50":C.border}` }}>
+                          {on?"✓ ":""}{label}
+                        </span>
+                      );
+                      return <>
+                        {chip("착수계", !!p["착수계"], C.blue)}
+                        {chip("검토", !!p["검토"], C.purple)}
+                        {chip("제본", !!p["제본"], C.purple)}
+                        {chip("완수", !!p["완수"], C.green)}
+                      </>;
+                    })()}
+                  </div>
                 </div>
                 <div onClick={e=>e.stopPropagation()} style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
                   <input type="date" value={s.field||""} onChange={e=>updDate(s.id,"field",e.target.value)}
