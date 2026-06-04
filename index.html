@@ -9,9 +9,10 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<!-- Firebase 8.10.1 (namespaced API) -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <style>
   html,body,#root{margin:0;padding:0;height:100%;}
   body{font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;}
@@ -104,6 +105,7 @@ const MENUS = [
   { id:"urgent",   icon:"🚨", label:"긴급 보고서" },
   { id:"done",     icon:"✅", label:"완료 보고서" },
   { id:"export",   icon:"📤", label:"엑셀 관리" },
+  { id:"settings", icon:"⚙️", label:"설정" },
 ];
 
 /* ══════════════════════════════════════════════════════════════
@@ -388,6 +390,7 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
     if (!setDb) return;
     const sc = allSchools.find(s=>s.id===sid);
     if (!sc?._year || !sc?._half) return;
+    const had = (sc.assignees||[]).includes(name);
     setDb(prev => {
       const next = {...prev};
       next[sc._year] = {...prev[sc._year]};
@@ -399,6 +402,7 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
       });
       return next;
     });
+    logAction(had?"삭제":"추가", `인원 배정 · ${sc.school}`, had?name:null, had?null:name);
   };
 
   const FieldCard = ({ s }) => {
@@ -627,6 +631,7 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
       });
     }
     const lbl = field==="field"?"현장조사일":field==="start"?"착수일":"완수일";
+    logAction("수정", `${sc?.school} · ${lbl}`, sc?.[field]||"-", nd);
     showToast(`${sc?.school} ${lbl} → ${mo}/${targetDay} · 현장관리 반영`);
     setDragging(null); setOverDay(null);
   }, [dragging, allSchools, yr, mo, setDb]);
@@ -792,6 +797,8 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
   const toggleStep = (k) => setProg(p => ({ ...p, [k]: !p[k] }));
 
   const save = () => {
+    const beforeStr = `${sc.team}/${(sc.assignees||[]).join(",")||"-"} · 진행 ${STEPS.filter(k=>sc.progress&&sc.progress[k]).length}/${STEPS.length}`;
+    const afterStr  = `${f.team}/${f.assignees.join(",")||"-"} · 진행 ${STEPS.filter(k=>prog[k]).length}/${STEPS.length}`;
     setDb(prev => {
       const next = {...prev};
       next[yr] = {...prev[yr]};
@@ -805,6 +812,7 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
       });
       return next;
     });
+    logAction("수정", `현장 · ${sc.school}`, beforeStr, afterStr);
     setSaved(true);
     setTimeout(()=>{ setSaved(false); onClose(); }, 1100);
   };
@@ -995,14 +1003,26 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
   const schools = useMemo(()=>db[yr]?.[half]||[], [db,yr,half]);
 
   const updDate = (sid,field,v) => {
+    const sc = schools.find(s=>s.id===sid);
+    const lbl = field==="field"?"현장조사일":field==="start"?"착수일":"완수일";
     setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
       n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,[field]:v}); return n; });
+    logAction("수정", `${sc?.school} · ${lbl}`, sc?.[field]||"-", v||"-");
     showToast("날짜 변경됨 · 캘린더 자동 반영");
   };
-  const toggleB = (sid,bi,field) => setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
-    n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,buildings:s.buildings.map((b,j)=>j!==bi?b:{...b,[field]:!b[field]})}); return n; });
-  const setDel = (sid,bi,v) => setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
-    n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,buildings:s.buildings.map((b,j)=>j!==bi?b:{...b,delivery:b.delivery===v?null:v})}); return n; });
+  const toggleB = (sid,bi,field) => {
+    const sc = schools.find(s=>s.id===sid); const b = sc?.buildings[bi];
+    const fl = field==="rep"?"보고서":field==="fmsD"?"FMS등록":field;
+    setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
+      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,buildings:s.buildings.map((x,j)=>j!==bi?x:{...x,[field]:!x[field]})}); return n; });
+    logAction("수정", `${sc?.school} · ${b?.b||""} ${fl}`, b?.[field]?"완료":"미완료", b?.[field]?"미완료":"완료");
+  };
+  const setDel = (sid,bi,v) => {
+    const sc = schools.find(s=>s.id===sid); const b = sc?.buildings[bi];
+    setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
+      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,buildings:s.buildings.map((x,j)=>j!==bi?x:{...x,delivery:x.delivery===v?null:v})}); return n; });
+    logAction("수정", `${sc?.school} · ${b?.b||""} 납품`, b?.delivery||"-", b?.delivery===v?"-":v);
+  };
 
   const filtered = useMemo(()=>schools.filter(s=>{
     if (teamF!=="전체" && s.team!==teamF) return false;
@@ -1254,6 +1274,7 @@ function ExportImportPage({ db, setDb }) {
         parsed.sheets.forEach(sh => { if (!next[sh.year]) next[sh.year]={}; next[sh.year][sh.half]=sh.schools; });
         return next;
       });
+      parsed.sheets.forEach(sh => logAction("추가", `엑셀 가져오기 · ${sh.year} ${sh.half}`, null, `${sh.count}개 학교 / ${sh.bCount}개 동`));
       setImporting(false); setDone(true); setParsed(null);
     }, 400);
   };
@@ -1417,6 +1438,53 @@ const FIREBASE_CONFIG = {
 const FB_DATA     = "facil/data";      // 학교 데이터 (ID로 키잉 → 부분 저장)
 const FB_META     = "facil/meta";      // 마지막 수정자/시각
 const FB_PRESENCE = "facil/presence";  // 동시 접속자
+const FB_LOGS     = "facil/logs";      // 수정 로그
+const FB_CONFIG   = "facil/config";    // 팀/인원 설정 (관리자 편집)
+
+/* 관리자 비밀번호 (클라이언트 확인) — 운영 시 변경하세요 */
+const ADMIN_PW = "ston3team!";
+
+/* 현재 로그인 사용자 (로그 기록용) */
+let CURRENT_USER = { uid:null, email:null, name:"" };
+
+/* 수정 로그 한 건 기록 */
+function logAction(action, target, before, after) {
+  try {
+    if (typeof firebase === "undefined" || !firebase.apps.length) return;
+    firebase.database().ref(FB_LOGS).push({
+      action,                       // 추가 / 수정 / 삭제
+      target: String(target||""),   // 대상(학교/항목)
+      before: before==null ? "" : (typeof before==="string"?before:JSON.stringify(before)).slice(0,500),
+      after:  after==null  ? "" : (typeof after==="string"?after:JSON.stringify(after)).slice(0,500),
+      by:    CURRENT_USER.name || CURRENT_USER.email || "알수없음",
+      email: CURRENT_USER.email || "",
+      uid:   CURRENT_USER.uid || "",
+      ts:    Date.now(),
+    }).catch(()=>{});
+  } catch {}
+}
+
+/* 새 팀 색상 팔레트 */
+const TEAM_PALETTE = ["#1D6FF2","#0A9260","#D93B2B","#7C3AED","#E07A20","#0E7490","#BE185D","#4338CA"];
+
+/* Firebase config → 모듈 객체(TC/TEAM_LIST/TEAM_MEMBERS) 갱신 */
+function applyConfig(cfg) {
+  if (!cfg) return;
+  if (Array.isArray(cfg.teams) && cfg.teams.length) {
+    TEAM_LIST.length = 0;
+    cfg.teams.forEach((t, i) => {
+      const name = typeof t === "string" ? t : t.name;
+      if (!name) return;
+      TEAM_LIST.push(name);
+      const color = (typeof t === "object" && t.color) || (TC[name] && TC[name].a) || TEAM_PALETTE[i % TEAM_PALETTE.length];
+      TC[name] = { a: color, b: color + "1f", c: color };
+    });
+  }
+  if (cfg.members && typeof cfg.members === "object") {
+    Object.keys(TEAM_MEMBERS).forEach(k => { delete TEAM_MEMBERS[k]; });
+    Object.entries(cfg.members).forEach(([k, v]) => { TEAM_MEMBERS[k] = toArr(v).filter(Boolean); });
+  }
+}
 
 /* 객체-키 ↔ 배열 변환 */
 const toArr = v => Array.isArray(v) ? v : (v && typeof v==="object" ? Object.values(v) : []);
@@ -1479,10 +1547,261 @@ function diffDb(prev, next) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   설정 / 관리자 모드 (팀·인원 관리 + 수정 로그)
+══════════════════════════════════════════════════════════════ */
+function SettingsPage({ cfgVer, logs, editor, authUser, onLogout }) {
+  const [admin, setAdmin] = useState(false);
+  const [pw, setPw] = useState("");
+  const [pwErr, setPwErr] = useState("");
+  const [newName, setNewName] = useState({});      // team → 입력중 이름
+  const [newTeam, setNewTeam] = useState("");
+
+  const tryAdmin = () => {
+    if (pw === ADMIN_PW) { setAdmin(true); setPwErr(""); setPw(""); }
+    else setPwErr("관리자 비밀번호가 올바르지 않습니다.");
+  };
+
+  const writeCfg = (teams, members) => {
+    try { firebase.database().ref(FB_CONFIG).set({ teams, members }).catch(()=>{}); } catch {}
+  };
+  const curTeams = () => TEAM_LIST.map(n => ({ name:n, color:(TC[n]&&TC[n].a)||C.t3 }));
+
+  const addMember = (team) => {
+    const nm = (newName[team]||"").trim(); if (!nm) return;
+    if ((TEAM_MEMBERS[team]||[]).includes(nm)) { setNewName(p=>({...p,[team]:""})); return; }
+    const members = { ...TEAM_MEMBERS, [team]: [...(TEAM_MEMBERS[team]||[]), nm] };
+    writeCfg(curTeams(), members);
+    logAction("추가", `인원 · ${team}`, null, nm);
+    setNewName(p=>({...p,[team]:""}));
+  };
+  const delMember = (team, nm) => {
+    const members = { ...TEAM_MEMBERS, [team]: (TEAM_MEMBERS[team]||[]).filter(x=>x!==nm) };
+    writeCfg(curTeams(), members);
+    logAction("삭제", `인원 · ${team}`, nm, null);
+  };
+  const addTeam = () => {
+    const nm = newTeam.trim(); if (!nm || TEAM_LIST.includes(nm)) { setNewTeam(""); return; }
+    const teams = [...curTeams(), { name:nm, color:TEAM_PALETTE[TEAM_LIST.length % TEAM_PALETTE.length] }];
+    const members = { ...TEAM_MEMBERS, [nm]: [] };
+    writeCfg(teams, members);
+    logAction("추가", "팀", null, nm);
+    setNewTeam("");
+  };
+  const delTeam = (nm) => {
+    const teams = curTeams().filter(t=>t.name!==nm);
+    const members = { ...TEAM_MEMBERS }; delete members[nm];
+    writeCfg(teams, members);
+    logAction("삭제", "팀", nm, null);
+  };
+  const setTeamColor = (nm, color) => {
+    const teams = curTeams().map(t=>t.name===nm?{...t,color}:t);
+    writeCfg(teams, { ...TEAM_MEMBERS });
+    logAction("수정", `팀 색상 · ${nm}`, null, color);
+  };
+
+  const fmtTs = (ts) => {
+    if (!ts) return "";
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2,"0");
+    return `${d.getFullYear()}.${p(d.getMonth()+1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const actColor = a => a==="추가"?C.green : a==="삭제"?C.red : C.blue;
+
+  return (
+    <div style={{ maxWidth:720,margin:"0 auto" }}>
+      <div style={{ marginBottom:20 }}>
+        <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>SETTINGS</div>
+        <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>설정</h1>
+      </div>
+
+      {/* 내 계정 */}
+      <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px",marginBottom:14,
+        display:"flex",alignItems:"center",gap:12 }}>
+        <div style={{ width:40,height:40,borderRadius:"50%",background:C.blueL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>👤</div>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:14,fontWeight:800,color:C.t1 }}>{editor || "이름 미설정"}</div>
+          <div style={{ fontSize:11,color:C.t3 }}>{authUser?.email}</div>
+        </div>
+        <button onClick={onLogout} style={{ padding:"8px 16px",borderRadius:8,border:`1.5px solid ${C.red}40`,
+          background:C.redL,color:C.red,fontSize:12,fontWeight:700,cursor:"pointer" }}>로그아웃</button>
+      </div>
+
+      {/* 관리자 모드 */}
+      {!admin ? (
+        <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"18px",marginBottom:14 }}>
+          <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:4 }}>🔒 관리자 모드</div>
+          <div style={{ fontSize:11,color:C.t3,marginBottom:12 }}>팀·인원 관리와 수정 내역 조회는 관리자 비밀번호가 필요합니다.</div>
+          <div style={{ display:"flex",gap:8 }}>
+            <input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&tryAdmin()}
+              placeholder="관리자 비밀번호" style={{ flex:1,padding:"10px 12px",background:C.surfaceL,border:BD,borderRadius:8,color:C.t1,fontSize:13,outline:"none" }}/>
+            <button onClick={tryAdmin} style={{ padding:"10px 20px",borderRadius:8,background:C.t1,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer" }}>진입</button>
+          </div>
+          {pwErr && <div style={{ fontSize:11,color:C.red,marginTop:8 }}>{pwErr}</div>}
+        </div>
+      ) : (
+        <>
+          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"10px 14px",
+            background:C.t1,borderRadius:10,color:"#fff" }}>
+            <span style={{ fontSize:14 }}>🔓</span>
+            <span style={{ fontSize:13,fontWeight:700 }}>관리자 모드</span>
+            <button onClick={()=>setAdmin(false)} style={{ marginLeft:"auto",padding:"5px 12px",borderRadius:7,
+              border:"1px solid rgba(255,255,255,.3)",background:"transparent",color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer" }}>나가기</button>
+          </div>
+
+          {/* 팀 · 인원 관리 */}
+          <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px",marginBottom:14 }}>
+            <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:12 }}>👥 팀 · 인원 관리</div>
+            {TEAM_LIST.map(team => {
+              const tc = TC[team]||{a:C.t3,b:C.surfaceL};
+              return (
+                <div key={team} style={{ marginBottom:12,padding:"12px",background:C.surfaceL,borderRadius:10,border:`1px solid ${tc.a}25`,borderLeft:`3px solid ${tc.a}` }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
+                    <div style={{ width:12,height:12,borderRadius:"50%",background:tc.a }}/>
+                    <span style={{ fontSize:13,fontWeight:800,color:tc.a }}>{team}</span>
+                    <span style={{ fontSize:10,color:C.t4 }}>{(TEAM_MEMBERS[team]||[]).length}명</span>
+                    {/* 색상 변경 */}
+                    <div style={{ display:"flex",gap:3,marginLeft:8 }}>
+                      {TEAM_PALETTE.slice(0,6).map(col=>(
+                        <button key={col} onClick={()=>setTeamColor(team,col)} title="색상 변경"
+                          style={{ width:14,height:14,borderRadius:"50%",background:col,border:tc.a===col?`2px solid ${C.t1}`:"1px solid #0001",cursor:"pointer",padding:0 }}/>
+                      ))}
+                    </div>
+                    <button onClick={()=>{ if(confirm(`'${team}' 팀을 삭제할까요?`)) delTeam(team); }}
+                      style={{ marginLeft:"auto",padding:"3px 8px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.red}30`,background:C.redL,color:C.red,cursor:"pointer" }}>팀 삭제</button>
+                  </div>
+                  <div style={{ display:"flex",flexWrap:"wrap",gap:5,marginBottom:8 }}>
+                    {(TEAM_MEMBERS[team]||[]).map(nm=>(
+                      <span key={nm} style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:700,
+                        color:tc.a,background:tc.b,padding:"5px 10px",borderRadius:20,border:`1px solid ${tc.a}30` }}>
+                        {nm}
+                        <button onClick={()=>delMember(team,nm)} style={{ width:15,height:15,borderRadius:"50%",border:"none",
+                          background:tc.a,color:"#fff",fontSize:10,fontWeight:900,cursor:"pointer",lineHeight:1,padding:0 }}>×</button>
+                      </span>
+                    ))}
+                    {(TEAM_MEMBERS[team]||[]).length===0 && <span style={{ fontSize:11,color:C.t4 }}>인원 없음</span>}
+                  </div>
+                  <div style={{ display:"flex",gap:6 }}>
+                    <input value={newName[team]||""} onChange={e=>setNewName(p=>({...p,[team]:e.target.value}))}
+                      onKeyDown={e=>e.key==="Enter"&&addMember(team)} placeholder="새 인원 이름"
+                      style={{ flex:1,padding:"7px 10px",background:C.surface,border:BD,borderRadius:7,color:C.t1,fontSize:12,outline:"none" }}/>
+                    <button onClick={()=>addMember(team)} style={{ padding:"7px 14px",borderRadius:7,background:tc.a,border:"none",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer" }}>+ 추가</button>
+                  </div>
+                </div>
+              );
+            })}
+            {/* 팀 추가 */}
+            <div style={{ display:"flex",gap:6,marginTop:8 }}>
+              <input value={newTeam} onChange={e=>setNewTeam(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTeam()}
+                placeholder="새 팀 이름 (예: 5팀)" style={{ flex:1,padding:"9px 11px",background:C.surfaceL,border:`1.5px dashed ${C.border}`,borderRadius:8,color:C.t1,fontSize:13,outline:"none" }}/>
+              <button onClick={addTeam} style={{ padding:"9px 18px",borderRadius:8,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer" }}>+ 팀 추가</button>
+            </div>
+          </div>
+
+          {/* 수정 로그 */}
+          <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px" }}>
+            <div style={{ display:"flex",alignItems:"center",marginBottom:12 }}>
+              <div style={{ fontSize:13,fontWeight:800,color:C.t1 }}>📝 최근 수정 내역</div>
+              <span style={{ marginLeft:8,fontSize:10,color:C.t4 }}>{logs.length}건</span>
+            </div>
+            {logs.length===0 && <div style={{ fontSize:12,color:C.t4,padding:"20px 0",textAlign:"center" }}>아직 기록된 수정 내역이 없습니다.</div>}
+            <div style={{ display:"flex",flexDirection:"column",gap:6,maxHeight:420,overflowY:"auto" }}>
+              {logs.map(l=>(
+                <div key={l.id} style={{ display:"flex",alignItems:"flex-start",gap:10,padding:"9px 11px",background:C.surfaceL,borderRadius:8,border:BD }}>
+                  <span style={{ fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:4,flexShrink:0,
+                    background:actColor(l.action)+"18",color:actColor(l.action),border:`1px solid ${actColor(l.action)}30` }}>{l.action}</span>
+                  <div style={{ flex:1,minWidth:0 }}>
+                    <div style={{ fontSize:12,fontWeight:700,color:C.t1 }}>{l.target}</div>
+                    {(l.before || l.after) && (
+                      <div style={{ fontSize:10,color:C.t3,marginTop:2,wordBreak:"break-all" }}>
+                        {l.before && <span style={{ color:C.t4 }}>{l.before}</span>}
+                        {l.before && l.after && <span style={{ color:C.t4 }}> → </span>}
+                        {l.after && <span style={{ color:C.t2 }}>{l.after}</span>}
+                      </div>
+                    )}
+                    <div style={{ fontSize:9,color:C.t4,marginTop:3 }}>{l.by}{l.email?` (${l.email})`:""} · {fmtTs(l.ts)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize:9,color:C.t4,marginTop:10 }}>* 로그는 표시 전용이며 일반 사용자는 수정·삭제할 수 없습니다.</div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   로그인 화면 (이메일/비밀번호)
+══════════════════════════════════════════════════════════════ */
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = () => {
+    if (!email || !pw) { setErr("이메일과 비밀번호를 입력하세요."); return; }
+    if (typeof firebase==="undefined" || !firebase.auth) { setErr("인증 모듈을 불러오지 못했습니다."); return; }
+    setBusy(true); setErr("");
+    firebase.auth().signInWithEmailAndPassword(email.trim(), pw)
+      .then(() => { /* onAuthStateChanged 가 처리 */ })
+      .catch((e) => {
+        const m = {
+          "auth/invalid-email":"이메일 형식이 올바르지 않습니다.",
+          "auth/user-not-found":"등록되지 않은 계정입니다.",
+          "auth/wrong-password":"비밀번호가 올바르지 않습니다.",
+          "auth/invalid-credential":"이메일 또는 비밀번호가 올바르지 않습니다.",
+          "auth/too-many-requests":"시도가 많아 잠시 후 다시 시도하세요.",
+          "auth/network-request-failed":"네트워크 연결을 확인하세요.",
+        }[e.code] || ("로그인 실패: " + (e.message||e.code));
+        setErr(m); setBusy(false);
+      });
+  };
+
+  return (
+    <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:F,padding:20 }}>
+      <div style={{ width:"100%",maxWidth:380,background:C.surface,borderRadius:18,border:BD,
+        boxShadow:"0 12px 40px rgba(0,0,0,.12)",overflow:"hidden" }}>
+        <div style={{ padding:"28px 28px 20px",textAlign:"center",borderBottom:BD }}>
+          <div style={{ fontSize:30,fontWeight:900,color:C.t1,letterSpacing:-.5 }}><span style={{ color:C.blue }}>◈</span> FACIL</div>
+          <div style={{ fontSize:11,color:C.t3,marginTop:4,letterSpacing:2,fontWeight:600 }}>현장 일정·관리 시스템</div>
+        </div>
+        <div style={{ padding:"24px 28px" }}>
+          <div style={{ fontSize:13,fontWeight:700,color:C.t1,marginBottom:14 }}>팀원 로그인</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+            <div>
+              <label style={{ fontSize:10,color:C.t3,fontWeight:700,display:"block",marginBottom:4 }}>이메일</label>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="name@stoneng.co.kr" autoComplete="username"
+                style={{ width:"100%",padding:"11px 12px",background:C.surfaceL,border:BD,borderRadius:9,color:C.t1,fontSize:14,outline:"none" }}/>
+            </div>
+            <div>
+              <label style={{ fontSize:10,color:C.t3,fontWeight:700,display:"block",marginBottom:4 }}>비밀번호</label>
+              <input type="password" value={pw} onChange={e=>setPw(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="••••••••" autoComplete="current-password"
+                style={{ width:"100%",padding:"11px 12px",background:C.surfaceL,border:BD,borderRadius:9,color:C.t1,fontSize:14,outline:"none" }}/>
+            </div>
+            {err && <div style={{ fontSize:11,color:C.red,background:C.redL,padding:"8px 11px",borderRadius:8,border:`1px solid ${C.red}30` }}>{err}</div>}
+            <button onClick={submit} disabled={busy} style={{ marginTop:4,padding:"12px",borderRadius:10,
+              background:busy?C.t4:C.blue,border:"none",color:"#fff",fontSize:14,fontWeight:700,cursor:busy?"default":"pointer",
+              boxShadow:`0 4px 14px ${C.blue}40` }}>{busy?"로그인 중…":"로그인"}</button>
+          </div>
+          <div style={{ fontSize:10,color:C.t4,marginTop:16,lineHeight:1.6 }}>
+            계정이 없으면 관리자에게 문의하세요. 계정은 Firebase 콘솔 → Authentication 에서 발급합니다.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    메인 앱 — 사이드바 + 라우팅
 ══════════════════════════════════════════════════════════════ */
 function App() {
   const isMobile = useIsMobile();
+  const [authUser, setAuthUser] = useState(undefined); // undefined=확인중, null=미로그인, obj=로그인
   const [db, setDb] = useState(DB);
   const [sideOpen, setSideOpen] = useState(typeof window!=="undefined" ? window.innerWidth>=820 : true);
   const [menu, setMenuRaw] = useState("schedule");
@@ -1510,88 +1829,86 @@ function App() {
   const editorRef  = useRef(editor);
   editorRef.current = editor;
   const saveTimer  = useRef(null);
+  const [cfgVer, setCfgVer] = useState(0);   // 팀/인원 설정 갱신 트리거
+  const [logs, setLogs] = useState([]);       // 수정 로그
 
-  /* 1) 초기화 + 실시간 구독 + 접속 상태 + presence */
+  /* A) Firebase 초기화 + 접속 상태 + 인증 상태 감시 */
   useEffect(() => {
-    let offData=null, offConn=null, offPres=null, offMeta=null, presNode=null, offAuth=null;
+    let offConn=null, offAuth=null;
     try {
-      if (typeof firebase === "undefined") { setFbStatus("오프라인 (SDK 없음)"); return; }
+      if (typeof firebase === "undefined") { setFbStatus("오프라인 (SDK 없음)"); setLoaded(true); setAuthUser(null); return; }
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
       const rootDb = firebase.database();
 
-      /* 접속 상태 (인증 불필요) */
       const connRef = rootDb.ref(".info/connected");
-      const onConn = (s) => {
-        const c = s.val()===true;
-        setOnline(c);
-        setFbStatus(c ? "실시간 연결됨" : "재연결 중...");
-      };
+      const onConn = (s) => { const c=s.val()===true; setOnline(c); setFbStatus(c?"실시간 연결됨":"재연결 중..."); };
       connRef.on("value", onConn);
       offConn = () => connRef.off("value", onConn);
 
-      /* 인증 완료 후 데이터/메타/presence 구독 */
-      const attach = () => {
-        const dRef = rootDb.ref(FB_DATA);
-        const mRef = rootDb.ref(FB_META);
-        dataRef.current = dRef;
-        metaRef.current = mRef;
-
-        const onData = (snap) => {
-          const val = fbToDb(snap.val());
-          if (val && Object.keys(val).length) {
-            skipWrite.current = true;
-            lastSynced.current = val;
-            setDb(val);
-          } else {
-            dRef.set(dbToFb(DB)).catch(()=>{});   // 비어있으면 시드
-            lastSynced.current = DB;
-          }
-          fbReady.current = true;
-          setLoaded(true);
-        };
-        const onErr = (err) => { console.error("[Firebase] 구독 오류:", err); setFbStatus("오프라인 (권한 확인)"); setLoaded(true); };
-        dRef.on("value", onData, onErr);
-        offData = () => dRef.off("value", onData);
-
-        const onMeta = (s) => { const m=s.val(); if(m) setMeta(m); };
-        mRef.on("value", onMeta);
-        offMeta = () => mRef.off("value", onMeta);
-
-        const presRef = rootDb.ref(FB_PRESENCE);
-        presNode = presRef.push();
-        presNode.set({ name: editorRef.current || "익명", ts: Date.now() });
-        presNode.onDisconnect().remove();
-        const onPres = (s) => setUsers(s.numChildren());
-        presRef.on("value", onPres);
-        offPres = () => presRef.off("value", onPres);
-      };
-
-      /* 익명 인증 — 앱을 거친 사용자만 DB 접근 가능 */
       if (firebase.auth) {
-        let attached = false;
         offAuth = firebase.auth().onAuthStateChanged((user) => {
-          if (user && !attached) { attached = true; attach(); }
+          if (user) {
+            CURRENT_USER = { uid:user.uid, email:user.email, name:(editorRef.current||user.email||"") };
+            setAuthUser(user);
+          } else {
+            CURRENT_USER = { uid:null, email:null, name:"" };
+            setAuthUser(null);
+          }
         });
-        firebase.auth().signInAnonymously().catch((e) => {
-          console.error("[Firebase] 익명 로그인 실패:", e);
-          // 익명 인증 미설정 시 → 인증 없이라도 구독 시도(공개 규칙 대비)
-          if (!offData) attach();
-          setFbStatus("오프라인 (인증 확인)");
-        });
-      } else {
-        attach();   // auth SDK 없으면 바로 구독 (공개 규칙)
-      }
+      } else { setAuthUser(null); setFbStatus("오프라인 (인증 SDK 없음)"); }
     } catch (e) {
       console.error("[Firebase] 초기화 실패:", e);
-      setFbStatus("오프라인 (로컬)");
-      setLoaded(true);
+      setFbStatus("오프라인 (로컬)"); setLoaded(true); setAuthUser(null);
     }
-    return () => {
-      if (offAuth) offAuth(); if (offData) offData(); if (offConn) offConn();
-      if (offPres) offPres(); if (offMeta) offMeta();
-      if (presNode) presNode.remove().catch(()=>{});
-    };
+    return () => { if (offConn) offConn(); if (offAuth) offAuth(); };
   }, []);
+
+  /* B) 로그인 후에만 데이터/메타/설정/로그/presence 구독 */
+  useEffect(() => {
+    if (!authUser || typeof firebase==="undefined" || !firebase.apps.length) return;
+    const rootDb = firebase.database();
+    const dRef = rootDb.ref(FB_DATA), mRef = rootDb.ref(FB_META);
+    const cRef = rootDb.ref(FB_CONFIG), presRef = rootDb.ref(FB_PRESENCE);
+    const lRef = rootDb.ref(FB_LOGS).limitToLast(200);
+    dataRef.current = dRef; metaRef.current = mRef;
+
+    const onData = (snap) => {
+      const val = fbToDb(snap.val());
+      if (val && Object.keys(val).length) { skipWrite.current=true; lastSynced.current=val; setDb(val); }
+      else { dRef.set(dbToFb(DB)).catch(()=>{}); lastSynced.current = DB; }
+      fbReady.current = true; setLoaded(true);
+    };
+    const onErr = (err) => { console.error("[Firebase] 구독 오류:", err); setFbStatus("오프라인 (권한 확인)"); setLoaded(true); };
+    dRef.on("value", onData, onErr);
+
+    const onMeta = (s) => { const m=s.val(); if(m) setMeta(m); };
+    mRef.on("value", onMeta);
+
+    const onCfg = (s) => {
+      const cfg = s.val();
+      if (cfg) { applyConfig(cfg); setCfgVer(v=>v+1); }
+      else { cRef.set({ teams: TEAM_LIST.map(n=>({name:n,color:(TC[n]&&TC[n].a)||C.t3})), members: TEAM_MEMBERS }).catch(()=>{}); }
+    };
+    cRef.on("value", onCfg);
+
+    const onLogs = (s) => {
+      const v = s.val()||{};
+      setLogs(Object.entries(v).map(([id,o])=>({id,...o})).sort((a,b)=>(b.ts||0)-(a.ts||0)));
+    };
+    lRef.on("value", onLogs);
+
+    const presNode = presRef.push();
+    presNode.set({ name: editorRef.current || CURRENT_USER.email || "익명", ts: Date.now() });
+    presNode.onDisconnect().remove();
+    const onPres = (s) => setUsers(s.numChildren());
+    presRef.on("value", onPres);
+
+    return () => {
+      dRef.off("value", onData); mRef.off("value", onMeta);
+      cRef.off("value", onCfg); lRef.off("value", onLogs); presRef.off("value", onPres);
+      presNode.remove().catch(()=>{});
+    };
+  }, [authUser]);
 
   /* 2) 로컬 db 변경 → 변경된 학교만 부분 저장 (디바운스 + 에코 차단) */
   useEffect(() => {
@@ -1616,14 +1933,14 @@ function App() {
     }, 300);
   }, [db]);
 
-  /* presence 이름 갱신 */
+  /* 내 이름 변경 시 로그 기록용 사용자명 갱신 */
   useEffect(() => {
-    if (!fbReady.current) return;
-    try {
-      const presRef = firebase.database().ref(FB_PRESENCE);
-      // 이름이 바뀌면 메타에만 반영 (presence 노드는 세션 단위라 생략)
-    } catch {}
+    CURRENT_USER = { ...CURRENT_USER, name: editor || CURRENT_USER.email || "" };
   }, [editor]);
+
+  const logout = () => {
+    try { firebase.auth().signOut(); } catch {}
+  };
 
   const fmtMeta = (ts) => {
     if (!ts) return "";
@@ -1676,7 +1993,21 @@ function App() {
       </div>
     ),
     export: <ExportImportPage db={db} setDb={setDb}/>,
+    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout}/>,
   };
+
+  /* 인증 게이트 */
+  if (authUser === undefined) {
+    return (
+      <div style={{ minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,fontFamily:F }}>
+        <div style={{ fontSize:26,fontWeight:900,color:C.t1 }}><span style={{ color:C.blue }}>◈</span> FACIL</div>
+        <div style={{ width:30,height:30,border:`3px solid ${C.border}`,borderTopColor:C.blue,borderRadius:"50%",animation:"spin .8s linear infinite" }}/>
+        <div style={{ fontSize:12,color:C.t3 }}>로그인 상태 확인 중…</div>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      </div>
+    );
+  }
+  if (!authUser) return <LoginScreen/>;
 
   return (
     <div style={{ fontFamily:F,background:C.bg,minHeight:"100vh",display:"flex",color:C.t1,fontSize:13 }}>
