@@ -15,24 +15,16 @@
 <style>
   html,body,#root{margin:0;padding:0;height:100%;}
   body{font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;}
-  #boot{display:flex;align-items:center;justify-content:center;height:100vh;
-    flex-direction:column;gap:14px;color:#8A94A6;background:#F0F2F5;}
+  #boot{display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:14px;color:#8A94A6;background:#F0F2F5;}
   #boot .logo{font-size:28px;font-weight:900;color:#1A2332;letter-spacing:-0.5px;}
   #boot .logo span{color:#1D6FF2;}
   #boot .bar{width:120px;height:4px;border-radius:4px;background:#E2E6ED;overflow:hidden;}
-  #boot .bar i{display:block;height:100%;width:40%;background:#1D6FF2;border-radius:4px;
-    animation:slide 1s ease-in-out infinite;}
+  #boot .bar i{display:block;height:100%;width:40%;background:#1D6FF2;border-radius:4px;animation:slide 1s ease-in-out infinite;}
   @keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
 </style>
 </head>
 <body>
-<div id="root">
-  <div id="boot">
-    <div class="logo">◈ FACIL</div>
-    <div style="font-size:13px;">현장 일정·관리 시스템 불러오는 중...</div>
-    <div class="bar"><i></i></div>
-  </div>
-</div>
+<div id="root"><div id="boot"><div class="logo">◈ FACIL</div><div style="font-size:13px;">현장 일정·관리 시스템 불러오는 중...</div><div class="bar"><i></i></div></div></div>
 <script type="text/babel" data-presets="react">
 const { useState, useMemo, useCallback, useRef, useEffect } = React;
 
@@ -343,10 +335,13 @@ function buildSheet(schools) {
 ══════════════════════════════════════════════════════════════ */
 function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile }) {
   const [pickerId, setPickerId] = useState(null);
+  const [editId, setEditId] = useState(null);
 
   const fieldSchools = allSchools.filter(s => s.field===dateStr && (teamF==="전체"||s.team===teamF));
+  const startSchools = allSchools.filter(s => s.start===dateStr && (teamF==="전체"||s.team===teamF));
   const endSchools   = allSchools.filter(s => s.end===dateStr   && (teamF==="전체"||s.team===teamF));
-  const total = fieldSchools.length + endSchools.length;
+  const total = fieldSchools.length + startSchools.length + endSchools.length;
+  const editSc = editId ? allSchools.find(s=>s.id===editId) : null;
 
   const toggleAssignee = (sid, name) => {
     if (!setDb) return;
@@ -377,6 +372,8 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
           <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
           <span style={{ fontSize:11,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
           <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
+          <button onClick={()=>setEditId(s.id)} style={{ padding:"2px 8px",borderRadius:5,fontSize:9,fontWeight:700,
+            border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
         </div>
 
         {/* 팀(이름) 배정 */}
@@ -429,6 +426,25 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
     );
   };
 
+  const StartCard = ({ s }) => {
+    const tc = TC[s.team]||{a:C.t3,b:C.surfaceL};
+    return (
+      <div style={{ padding:"10px 11px",background:C.surface,borderRadius:9,
+        border:`1px solid ${C.green}40`,borderLeft:`3px solid ${C.green}`,marginBottom:6 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:5 }}>
+          <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
+          <span style={{ fontSize:11,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
+          <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
+          <button onClick={()=>setEditId(s.id)} style={{ padding:"2px 8px",borderRadius:5,fontSize:9,fontWeight:700,
+            border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
+        </div>
+        <div style={{ fontSize:10,color:C.t2 }}>
+          ▶ 용역 착수 · {s.buildings.length}동 · 완수 {fd(s.end)} ({ddL(calcDday(s.end))})
+        </div>
+      </div>
+    );
+  };
+
   const EndCard = ({ s }) => {
     const tc = TC[s.team]||{a:C.t3,b:C.surfaceL};
     const repAll = s.buildings.every(b=>b.rep);
@@ -442,6 +458,8 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
           <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
           <span style={{ fontSize:11,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
           <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
+          <button onClick={()=>setEditId(s.id)} style={{ padding:"2px 8px",borderRadius:5,fontSize:9,fontWeight:700,
+            border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
         </div>
         <div style={{ display:"flex",gap:4 }}>
           {[{k:"보고서",v:repAll,ac:C.purple},{k:"FMS",v:fmsAll,ac:C.blue},
@@ -464,7 +482,7 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
         <div style={{ padding:"13px 15px",borderBottom:BD,background:C.blueL,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
           <div>
             <div style={{ fontSize:18,fontWeight:900,color:C.blue,lineHeight:1 }}>{label}</div>
-            <div style={{ fontSize:10,color:C.blue+"bb",marginTop:3 }}>현장 {fieldSchools.length} · 완수 {endSchools.length} · 총 {total}건</div>
+            <div style={{ fontSize:10,color:C.blue+"bb",marginTop:3 }}>현장 {fieldSchools.length} · 착수 {startSchools.length} · 완수 {endSchools.length} · 총 {total}건</div>
           </div>
           <button onClick={onClose} style={{ width:22,height:22,borderRadius:"50%",background:`${C.blue}20`,
             border:`1px solid ${C.blue}40`,color:C.blue,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>×</button>
@@ -480,6 +498,15 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
               {fieldSchools.map(s=><FieldCard key={s.id} s={s}/>)}
             </div>
           )}
+          {startSchools.length>0 && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:5,marginBottom:8,padding:"5px 8px",background:C.greenL,borderRadius:6 }}>
+                <span style={{ fontSize:13 }}>▶</span><span style={{ fontSize:11,fontWeight:700,color:C.green }}>착수일</span>
+                <span style={{ marginLeft:"auto",background:C.green,color:"#fff",padding:"1px 7px",borderRadius:10,fontSize:10,fontWeight:700 }}>{startSchools.length}</span>
+              </div>
+              {startSchools.map(s=><StartCard key={s.id} s={s}/>)}
+            </div>
+          )}
           {endSchools.length>0 && (
             <div>
               <div style={{ display:"flex",alignItems:"center",gap:5,marginBottom:8,padding:"5px 8px",background:C.orangeL,borderRadius:6 }}>
@@ -491,6 +518,7 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
           )}
         </div>
       </div>
+      {editSc && <EditPanel sc={editSc} yr={editSc._year} half={editSc._half} setDb={setDb} onClose={()=>setEditId(null)}/>}
     </div>
   );
 }
@@ -529,7 +557,7 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
   const eventsByDay = useMemo(() => {
     const map = {};
     allSchools.forEach(s => {
-      [["field","현장"],["end","완수"]].forEach(([f,lbl]) => {
+      [["field","현장"],["start","착수"],["end","완수"]].forEach(([f,lbl]) => {
         const ds = s[f]; if (!ds) return;
         const [y,m,d] = ds.split("-").map(Number);
         if (y!==yr || m!==mo) return;
@@ -537,6 +565,9 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
           team:s.team, headcount:s.headcount||2, assignees:s.assignees||[] });
       });
     });
+    // 같은 날 정렬: 현장 → 착수 → 완수
+    const ord = { field:0, start:1, end:2 };
+    Object.values(map).forEach(arr => arr.sort((a,b)=>ord[a.field]-ord[b.field]));
     return map;
   }, [allSchools, yr, mo]);
 
@@ -554,11 +585,14 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
         return next;
       });
     }
-    showToast(`${sc?.school} ${field==="field"?"현장조사일":"완수일"} → ${mo}/${targetDay} · 현장관리 반영`);
+    const lbl = field==="field"?"현장조사일":field==="start"?"착수일":"완수일";
+    showToast(`${sc?.school} ${lbl} → ${mo}/${targetDay} · 현장관리 반영`);
     setDragging(null); setOverDay(null);
   }, [dragging, allSchools, yr, mo, setDb]);
 
-  const evColor = (f,team) => f==="field" ? (TC[team]?.a||C.blue) : C.yellow;
+  /* 현장=팀색, 착수=초록, 완수=노랑 */
+  const evColor = (f,team) => f==="field" ? (TC[team]?.a||C.blue) : f==="start" ? C.green : C.yellow;
+  const evMark  = f => f==="start" ? " ▶" : f==="end" ? " 📦" : "";
   const DOW = ["일","월","화","수","목","금","토"];
   const selLabel = selDay ? `${mo}월 ${selDay}일 (${DOW[new Date(yr,mo-1,selDay).getDay()]})` : "";
 
@@ -650,8 +684,9 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
                                     boxShadow:"0 1px 3px rgba(0,0,0,.07)",
                                     opacity:dragging?.schoolId===e.schoolId&&dragging?.field===e.field?0.4:1 }}>
                                   <span>{e.school.length>4?e.school.slice(0,4)+"…":e.school}</span>
-                                  {e.label==="완수" && <span> 📦</span>}
-                                  {e.label==="현장" && <span style={{opacity:.85,fontSize:8}}>{e.assignees.length>0?` (${e.assignees.map(n=>n[0]).join("·")})`:` ${e.headcount}명`}</span>}
+                                  {e.field==="end" && <span> 📦</span>}
+                                  {e.field==="start" && <span> ▶</span>}
+                                  {e.field==="field" && <span style={{opacity:.85,fontSize:8}}>{e.assignees.length>0?` (${e.assignees.map(n=>n[0]).join("·")})`:` ${e.headcount}명`}</span>}
                                 </div>
                               ))}
                               {evs.length>2 && <div style={{ fontSize:9,color:C.t4,paddingLeft:4 }}>+{evs.length-2}건</div>}
@@ -667,7 +702,7 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
           </div>
 
           <div style={{ display:"flex",gap:14,marginTop:10,padding:"9px 14px",background:C.surface,border:BD,borderRadius:8,alignItems:"center",flexWrap:"wrap" }}>
-            {[["팀색 = 현장조사일",C.blue],["노랑 = 완수일",C.yellow]].map(([k,v])=>(
+            {[["팀색 = 현장조사",C.blue],["초록 ▶ 착수일",C.green],["노랑 📦 완수일",C.yellow]].map(([k,v])=>(
               <div key={k} style={{ display:"flex",alignItems:"center",gap:5 }}>
                 <div style={{ width:10,height:10,borderRadius:2,background:v }}/><span style={{ fontSize:10,color:C.t3 }}>{k}</span>
               </div>
