@@ -1,0 +1,15 @@
+{
+  "name": "FACIL — 현장 일정·관리",
+  "short_name": "FACIL",
+  "description": "시설물 정밀안전점검 현장 일정·관리 대시보드",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F0F2F5",
+  "theme_color": "#1D6FF2",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
