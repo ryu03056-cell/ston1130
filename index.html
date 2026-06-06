@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<title>FACIL — 현장 일정·관리</title>
+<title>STON — 현장 일정·관리</title>
 <link rel="manifest" href="manifest.json"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
-<meta name="apple-mobile-web-app-title" content="FACIL"/>
+<meta name="apple-mobile-web-app-title" content="STON"/>
 <meta name="theme-color" content="#1D6FF2"/>
 <link rel="apple-touch-icon" href="icon-192.png"/>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" rel="stylesheet"/>
@@ -38,12 +38,12 @@
 </style>
 </head>
 <body>
-<div id="root"><div id="boot"><div class="logo">◈ FACIL</div><div style="font-size:13px;">현장 일정·관리 시스템 불러오는 중...</div><div class="bar"><i></i></div></div></div>
+<div id="root"><div id="boot"><div class="logo">◈ STON</div><div style="font-size:13px;">현장 일정·관리 시스템 불러오는 중...</div><div class="bar"><i></i></div></div></div>
 <script type="text/babel" data-presets="react">
 const { useState, useMemo, useCallback, useRef, useEffect } = React;
 
 /* ══════════════════════════════════════════════════════════════
-   FACIL — 시설물 정밀안전점검 현장 일정·관리 대시보드
+   STON — 시설물 정밀안전점검 현장 일정·관리 대시보드
    · 연도/반기별 현장 분리
    · 영구 캘린더 (드래그로 일정 변경 → 현장관리 자동 반영)
    · 팀(4팀) 색상 구분 + 팀원 배정
@@ -73,8 +73,9 @@ const TC = {
   "2팀":{a:C.team2,b:C.team2b,c:C.team2c},
   "3팀":{a:C.team3,b:C.team3b,c:C.team3c},
   "4팀":{a:C.team4,b:C.team4b,c:C.team4c},
+  "관리팀":{a:"#475569",b:"#4755691f",c:"#334155"},
 };
-const TEAM_LIST = ["1팀","2팀","3팀","4팀"];
+const TEAM_LIST = ["1팀","2팀","3팀","4팀","관리팀"];
 
 /* ── 팀원 명단 (실제 명단으로 교체 가능) ── */
 const TEAM_MEMBERS = {
@@ -82,6 +83,7 @@ const TEAM_MEMBERS = {
   "2팀": ["정도혁","윤종현","이동현","관우남"],
   "3팀": ["한상오","장민태","채승준","함예린"],
   "4팀": ["이준혁","박서연","최민준","윤지현"],
+  "관리팀": [],
 };
 
 /* ── 업무 진행 8단계 (순서 고정) ── */
@@ -1476,12 +1478,12 @@ const FIREBASE_CONFIG = {
 };
 /* OneSignal 푸시 전송용 Cloudflare Worker (자매 앱과 동일) */
 const PUSH_ENDPOINT = "https://ston03.ryu03056.workers.dev";
-const FB_DATA     = "facil/data";      // 학교 데이터 (ID로 키잉 → 부분 저장)
-const FB_META     = "facil/meta";      // 마지막 수정자/시각
-const FB_PRESENCE = "facil/presence";  // 동시 접속자
-const FB_LOGS     = "facil/logs";      // 수정 로그
-const FB_CONFIG   = "facil/config";    // 팀/인원 설정 (관리자 편집)
-const FB_CHAT     = "facil/chat";      // 팀 채팅
+const FB_DATA     = "ston/data";      // 학교 데이터 (ID로 키잉 → 부분 저장)
+const FB_META     = "ston/meta";      // 마지막 수정자/시각
+const FB_PRESENCE = "ston/presence";  // 동시 접속자
+const FB_LOGS     = "ston/logs";      // 수정 로그
+const FB_CONFIG   = "ston/config";    // 팀/인원 설정 (관리자 편집)
+const FB_CHAT     = "ston/chat";      // 팀 채팅
 
 /* 푸시 알림 — OneSignal (Cloudflare Worker 경유, 본인 제외 전송) */
 function registerOneSignal(userName) {
@@ -1504,7 +1506,7 @@ function sendPush(title, body) {
 }
 
 /* 관리자 비밀번호 (클라이언트 확인) — 운영 시 변경하세요 */
-const ADMIN_PW = "ston3team!";
+const ADMIN_PW = "961211";
 
 /* 현재 로그인 사용자 (로그 기록용) */
 let CURRENT_USER = { uid:null, email:null, name:"" };
@@ -1529,10 +1531,12 @@ function logAction(action, target, before, after) {
 /* 새 팀 색상 팔레트 */
 const TEAM_PALETTE = ["#1D6FF2","#0A9260","#D93B2B","#7C3AED","#E07A20","#0E7490","#BE185D","#4338CA"];
 
+/* 항상 존재해야 하는 기본 5개 팀 */
+const BASE_TEAMS = [["1팀","#1D6FF2"],["2팀","#0A9260"],["3팀","#D93B2B"],["4팀","#7C3AED"],["관리팀","#475569"]];
+
 /* Firebase config → 모듈 객체(TC/TEAM_LIST/TEAM_MEMBERS) 갱신 */
 function applyConfig(cfg) {
-  if (!cfg) return;
-  if (Array.isArray(cfg.teams) && cfg.teams.length) {
+  if (cfg && Array.isArray(cfg.teams) && cfg.teams.length) {
     TEAM_LIST.length = 0;
     cfg.teams.forEach((t, i) => {
       const name = typeof t === "string" ? t : t.name;
@@ -1542,10 +1546,16 @@ function applyConfig(cfg) {
       TC[name] = { a: color, b: color + "1f", c: color };
     });
   }
-  if (cfg.members && typeof cfg.members === "object") {
+  if (cfg && cfg.members && typeof cfg.members === "object") {
     Object.keys(TEAM_MEMBERS).forEach(k => { delete TEAM_MEMBERS[k]; });
     Object.entries(cfg.members).forEach(([k, v]) => { TEAM_MEMBERS[k] = toArr(v).filter(Boolean); });
   }
+  /* 기본 5개 팀 보장 — 저장된 설정에 없어도 항상 표시 */
+  BASE_TEAMS.forEach(([name, col]) => {
+    if (!TEAM_LIST.includes(name)) TEAM_LIST.push(name);
+    if (!TC[name]) TC[name] = { a: col, b: col + "1f", c: col };
+    if (!TEAM_MEMBERS[name]) TEAM_MEMBERS[name] = [];
+  });
 }
 
 /* 객체-키 ↔ 배열 변환 */
@@ -1949,7 +1959,9 @@ const chatRoomIcon  = (r) => r==="전체" ? "💬 " : r==="공지사항" ? "📢
 function ChatPage({ editor, isMobile }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
-  const [room, setRoom] = useState(() => TEAM_LIST.find(t => (TEAM_MEMBERS[t]||[]).includes(editor)) || "전체");
+  const myTeam = TEAM_LIST.find(t => (TEAM_MEMBERS[t]||[]).includes(editor));
+  const rooms = myTeam ? ["전체", myTeam] : ["전체"];   // 전체 + 본인 팀만
+  const [room, setRoom] = useState(myTeam || "전체");
   const [uploading, setUploading] = useState(false);
   const imgRef = useRef();
   const bottomRef = useRef();
@@ -1996,18 +2008,23 @@ function ChatPage({ editor, isMobile }) {
         <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>TEAM CHAT</div>
         <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>팀 채팅</h1>
       </div>
-      {/* 방 선택 — 전체 · 공지 + 팀별 */}
-      <div style={{ display:"flex",gap:6,marginBottom:10,flexWrap:"wrap" }}>
-        {["전체", ...TEAM_LIST, "공지사항"].map(r=>{
+      {/* 방 선택 — 전체 + 본인 팀만 */}
+      <div style={{ display:"flex",gap:6,marginBottom:6,flexWrap:"wrap" }}>
+        {rooms.map(r=>{
           const rc = chatRoomColor(r);
           return (
-            <button key={r} onClick={()=>setRoom(r)} style={{ padding:"6px 13px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",
+            <button key={r} onClick={()=>setRoom(r)} style={{ padding:"7px 15px",borderRadius:20,fontSize:13,fontWeight:700,cursor:"pointer",
               border:`1.5px solid ${room===r?rc:C.border}`, background:room===r?rc+"15":"transparent", color:room===r?rc:C.t3,whiteSpace:"nowrap" }}>
-              {chatRoomIcon(r)}{r}
+              {chatRoomIcon(r)}{r==="전체"?"전체 채팅":r}
             </button>
           );
         })}
       </div>
+      {!myTeam && (
+        <div style={{ fontSize:11,color:C.orange,background:C.orangeL,padding:"8px 11px",borderRadius:8,marginBottom:10,border:`1px solid ${C.orange}30` }}>
+          사이드바에서 <b>내 이름</b>을 선택하면 우리 팀 채팅방이 나타나요.
+        </div>
+      )}
       {/* 메시지 영역 */}
       <div style={{ flex:1,overflowY:"auto",background:C.surface,border:BD,borderRadius:12,padding:"14px",display:"flex",flexDirection:"column",gap:8 }}>
         {msgs.length===0 && <div style={{ textAlign:"center",color:C.t4,fontSize:12,margin:"auto" }}>아직 메시지가 없어요. 첫 메시지를 보내보세요!</div>}
@@ -2015,7 +2032,9 @@ function ChatPage({ editor, isMobile }) {
           const mine = m.name===me;
           return (
             <div key={m.id} style={{ display:"flex",flexDirection:"column",alignItems:mine?"flex-end":"flex-start" }}>
-              {!mine && <span style={{ fontSize:10,color:C.t3,marginBottom:2,marginLeft:4 }}>{m.name}</span>}
+              <span style={{ fontSize:10,color:mine?C.blue:C.t2,fontWeight:700,marginBottom:2,marginLeft:mine?0:4,marginRight:mine?4:0 }}>
+                {m.name||"익명"}{mine?" (나)":""}
+              </span>
               <div style={{ display:"flex",alignItems:"flex-end",gap:5,flexDirection:mine?"row-reverse":"row" }}>
                 <div style={{ maxWidth:"72%",padding:m.img?"4px":"8px 12px",borderRadius:14,
                   background:mine?C.blue:C.surfaceD, color:mine?"#fff":C.t1,fontSize:13,lineHeight:1.5,wordBreak:"break-word" }}>
@@ -2074,7 +2093,7 @@ function LoginScreen({ onLogin }) {
       <div style={{ width:"100%",maxWidth:380,background:C.surface,borderRadius:18,border:BD,
         boxShadow:"0 12px 40px rgba(0,0,0,.12)",overflow:"hidden" }}>
         <div style={{ padding:"28px 28px 20px",textAlign:"center",borderBottom:BD }}>
-          <div style={{ fontSize:30,fontWeight:900,color:C.t1,letterSpacing:-.5 }}><span style={{ color:C.blue }}>◈</span> FACIL</div>
+          <div style={{ fontSize:30,fontWeight:900,color:C.t1,letterSpacing:-.5 }}><span style={{ color:C.blue }}>◈</span> STON</div>
           <div style={{ fontSize:11,color:C.t3,marginTop:4,letterSpacing:2,fontWeight:600 }}>현장 일정·관리 시스템</div>
         </div>
         <div style={{ padding:"24px 28px" }}>
@@ -2127,9 +2146,9 @@ function App() {
   const [users,    setUsers]    = useState(0);        // 동시 접속자
   const [meta,     setMeta]     = useState(null);     // { at, by }
   const [editor,   setEditor]   = useState(() => {
-    try { return localStorage.getItem("facil_editor") || ""; } catch { return ""; }
+    try { return localStorage.getItem("ston_editor") || ""; } catch { return ""; }
   });
-  const saveName = n => { setEditor(n); try { localStorage.setItem("facil_editor", n); } catch {} };
+  const saveName = n => { setEditor(n); try { localStorage.setItem("ston_editor", n); } catch {} };
 
   const dataRef    = useRef(null);
   const metaRef    = useRef(null);
@@ -2318,7 +2337,7 @@ function App() {
   if (authUser === undefined) {
     return (
       <div style={{ minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,fontFamily:F }}>
-        <div style={{ fontSize:26,fontWeight:900,color:C.t1 }}><span style={{ color:C.blue }}>◈</span> FACIL</div>
+        <div style={{ fontSize:26,fontWeight:900,color:C.t1 }}><span style={{ color:C.blue }}>◈</span> STON</div>
         <div style={{ width:30,height:30,border:`3px solid ${C.border}`,borderTopColor:C.blue,borderRadius:"50%",animation:"spin .8s linear infinite" }}/>
         <div style={{ fontSize:12,color:C.t3 }}>로그인 상태 확인 중…</div>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -2333,7 +2352,7 @@ function App() {
 
       {!loaded && (
         <div style={{ position:"fixed",inset:0,background:C.bg,zIndex:9999,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16 }}>
-          <div style={{ fontSize:26,fontWeight:900,color:C.t1 }}><span style={{ color:C.blue }}>◈</span> FACIL</div>
+          <div style={{ fontSize:26,fontWeight:900,color:C.t1 }}><span style={{ color:C.blue }}>◈</span> STON</div>
           <div style={{ width:30,height:30,border:`3px solid ${C.border}`,borderTopColor:C.blue,borderRadius:"50%",animation:"spin .8s linear infinite" }}/>
           <div style={{ fontSize:12,color:C.t3 }}>Firebase 실시간 데이터 불러오는 중…</div>
         </div>
@@ -2351,7 +2370,7 @@ function App() {
       <div style={{ width:isMobile?280:214,maxWidth:"85vw",height:"100%",display:"flex",flexDirection:"column",overflowY:"auto" }}>
         <div style={{ padding:"20px 18px 14px",borderBottom:BD,whiteSpace:"nowrap" }}>
           <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-            <div><div style={{ fontSize:18,fontWeight:900,color:C.t1,letterSpacing:-.5 }}><span style={{ color:C.blue }}>◈</span> FACIL</div>
+            <div><div style={{ fontSize:18,fontWeight:900,color:C.t1,letterSpacing:-.5 }}><span style={{ color:C.blue }}>◈</span> STON</div>
               <div style={{ fontSize:9,color:C.t4,marginTop:2,letterSpacing:2,fontWeight:600 }}>현장조사팀</div></div>
             <button onClick={()=>setSideOpen(false)} style={{ background:"transparent",border:"none",color:C.t4,fontSize:18,padding:"2px 4px" }}>☰</button>
           </div>
