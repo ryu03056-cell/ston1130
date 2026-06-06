@@ -321,7 +321,8 @@ function useIsMobile(bp = 820) {
             18특기 19보고서완료(◎) 20납품 21FMS등록(◎)
 ══════════════════════════════════════════════════════════════ */
 function parseSheetName(name) {
-  const m = name.match(/(\d{2})년\s*\(\s*([상하])\s*\)/);
+  /* 정확히 "26년(상)" 형식만 인식 — "26년(상) 특이사항" 같은 변형 시트는 제외 */
+  const m = String(name).match(/^\s*(\d{2})년\s*\(\s*([상하])\s*\)\s*$/);
   if (!m) return null;
   return { year:`20${m[1]}`, half:m[2]==="상"?"상반기":"하반기" };
 }
@@ -512,6 +513,55 @@ function parseBudget(ws) {
     if (amt>0) out[sch]=(out[sch]||0)+amt*1000;   // 천원 → 원
   }
   return out;
+}
+
+/* 특이사항 시트 → [{school, building, note}]  (특기 헤더가 비어있어도 보고서완료 열 앞 칸으로 추정) */
+function parseNotes(ws) {
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+  const clean = v => v==null ? "" : String(v).replace(/\u00a0/g," ").trim();
+  const norm  = v => clean(v).toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
+  let hIdx = -1;
+  for (let i=0; i<Math.min(rows.length,8); i++) {
+    if ((rows[i]||[]).some(v => { const n=norm(v); return n.includes("학교명")||n.includes("시설물명"); })) { hIdx=i; break; }
+  }
+  if (hIdx<0) return [];
+  const H = (rows[hIdx]||[]).map(norm);
+  const schoolCol   = H.findIndex(h => h.includes("학교명")||h.includes("시설물명"));
+  const buildingCol = H.findIndex(h => h==="시설명"||h==="동명");
+  let noteCol = H.findIndex(h => h.includes("특기"));
+  if (noteCol<0) { const repCol = H.findIndex(h => h.includes("보고서")&&h.includes("완료")); if (repCol>0) noteCol = repCol-1; }
+  if (schoolCol<0 || noteCol<0) return [];
+  const out = []; let curSchool = "";
+  for (let i=hIdx+1; i<rows.length; i++) {
+    const r=rows[i]; if(!r) continue;
+    const sch=clean(r[schoolCol]); if(sch) curSchool=sch;
+    const note=clean(r[noteCol]);
+    if (note && curSchool) out.push({ school:curSchool, building: buildingCol>=0?clean(r[buildingCol]):"", note });
+  }
+  return out;
+}
+
+/* 특이사항 노트를 학교의 해당 시설(동) 특기사항에 추가 병합 (중복 방지) */
+function applyNotes(schools, notes) {
+  if (!notes || !notes.length) return 0;
+  const byName = {}; schools.forEach(s => { (byName[s.school] = byName[s.school]||[]).push(s); });
+  let applied = 0;
+  notes.forEach(({school, building, note}) => {
+    const list = byName[school]; if (!list || !list.length) return;
+    const s = list[0];
+    let b = null;
+    if (building) b = s.buildings.find(x=>x.b===building) || s.buildings.find(x=>x.b && (x.b.includes(building)||building.includes(x.b)));
+    if (!b) b = s.buildings[0];
+    if (!b) return;
+    const add = (building && b.b!==building) ? `[${building}] ${note}` : note;
+    const sig = note.replace(/\s/g,"").slice(0,20);                 // 노트 앞부분 지문(공백 제거 20자)
+    const existSig = (b.note||"").replace(/\s/g,"");
+    if (!b.note) b.note = add;
+    else if (existSig.includes(sig)) { /* 사실상 같은 노트 → 건너뜀(중복 방지) */ }
+    else b.note = b.note + " / " + add;
+    applied++;
+  });
+  return applied;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1427,7 +1477,16 @@ function ExportImportPage({ db, setDb }) {
           const bud = parseBudget(wb.Sheets[name]);
           if (Object.keys(bud).length) budgetByYear[yr] = { ...(budgetByYear[yr]||{}), ...bud };
         });
-        /* 2) 반기 시트 → 학교 목록 (+ 예산 금액 매칭) */
+        /* 2) 특이사항 시트 → 연도/반기별 노트 목록 */
+        const notesByHalf = {};
+        wb.SheetNames.forEach(name => {
+          const m = name.match(/(\d{2})년\s*\(\s*([상하])\s*\)\s*특이사항/);
+          if (!m) return;
+          const yr=`20${m[1]}`, hf=m[2]==="상"?"상반기":"하반기";
+          const ns = parseNotes(wb.Sheets[name]);
+          if (ns.length) { (notesByHalf[yr] = notesByHalf[yr]||{})[hf] = ns; }
+        });
+        /* 3) 반기 시트 → 학교 목록 (+ 예산 매칭 + 특이사항 병합) */
         const sheets = [];
         wb.SheetNames.forEach(name => {
           const info = parseSheetName(name); if (!info) return;
@@ -1435,8 +1494,9 @@ function ExportImportPage({ db, setDb }) {
           const bud = budgetByYear[info.year] || {};
           let budHit = 0;
           schools.forEach(s => { if (bud[s.school]!=null) { s.contract = bud[s.school]; budHit++; } });
+          const noteHit = applyNotes(schools, notesByHalf[info.year] && notesByHalf[info.year][info.half]);
           sheets.push({ name, year:info.year, half:info.half, schools, count:schools.length,
-            bCount:schools.reduce((a,s)=>a+s.buildings.length,0), budHit });
+            bCount:schools.reduce((a,s)=>a+s.buildings.length,0), budHit, noteHit });
         });
         if (!sheets.length) { setErr('인식된 시트가 없어요. 시트 이름이 "26년(상)" 형식인지 확인해주세요.'); return; }
         setParsed({ sheets, fileName:file.name, budYears:Object.keys(budgetByYear) });
@@ -1485,7 +1545,7 @@ function ExportImportPage({ db, setDb }) {
         });
         return next;
       });
-      parsed.sheets.forEach(sh => logAction("수정", `엑셀 병합 · ${sh.year} ${sh.half}`, null, `${sh.count}개 학교 / ${sh.bCount}개 동${sh.budHit?` / 예산 ${sh.budHit}건`:""}`));
+      parsed.sheets.forEach(sh => logAction("수정", `엑셀 병합 · ${sh.year} ${sh.half}`, null, `${sh.count}개 학교 / ${sh.bCount}개 동${sh.budHit?` / 예산 ${sh.budHit}건`:""}${sh.noteHit?` / 특이사항 ${sh.noteHit}건`:""}`));
       setImporting(false); setDone(true); setParsed(null);
     }, 400);
   };
@@ -1567,6 +1627,7 @@ function ExportImportPage({ db, setDb }) {
                       <span style={{ fontSize:14,fontWeight:800,color:C.t1 }}>{sh.year}년 {sh.half}</span>
                       <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:hc+"18",color:hc,fontWeight:700 }}>{sh.count}개 학교 · {sh.bCount}개 동</span>
                       {sh.budHit>0 && <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:C.green+"18",color:C.green,fontWeight:700 }}>💰 예산 {sh.budHit}건</span>}
+                      {sh.noteHit>0 && <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:C.yellow+"22",color:"#9A7B0A",fontWeight:700 }}>📝 특이사항 {sh.noteHit}건</span>}
                     </div>
                     <div style={{ display:"flex",gap:5,flexWrap:"wrap",marginBottom:6 }}>
                       {Object.entries(teams).map(([t,n])=>(
@@ -2679,9 +2740,7 @@ function App() {
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 <script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
-  }
+  if ('serviceWorker' in navigator) { window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); }); }
 </script>
 </body>
 </html>
