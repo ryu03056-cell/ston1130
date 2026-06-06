@@ -4,15 +4,36 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>FACIL — 현장 일정·관리</title>
+
+<!-- PWA (홈 화면 앱) -->
+<link rel="manifest" href="manifest.json"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="FACIL"/>
+<meta name="theme-color" content="#1D6FF2"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
+
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" rel="stylesheet"/>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<!-- Firebase 8.10.1 (namespaced API) -->
+
+<!-- Firebase 8.10.1 -->
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
+
+<!-- 푸시 알림 (OneSignal) -->
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script>
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
+    try { await OneSignal.init({ appId: "26e9e8f3-42a8-4553-b8ef-0a84714db091", allowLocalhostAsSecureOrigin: true }); } catch(e){}
+  });
+</script>
+
 <style>
   html,body,#root{margin:0;padding:0;height:100%;}
   body{font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;}
@@ -100,8 +121,10 @@ const BD = `1px solid ${C.border}`;
 const F  = `'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif`;
 
 const MENUS = [
+  { id:"overview", icon:"📊", label:"전체 현황" },
   { id:"schedule", icon:"📅", label:"현장 일정" },
   { id:"sites",    icon:"🏫", label:"현장 관리" },
+  { id:"chat",     icon:"💬", label:"팀 채팅" },
   { id:"urgent",   icon:"🚨", label:"긴급 보고서" },
   { id:"done",     icon:"✅", label:"완료 보고서" },
   { id:"export",   icon:"📤", label:"엑셀 관리" },
@@ -316,34 +339,57 @@ function parseExcelDate(v) {
 }
 function parseSheet(ws) {
   const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
-  const teamMap = {}, schoolMap = {};
+  const order = [];           // 학교 등장 순서 보존
+  const schoolMap = {};
+  let curKey = null;
+  const clean = v => v==null ? "" : String(v).trim();
+  const isMark = v => v==="◎"||v==="○"||v==="O"||v==="o"||v==="Y"||v==="y"||v==="V"||v==="v"||v==="✓"||v===true;
+
   for (let i=2; i<rows.length; i++) {
     const r = rows[i]; if (!r) continue;
-    const no = r[1]; if (no==null) continue;
-    const noStr = String(no).trim();
-    const team  = r[0] ? String(r[0]).trim() : null;
-    if (team) teamMap[noStr] = team;
-    if (!schoolMap[noStr]) {
-      schoolMap[noStr] = {
-        id:`imp-${noStr}-${Math.random().toString(36).slice(2,8)}`,
-        no:noStr, school:r[4]?String(r[4]).trim():"", region:r[3]?String(r[3]).trim():"",
-        kind:r[2]?String(r[2]).trim():"정기점검", team:null,
-        field:parseExcelDate(r[11]), start:parseExcelDate(r[12]), end:parseExcelDate(r[13]),
+    const no = clean(r[1]), school = clean(r[4]), building = clean(r[5]);
+    if (!no && !school && !building) continue;          // 빈 줄 스킵
+
+    /* 새 학교 시작 판단: No가 있으면 새 키, 없으면 학교명이 바뀔 때만 새 키 */
+    if (no) curKey = "no:"+no;
+    else if (school && (!curKey || (schoolMap[curKey] && schoolMap[curKey].school !== school))) curKey = "nm:"+school;
+    if (!curKey) continue;                               // 아직 학교 식별 전이면 스킵
+
+    if (!schoolMap[curKey]) {
+      schoolMap[curKey] = {
+        id:`imp-${Date.now().toString(36)}-${order.length}-${Math.random().toString(36).slice(2,6)}`,
+        no: no || String(order.length+1),
+        school, region: clean(r[3]), kind: clean(r[2]) || "정기점검",
+        team: clean(r[0]) || "미지정",
+        field: parseExcelDate(r[11]), start: parseExcelDate(r[12]), end: parseExcelDate(r[13]),
         headcount:2, assignees:[], buildings:[],
       };
+      order.push(curKey);
+    } else {
+      /* 이어지는 줄에 학교 정보가 더 있으면 보강 */
+      const s = schoolMap[curKey];
+      if ((!s.team || s.team==="미지정")) { const t=clean(r[0]); if(t) s.team=t; }
+      if (!s.school && school) s.school = school;
+      if (!s.region) s.region = clean(r[3]);
+      if (!s.field) s.field = parseExcelDate(r[11]);
+      if (!s.start) s.start = parseExcelDate(r[12]);
+      if (!s.end)   s.end   = parseExcelDate(r[13]);
     }
-    schoolMap[noStr].buildings.push({
-      b:r[5]?String(r[5]).trim():"", floor:r[6]?String(r[6]).trim():null,
-      area:typeof r[7]==="number"?r[7]:(r[7]?parseFloat(String(r[7]).replace(/,/g,""))||null:null),
-      fms:r[15]?String(r[15]).trim():null, flag:r[16]?String(r[16]).trim():null,
-      note:r[17]?String(r[17]).trim():null,
-      rep:r[18]==="◎"||r[18]==="○"||r[18]===true,
-      fmsD:r[20]==="◎"||r[20]==="○"||r[20]===true,
-      delivery:r[19]?String(r[19]).trim():null,
-    });
+
+    /* 시설(동) 추가 — 동명이 있을 때만 */
+    if (building) {
+      schoolMap[curKey].buildings.push({
+        b: building, floor: clean(r[6])||null,
+        area: typeof r[7]==="number" ? r[7] : (r[7] ? parseFloat(String(r[7]).replace(/,/g,""))||null : null),
+        fms: clean(r[15])||null, flag: clean(r[16])||null, note: clean(r[17])||null,
+        rep: isMark(r[18]), fmsD: isMark(r[20]), delivery: clean(r[19])||null,
+      });
+    }
   }
-  Object.entries(schoolMap).forEach(([no,s]) => { s.team = teamMap[no] || "미지정"; });
-  return Object.values(schoolMap);
+  const out = order.map(k=>schoolMap[k]).filter(s=>s.school || s.buildings.length);
+  /* 동이 하나도 없으면 표시용 빈 동 1개 보장 */
+  out.forEach(s=>{ if(!s.buildings.length) s.buildings.push({b:s.school||"본관",floor:null,area:null,fms:null,flag:null,note:null,rep:false,fmsD:false,delivery:null}); });
+  return out;
 }
 function buildSheet(schools) {
   const today = new Date();
@@ -1435,14 +1481,37 @@ const FIREBASE_CONFIG = {
   appId: "1:462390983896:web:a43c8acf2d236203c36bad",
   measurementId: "G-82RR7G869R",
 };
+/* OneSignal 푸시 전송용 Cloudflare Worker (자매 앱과 동일) */
+const PUSH_ENDPOINT = "https://ston03.ryu03056.workers.dev";
 const FB_DATA     = "facil/data";      // 학교 데이터 (ID로 키잉 → 부분 저장)
 const FB_META     = "facil/meta";      // 마지막 수정자/시각
 const FB_PRESENCE = "facil/presence";  // 동시 접속자
 const FB_LOGS     = "facil/logs";      // 수정 로그
 const FB_CONFIG   = "facil/config";    // 팀/인원 설정 (관리자 편집)
+const FB_CHAT     = "facil/chat";      // 팀 채팅
+
+/* 푸시 알림 — OneSignal (Cloudflare Worker 경유, 본인 제외 전송) */
+function registerOneSignal(userName) {
+  if (!window.OneSignalDeferred) return;
+  window.OneSignalDeferred.push(async function(OneSignal) {
+    try {
+      await OneSignal.Notifications.requestPermission();
+      await OneSignal.login(userName || "익명");
+      await OneSignal.User.addTag("username", userName || "익명");
+    } catch (e) { console.warn("OneSignal 등록 실패:", e.message); }
+  });
+}
+function sendPush(title, body) {
+  try {
+    fetch(PUSH_ENDPOINT, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, sender: CURRENT_USER.name || "" }),
+    }).catch(()=>{});
+  } catch {}
+}
 
 /* 관리자 비밀번호 (클라이언트 확인) — 운영 시 변경하세요 */
-const ADMIN_PW = "961211";
+const ADMIN_PW = "ston3team!";
 
 /* 현재 로그인 사용자 (로그 기록용) */
 let CURRENT_USER = { uid:null, email:null, name:"" };
@@ -1549,12 +1618,38 @@ function diffDb(prev, next) {
 /* ══════════════════════════════════════════════════════════════
    설정 / 관리자 모드 (팀·인원 관리 + 수정 로그)
 ══════════════════════════════════════════════════════════════ */
-function SettingsPage({ cfgVer, logs, editor, authUser, onLogout }) {
+function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, db, setDb }) {
   const [admin, setAdmin] = useState(false);
   const [pw, setPw] = useState("");
   const [pwErr, setPwErr] = useState("");
   const [newName, setNewName] = useState({});      // team → 입력중 이름
   const [newTeam, setNewTeam] = useState("");
+  const [revEdit, setRevEdit] = useState(null);    // 매출 편집중 학교 id
+  const [revVal, setRevVal] = useState("");
+  const won = n => n ? `${Number(n).toLocaleString()}원` : "-";
+
+  /* 모든 학교 평면화 (매출용) */
+  const allSchools = [];
+  Object.entries(db||{}).forEach(([yr,hs]) => Object.entries(hs).forEach(([half,arr]) =>
+    (arr||[]).forEach(s => allSchools.push({ ...s, _year:yr, _half:half }))));
+  const revTotal = allSchools.reduce((a,s)=>a+(Number(s.contract)||0),0);
+  const revDone  = allSchools.filter(s=>getProgress(s).done===STEPS.length).reduce((a,s)=>a+(Number(s.contract)||0),0);
+  const revIng   = allSchools.filter(s=>{const d=getProgress(s).done; return d>0&&d<STEPS.length;}).reduce((a,s)=>a+(Number(s.contract)||0),0);
+  const revNone  = allSchools.filter(s=>getProgress(s).done===0).reduce((a,s)=>a+(Number(s.contract)||0),0);
+
+  const saveRev = (sid) => {
+    const n = parseInt(String(revVal).replace(/,/g,""))||0;
+    const sc = allSchools.find(s=>s.id===sid);
+    if (sc && setDb) {
+      setDb(prev => {
+        const next = {...prev}; next[sc._year]={...prev[sc._year]};
+        next[sc._year][sc._half] = prev[sc._year][sc._half].map(s=>s.id!==sid?s:{...s,contract:n});
+        return next;
+      });
+      logAction("수정", `계약금액 · ${sc.school}`, won(sc.contract), won(n));
+    }
+    setRevEdit(null); setRevVal("");
+  };
 
   const tryAdmin = () => {
     if (pw === ADMIN_PW) { setAdmin(true); setPwErr(""); setPw(""); }
@@ -1725,8 +1820,226 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout }) {
             </div>
             <div style={{ fontSize:9,color:C.t4,marginTop:10 }}>* 로그는 표시 전용이며 일반 사용자는 수정·삭제할 수 없습니다.</div>
           </div>
+
+          {/* 매출 관리 (관리자 전용) */}
+          <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px",marginTop:14 }}>
+            <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:4 }}>💰 매출 관리</div>
+            <div style={{ fontSize:11,color:C.t3,marginBottom:12 }}>학교별 계약금액을 입력하면 자동 집계됩니다. (관리자 전용)</div>
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14 }}>
+              {[{l:"총 계약금액",v:revTotal,c:C.blue},{l:"완료 금액",v:revDone,c:C.green},
+                {l:"진행중",v:revIng,c:C.purple},{l:"미착수",v:revNone,c:C.t3}].map(k=>(
+                <div key={k.l} style={{ background:C.surfaceL,borderRadius:10,padding:"12px 14px",borderTop:`3px solid ${k.c}` }}>
+                  <div style={{ fontSize:10,color:C.t3,marginBottom:5 }}>{k.l}</div>
+                  <div style={{ fontSize:16,fontWeight:800,color:k.c }}>{won(k.v)}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ maxHeight:340,overflowY:"auto",display:"flex",flexDirection:"column",gap:5 }}>
+              {allSchools.map(s=>{
+                const tc=TC[s.team]||{a:C.t3,b:C.surfaceL};
+                return (
+                  <div key={s.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 11px",background:C.surfaceL,borderRadius:8,border:BD }}>
+                    <span style={{ fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:tc.b,color:tc.a,flexShrink:0 }}>{s.team}</span>
+                    <span style={{ fontSize:12,fontWeight:700,color:C.t1,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
+                    <span style={{ fontSize:9,color:C.t4 }}>{s._year} {s._half}</span>
+                    {revEdit===s.id ? (
+                      <>
+                        <input autoFocus value={revVal} onChange={e=>setRevVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveRev(s.id)}
+                          placeholder="금액" style={{ width:110,padding:"5px 8px",border:BD,borderRadius:6,fontSize:12,textAlign:"right",outline:"none" }}/>
+                        <button onClick={()=>saveRev(s.id)} style={{ padding:"5px 10px",borderRadius:6,background:C.green,border:"none",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer" }}>저장</button>
+                      </>
+                    ) : (
+                      <button onClick={()=>{ setRevEdit(s.id); setRevVal(s.contract||""); }}
+                        style={{ minWidth:96,textAlign:"right",padding:"5px 10px",borderRadius:6,border:`1px solid ${s.contract?C.blue+"40":C.border}`,
+                          background:s.contract?C.blueL:C.surface,color:s.contract?C.blue:C.t4,fontSize:12,fontWeight:700,cursor:"pointer" }}>
+                        {won(s.contract)}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {allSchools.length===0 && <div style={{ textAlign:"center",color:C.t4,fontSize:12,padding:16 }}>학교가 없습니다.</div>}
+            </div>
+          </div>
         </>
       )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   전체 현황 (대시보드 요약)
+══════════════════════════════════════════════════════════════ */
+function OverviewPage({ allSchools, db, isMobile, onGo }) {
+  const total = allSchools.length;
+  const buildings = allSchools.flatMap(s=>s.buildings);
+  const urgent = allSchools.filter(s=>{ const d=calcDday(s.end); return d!==null&&d<0&&d>=-7; });
+  const overdue = allSchools.filter(s=>{ const d=calcDday(s.end); return d!==null&&d<-7; });
+  const doneCnt = allSchools.filter(s=>getProgress(s).done===STEPS.length).length;
+  const repDone = buildings.filter(b=>b.rep).length;
+  const teamCount = {};
+  TEAM_LIST.forEach(t=>{ teamCount[t]=allSchools.filter(s=>s.team===t).length; });
+  const stepAgg = STEPS.map(k => ({ k, n: allSchools.filter(s=>s.progress&&s.progress[k]).length }));
+
+  const Card = ({ label, val, sub, color, go }) => (
+    <button onClick={go?()=>onGo(go):undefined} style={{ textAlign:"left",cursor:go?"pointer":"default",
+      background:C.surface,border:BD,borderTop:`3px solid ${color}`,borderRadius:12,padding:"16px 18px",boxShadow:"0 1px 6px rgba(0,0,0,.05)" }}>
+      <div style={{ fontSize:11,color:C.t3,fontWeight:600,marginBottom:6 }}>{label}</div>
+      <div style={{ fontSize:26,fontWeight:900,color }}>{val}</div>
+      {sub && <div style={{ fontSize:10,color:C.t4,marginTop:4 }}>{sub}</div>}
+    </button>
+  );
+
+  return (
+    <div>
+      <div style={{ marginBottom:18 }}>
+        <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>OVERVIEW</div>
+        <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>전체 현황</h1>
+      </div>
+
+      <div style={{ display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:12,marginBottom:14 }}>
+        <Card label="전체 현장" val={total} sub={`${buildings.length}개 동`} color={C.blue} go="sites"/>
+        <Card label="✅ 완료" val={doneCnt} sub={`8단계 모두 완료`} color={C.green} go="done"/>
+        <Card label="🚨 긴급 (D-7)" val={urgent.length} sub="완수일 임박" color={C.red} go="urgent"/>
+        <Card label="⏰ 기한 초과" val={overdue.length} sub="완수일 지남" color={C.orange}/>
+      </div>
+
+      {/* 팀별 현장 수 */}
+      <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px",marginBottom:14 }}>
+        <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:12 }}>팀별 현장</div>
+        <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+          {TEAM_LIST.map(t=>{
+            const tc=TC[t]||{a:C.t3}; const n=teamCount[t]||0; const pct=total?Math.round(n/total*100):0;
+            return (
+              <div key={t} style={{ display:"flex",alignItems:"center",gap:10 }}>
+                <span style={{ width:46,fontSize:12,fontWeight:700,color:tc.a }}>{t}</span>
+                <div style={{ flex:1,height:10,background:C.surfaceD,borderRadius:5,overflow:"hidden" }}>
+                  <div style={{ width:`${pct}%`,height:"100%",background:tc.a,borderRadius:5 }}/>
+                </div>
+                <span style={{ width:40,textAlign:"right",fontSize:12,fontWeight:700,color:C.t2 }}>{n}개</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 단계별 진행 집계 */}
+      <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px" }}>
+        <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:12 }}>단계별 완료 현장 수 <span style={{ fontSize:10,color:C.t4,fontWeight:500 }}>(전체 {total}개 중)</span></div>
+        <div style={{ display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:10 }}>
+          {stepAgg.map(({k,n})=>{
+            const sp=STEP_SPECIAL[k], col=sp?C.purple:C.blue, pct=total?Math.round(n/total*100):0;
+            return (
+              <div key={k} style={{ padding:"10px 12px",background:C.surfaceL,borderRadius:9,border:`1px solid ${sp?C.purple+"30":C.border}` }}>
+                <div style={{ display:"flex",alignItems:"center",gap:5,marginBottom:6 }}>
+                  <span style={{ fontSize:13 }}>{STEP_ICON[k]}</span>
+                  <span style={{ fontSize:11,fontWeight:700,color:sp?C.purple:C.t2 }}>{k}</span>
+                </div>
+                <div style={{ fontSize:16,fontWeight:800,color }}>{n}<span style={{ fontSize:10,color:C.t4,fontWeight:500 }}> / {pct}%</span></div>
+                <div style={{ height:4,background:C.surfaceD,borderRadius:2,marginTop:5 }}><div style={{ width:`${pct}%`,height:"100%",background:col,borderRadius:2 }}/></div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   팀 채팅 (방별 · 이미지 첨부 · 새 메시지 푸시)
+══════════════════════════════════════════════════════════════ */
+const CHAT_ROOMS = ["전체","현장조사","보고서작성","공지사항"];
+const CHAT_RCOL = { "전체":C.blue, "현장조사":C.green, "보고서작성":C.purple, "공지사항":C.red };
+
+function ChatPage({ editor, isMobile }) {
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState("");
+  const [room, setRoom] = useState("전체");
+  const [uploading, setUploading] = useState(false);
+  const imgRef = useRef();
+  const bottomRef = useRef();
+  const me = editor || (CURRENT_USER.email||"").split("@")[0] || "익명";
+
+  useEffect(() => {
+    if (typeof firebase==="undefined" || !firebase.apps.length) return;
+    const ref = firebase.database().ref(`${FB_CHAT}/${room}`).limitToLast(200);
+    const on = (snap) => {
+      const v = snap.val()||{};
+      setMsgs(Object.entries(v).map(([id,o])=>({id,...o})).sort((a,b)=>(a.ts||0)-(b.ts||0)));
+    };
+    ref.on("value", on);
+    return () => ref.off("value", on);
+  }, [room]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [msgs]);
+
+  const send = (text, img) => {
+    if (!text && !img) return;
+    if (typeof firebase==="undefined" || !firebase.apps.length) return;
+    firebase.database().ref(`${FB_CHAT}/${room}`).push({
+      name: me, text: text||"", img: img||"", ts: Date.now(),
+    }).catch(()=>{});
+    sendPush(`[${room}] ${me}`, text || "📷 사진");
+    setInput("");
+  };
+
+  const onImg = (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    if (typeof firebase==="undefined" || !firebase.storage) { alert("이미지 업로드를 사용하려면 Storage가 필요합니다."); return; }
+    setUploading(true);
+    const path = `chat/${room}/${Date.now()}_${file.name}`;
+    const task = firebase.storage().ref(path).put(file);
+    task.then(snap => snap.ref.getDownloadURL()).then(url => { send("", url); setUploading(false); })
+      .catch(err => { console.warn("업로드 실패:", err); setUploading(false); });
+  };
+
+  const fmtT = ts => { const d=new Date(ts); return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",height:isMobile?"calc(100vh - 120px)":"calc(100vh - 130px)" }}>
+      <div style={{ marginBottom:12 }}>
+        <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>TEAM CHAT</div>
+        <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>팀 채팅</h1>
+      </div>
+      {/* 방 선택 */}
+      <div style={{ display:"flex",gap:6,marginBottom:10,flexWrap:"wrap" }}>
+        {CHAT_ROOMS.map(r=>(
+          <button key={r} onClick={()=>setRoom(r)} style={{ padding:"6px 13px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",
+            border:`1.5px solid ${room===r?CHAT_RCOL[r]:C.border}`, background:room===r?CHAT_RCOL[r]+"15":"transparent", color:room===r?CHAT_RCOL[r]:C.t3 }}>
+            {r==="공지사항"?"📢 ":r==="현장조사"?"📍 ":r==="보고서작성"?"📄 ":"💬 "}{r}
+          </button>
+        ))}
+      </div>
+      {/* 메시지 영역 */}
+      <div style={{ flex:1,overflowY:"auto",background:C.surface,border:BD,borderRadius:12,padding:"14px",display:"flex",flexDirection:"column",gap:8 }}>
+        {msgs.length===0 && <div style={{ textAlign:"center",color:C.t4,fontSize:12,margin:"auto" }}>아직 메시지가 없어요. 첫 메시지를 보내보세요!</div>}
+        {msgs.map(m=>{
+          const mine = m.name===me;
+          return (
+            <div key={m.id} style={{ display:"flex",flexDirection:"column",alignItems:mine?"flex-end":"flex-start" }}>
+              {!mine && <span style={{ fontSize:10,color:C.t3,marginBottom:2,marginLeft:4 }}>{m.name}</span>}
+              <div style={{ display:"flex",alignItems:"flex-end",gap:5,flexDirection:mine?"row-reverse":"row" }}>
+                <div style={{ maxWidth:"72%",padding:m.img?"4px":"8px 12px",borderRadius:14,
+                  background:mine?C.blue:C.surfaceD, color:mine?"#fff":C.t1,fontSize:13,lineHeight:1.5,wordBreak:"break-word" }}>
+                  {m.img ? <img src={m.img} alt="" style={{ maxWidth:200,maxHeight:200,borderRadius:10,display:"block" }}/> : m.text}
+                </div>
+                <span style={{ fontSize:9,color:C.t4 }}>{fmtT(m.ts)}</span>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef}/>
+      </div>
+      {/* 입력 */}
+      <div style={{ display:"flex",gap:8,marginTop:10,alignItems:"center" }}>
+        <input ref={imgRef} type="file" accept="image/*" style={{ display:"none" }} onChange={onImg}/>
+        <button onClick={()=>imgRef.current?.click()} disabled={uploading} style={{ width:42,height:42,borderRadius:10,border:BD,background:C.surface,fontSize:18,cursor:"pointer",flexShrink:0 }}>{uploading?"⏳":"📷"}</button>
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send(input)}
+          placeholder={`${room} 메시지 입력…`} style={{ flex:1,padding:"11px 14px",background:C.surface,border:BD,borderRadius:10,fontSize:14,outline:"none" }}/>
+        <button onClick={()=>send(input)} style={{ padding:"0 20px",height:42,borderRadius:10,background:C.blue,border:"none",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",flexShrink:0 }}>전송</button>
+      </div>
+      {!editor && <div style={{ fontSize:10,color:C.orange,marginTop:6 }}>※ 사이드바에서 '내 이름'을 먼저 선택하면 메시지에 이름이 표시돼요.</div>}
     </div>
   );
 }
@@ -1804,7 +2117,7 @@ function App() {
   const [authUser, setAuthUser] = useState(undefined); // undefined=확인중, null=미로그인, obj=로그인
   const [db, setDb] = useState(DB);
   const [sideOpen, setSideOpen] = useState(typeof window!=="undefined" ? window.innerWidth>=820 : true);
-  const [menu, setMenuRaw] = useState("schedule");
+  const [menu, setMenuRaw] = useState("overview");
   const [globalTeam, setGlobalTeam] = useState("전체");
   // 모바일에서 메뉴 선택 시 사이드바 자동 닫힘
   const setMenu = (m) => { setMenuRaw(m); if (window.innerWidth < 820) setSideOpen(false); };
@@ -1933,13 +2246,19 @@ function App() {
     }, 300);
   }, [db]);
 
-  /* 내 이름 변경 시 로그 기록용 사용자명 갱신 */
+  /* 내 이름 변경 시 로그 기록용 사용자명 갱신 + 푸시 등록 */
   useEffect(() => {
     CURRENT_USER = { ...CURRENT_USER, name: editor || CURRENT_USER.email || "" };
   }, [editor]);
 
   const logout = () => {
     try { firebase.auth().signOut(); } catch {}
+  };
+
+  /* 푸시 알림 켜기 */
+  const enablePush = () => {
+    registerOneSignal(editor || (authUser && authUser.email) || "익명");
+    alert("알림 권한을 허용해 주세요. 아이폰은 홈 화면에 추가한 앱 아이콘에서 열어야 알림이 옵니다.");
   };
 
   const fmtMeta = (ts) => {
@@ -1961,8 +2280,10 @@ function App() {
   const urgent = allSchools.filter(s => { const d=calcDday(s.end); return d!==null&&d<0&&d>=-7; });
 
   const pages = {
+    overview: <OverviewPage allSchools={allSchools} db={db} isMobile={isMobile} onGo={setMenu}/>,
     schedule: <Calendar allSchools={allSchools} setDb={setDb} globalTeam={globalTeam} isMobile={isMobile}/>,
     sites:    <SitesManager db={db} setDb={setDb} globalTeam={globalTeam} isMobile={isMobile}/>,
+    chat:     <ChatPage editor={editor} isMobile={isMobile}/>,
     urgent: (
       <div>
         <div style={{ fontSize:11,color:C.t3,letterSpacing:2,marginBottom:3,fontWeight:600 }}>URGENT</div>
@@ -1993,7 +2314,7 @@ function App() {
       </div>
     ),
     export: <ExportImportPage db={db} setDb={setDb}/>,
-    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout}/>,
+    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} db={db} setDb={setDb}/>,
   };
 
   /* 인증 게이트 */
@@ -2077,6 +2398,9 @@ function App() {
               ))}
             </select>
           </div>
+          <button onClick={enablePush} style={{ width:"100%",marginTop:7,padding:"7px 8px",borderRadius:7,
+            border:`1.5px solid ${C.blue}40`,background:C.blueL,color:C.blue,fontSize:11,fontWeight:700,cursor:"pointer",
+            display:"flex",alignItems:"center",justifyContent:"center",gap:5 }}>🔔 알림 켜기</button>
         </div>
 
         <div style={{ padding:"10px 16px 8px",borderBottom:BD }}>
@@ -2103,7 +2427,7 @@ function App() {
 
         <nav style={{ flex:1,padding:"8px 0",overflowY:"auto" }}>
           <div style={{ padding:"8px 16px 3px",fontSize:9,color:C.t4,letterSpacing:1.5,fontWeight:700 }}>MAIN</div>
-          {MENUS.slice(0,2).map(m=>(
+          {MENUS.slice(0,4).map(m=>(
             <button key={m.id} onClick={()=>setMenu(m.id)} style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"12px 18px",
               background:menu===m.id?C.blueL:"transparent",borderLeft:`3px solid ${menu===m.id?C.blue:"transparent"}`,border:"none",
               color:menu===m.id?C.blue:C.t2,fontSize:13,fontWeight:menu===m.id?700:500,textAlign:"left",whiteSpace:"nowrap" }}>
@@ -2112,7 +2436,7 @@ function App() {
           ))}
           <div style={{ height:1,background:C.border,margin:"8px 14px" }}/>
           <div style={{ padding:"6px 16px 3px",fontSize:9,color:C.t4,letterSpacing:1.5,fontWeight:700 }}>REPORT</div>
-          {MENUS.slice(2).map(m=>(
+          {MENUS.slice(4).map(m=>(
             <button key={m.id} onClick={()=>setMenu(m.id)} style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 18px",
               background:menu===m.id?C.blueL:"transparent",borderLeft:`3px solid ${menu===m.id?C.blue:"transparent"}`,border:"none",
               color:menu===m.id?C.blue:C.t3,fontSize:12,fontWeight:menu===m.id?700:400,textAlign:"left",whiteSpace:"nowrap" }}>
@@ -2159,6 +2483,11 @@ function App() {
 
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+  }
 </script>
 </body>
 </html>
