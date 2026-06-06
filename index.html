@@ -4,28 +4,21 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>FACIL — 현장 일정·관리</title>
-
-<!-- PWA (홈 화면 앱) -->
 <link rel="manifest" href="manifest.json"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <meta name="apple-mobile-web-app-title" content="FACIL"/>
 <meta name="theme-color" content="#1D6FF2"/>
 <link rel="apple-touch-icon" href="icon-192.png"/>
-
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" rel="stylesheet"/>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-
-<!-- Firebase 8.10.1 -->
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
-
-<!-- 푸시 알림 (OneSignal) -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <script>
   window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -33,7 +26,6 @@
     try { await OneSignal.init({ appId: "26e9e8f3-42a8-4553-b8ef-0a84714db091", allowLocalhostAsSecureOrigin: true }); } catch(e){}
   });
 </script>
-
 <style>
   html,body,#root{margin:0;padding:0;height:100%;}
   body{font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;}
@@ -1935,7 +1927,7 @@ function OverviewPage({ allSchools, db, isMobile, onGo }) {
                   <span style={{ fontSize:13 }}>{STEP_ICON[k]}</span>
                   <span style={{ fontSize:11,fontWeight:700,color:sp?C.purple:C.t2 }}>{k}</span>
                 </div>
-                <div style={{ fontSize:16,fontWeight:800,color }}>{n}<span style={{ fontSize:10,color:C.t4,fontWeight:500 }}> / {pct}%</span></div>
+                <div style={{ fontSize:16,fontWeight:800,color:col }}>{n}<span style={{ fontSize:10,color:C.t4,fontWeight:500 }}> / {pct}%</span></div>
                 <div style={{ height:4,background:C.surfaceD,borderRadius:2,marginTop:5 }}><div style={{ width:`${pct}%`,height:"100%",background:col,borderRadius:2 }}/></div>
               </div>
             );
