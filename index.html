@@ -392,8 +392,8 @@ function parseSheet(ws) {
   const cleanTeam = r => { const t = clean(gv(r,col.team)); return (t && t!=="-") ? t : ""; };
   const isMark = v => { const s=clean(v); return ["◎","○","●","O","o","Y","y","V","v","✓"].includes(s) || v===true; };
 
-  const order = [], map = {};
-  let curKey = null;
+  const order = [], out = [];
+  let cur = null;
   for (let i=hIdx+1; i<rows.length; i++) {
     const r = rows[i]; if (!r) continue;
     const noRaw = clean(gv(r,col.no)); const no = (noRaw && noRaw!=="-") ? noRaw : "";
@@ -401,28 +401,31 @@ function parseSheet(ws) {
     const building = clean(gv(r,col.building));
     if (!no && !school && !building) continue;          // 빈 줄
 
-    if (no) curKey = "no:"+no;
-    else if (school && (!curKey || (map[curKey] && map[curKey].school !== school))) curKey = "nm:"+school;
-    if (!curKey) continue;
+    /* 새 학교 시작: No가 (값이 있고) 현재와 다르거나, 학교명이 (값이 있고) 현재와 다를 때.
+       → No 중복(다른 학교가 같은 번호) / 같은 학교 다른 번호(별개 용역) 모두 정확히 분리.
+       → No·학교명이 비었거나 동일하면 같은 학교의 추가 동(연속행). */
+    let startNew;
+    if (!cur) startNew = true;
+    else startNew = (no && no !== cur.no) || (school && school !== cur.school);
 
-    if (!map[curKey]) {
-      map[curKey] = {
-        id:`imp-${Date.now().toString(36)}-${order.length}-${Math.random().toString(36).slice(2,6)}`,
+    if (startNew) {
+      cur = {
+        id:`imp-${Date.now().toString(36)}-${out.length}-${Math.random().toString(36).slice(2,6)}`,
         no, school, region: clean(gv(r,col.region)), kind: clean(gv(r,col.kind)) || "정기점검",
         team: cleanTeam(r) || "미지정",
         field: parseExcelDate(gv(r,col.field)), start: parseExcelDate(gv(r,col.start)), end: parseExcelDate(gv(r,col.end)),
         headcount:2, assignees:[], buildings:[],
       };
-      order.push(curKey);
+      out.push(cur);
     } else {
-      const s = map[curKey];
-      if (!s.team || s.team==="미지정") { const t=cleanTeam(r); if(t) s.team=t; }
-      if (!s.school && school) s.school = school;
-      if (!s.region) s.region = clean(gv(r,col.region));
-      if (!s.kind || s.kind==="정기점검") { const k=clean(gv(r,col.kind)); if(k) s.kind=k; }
-      if (!s.field) s.field = parseExcelDate(gv(r,col.field));
-      if (!s.start) s.start = parseExcelDate(gv(r,col.start));
-      if (!s.end)   s.end   = parseExcelDate(gv(r,col.end));
+      if (no && !cur.no) cur.no = no;
+      if (school && !cur.school) cur.school = school;
+      if (!cur.team || cur.team==="미지정") { const t=cleanTeam(r); if(t) cur.team=t; }
+      if (!cur.region) cur.region = clean(gv(r,col.region));
+      if (!cur.kind || cur.kind==="정기점검") { const k=clean(gv(r,col.kind)); if(k) cur.kind=k; }
+      if (!cur.field) cur.field = parseExcelDate(gv(r,col.field));
+      if (!cur.start) cur.start = parseExcelDate(gv(r,col.start));
+      if (!cur.end)   cur.end   = parseExcelDate(gv(r,col.end));
     }
 
     if (building) {
@@ -432,7 +435,7 @@ function parseSheet(ws) {
       const areas  = clean(gv(r,col.area)).split(/\r?\n/);
       const pickArea = s => { const n=parseFloat(String(s).replace(/[^0-9.]/g,"")); return isNaN(n)?null:n; };
       names.forEach((bn,bi) => {
-        map[curKey].buildings.push({
+        cur.buildings.push({
           b: bn,
           floor: (floors[bi]!=null?floors[bi]:floors[0]||"").trim()||null,
           area:  pickArea(areas[bi]!=null?areas[bi]:areas[0]||""),
@@ -445,9 +448,9 @@ function parseSheet(ws) {
       });
     }
   }
-  const out = order.map(k=>map[k]).filter(s => s.school || s.buildings.length);
-  out.forEach(s => { if (!s.buildings.length) s.buildings.push({ b:s.school||"본관", floor:null, area:null, height:null, len:null, jong:null, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null }); });
-  return out;
+  const out2 = out.filter(s => s.school || s.buildings.length);
+  out2.forEach(s => { if (!s.buildings.length) s.buildings.push({ b:s.school||"본관", floor:null, area:null, height:null, len:null, jong:null, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null }); });
+  return out2;
 }
 function buildSheet(schools) {
   const today = new Date();
@@ -475,6 +478,40 @@ function buildSheet(schools) {
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [6,5,10,8,22,20,6,11,8,8,18,11,11,11,9,26,11,42,10,9,8].map(w=>({wch:w}));
   return ws;
+}
+
+/* 예산 시트 → { 학교명: 금액(원) }  (예산액 '합계' 천원 → 원, 학교별 합산) */
+function parseBudget(ws) {
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+  const clean = v => v==null ? "" : String(v).replace(/\u00a0/g," ").trim();
+  const norm  = v => clean(v).toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
+  /* 헤더 영역(학교명이 있는 행)과 그 아래 2행에서 열 탐지 */
+  let schoolRow = -1, schoolCol = -1;
+  for (let i=0; i<Math.min(rows.length,10); i++) {
+    const c = (rows[i]||[]).findIndex(v => { const n=norm(v); return n==="학교명"||n==="시설물명"; });
+    if (c>=0) { schoolRow=i; schoolCol=c; break; }
+  }
+  if (schoolRow<0) return {};
+  /* 금액 열: 학교명 행~+2행에서 '합계' 우선, 없으면 '예산액' */
+  let amtCol = -1;
+  for (const pat of ["합계","예산액"]) {
+    for (let i=schoolRow; i<=schoolRow+2 && i<rows.length && amtCol<0; i++) {
+      const idx=(rows[i]||[]).findIndex(v => norm(v).includes(pat));
+      if (idx>=0) amtCol=idx;
+    }
+    if (amtCol>=0) break;
+  }
+  if (amtCol<0) return {};
+  const toNum = v => { if(v==null) return 0; const n=parseFloat(String(v).replace(/[^0-9.]/g,"")); return isNaN(n)?0:n; };
+  const out = {};
+  for (let i=schoolRow+1; i<rows.length; i++) {
+    const r=rows[i]; if(!r) continue;
+    const sch=clean(r[schoolCol]); if(!sch) continue;
+    if (["합계","소계","총계","학교수"].some(k=>sch.includes(k))) continue;   // 요약행 제외
+    const amt=toNum(r[amtCol]);
+    if (amt>0) out[sch]=(out[sch]||0)+amt*1000;   // 천원 → 원
+  }
+  return out;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1381,18 +1418,58 @@ function ExportImportPage({ db, setDb }) {
     r.onload = (e) => {
       try {
         const wb = XLSX.read(e.target.result, { type:"array", cellDates:true });
+        /* 1) 예산 시트 → 연도별 { 학교명: 금액(원) } */
+        const budgetByYear = {};
+        wb.SheetNames.forEach(name => {
+          const ym = name.match(/(\d{2})\s*년/);
+          if (!/예산/.test(name) || !ym) return;
+          const yr = `20${ym[1]}`;
+          const bud = parseBudget(wb.Sheets[name]);
+          if (Object.keys(bud).length) budgetByYear[yr] = { ...(budgetByYear[yr]||{}), ...bud };
+        });
+        /* 2) 반기 시트 → 학교 목록 (+ 예산 금액 매칭) */
         const sheets = [];
         wb.SheetNames.forEach(name => {
           const info = parseSheetName(name); if (!info) return;
           const schools = parseSheet(wb.Sheets[name]); if (!schools.length) return;
+          const bud = budgetByYear[info.year] || {};
+          let budHit = 0;
+          schools.forEach(s => { if (bud[s.school]!=null) { s.contract = bud[s.school]; budHit++; } });
           sheets.push({ name, year:info.year, half:info.half, schools, count:schools.length,
-            bCount:schools.reduce((a,s)=>a+s.buildings.length,0) });
+            bCount:schools.reduce((a,s)=>a+s.buildings.length,0), budHit });
         });
         if (!sheets.length) { setErr('인식된 시트가 없어요. 시트 이름이 "26년(상)" 형식인지 확인해주세요.'); return; }
-        setParsed({ sheets, fileName:file.name });
+        setParsed({ sheets, fileName:file.name, budYears:Object.keys(budgetByYear) });
       } catch(e) { setErr("파일 읽기 오류: "+e.message); }
     };
     r.readAsArrayBuffer(file);
+  };
+
+  /* 기존 학교에 가져온 학교를 병합 — 학교명+No 기준으로 매칭.
+     엑셀 값(일정·학교정보·동·예산)은 갱신, 웹 전용 값(진행단계·투입인원)은 보존.
+     매칭 안 되는 기존 학교는 그대로 유지 → 중복/꼬임 없이 '바뀐 부분만' 반영. */
+  const mergeHalf = (existing, incoming) => {
+    const ex = existing || [];
+    const keyOf = s => `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
+    const exMap = new Map(); ex.forEach(s => exMap.set(keyOf(s), s));
+    const usedKeys = new Set();
+    const merged = incoming.map(ins => {
+      const k = keyOf(ins); const old = exMap.get(k);
+      if (old) {
+        usedKeys.add(k);
+        return {
+          ...ins,
+          id: old.id,                                   // 안정적 ID 유지
+          progress: old.progress || {},                 // 진행단계(웹 전용) 보존
+          assignees: old.assignees || [],               // 투입인원(웹 전용) 보존
+          headcount: old.headcount || ins.headcount,
+          contract: (ins.contract!=null && ins.contract>0) ? ins.contract : old.contract,  // 예산 갱신/보존
+        };
+      }
+      return ins;                                       // 신규 학교
+    });
+    const leftovers = ex.filter(s => !usedKeys.has(keyOf(s)));   // 엑셀에 없던 기존 학교 → 유지
+    return { merged: merged.concat(leftovers), matched: usedKeys.size, added: incoming.length - usedKeys.size, kept: leftovers.length };
   };
 
   const doImport = () => {
@@ -1401,10 +1478,14 @@ function ExportImportPage({ db, setDb }) {
     setTimeout(() => {
       setDb(prev => {
         const next = {...prev};
-        parsed.sheets.forEach(sh => { if (!next[sh.year]) next[sh.year]={}; next[sh.year][sh.half]=sh.schools; });
+        parsed.sheets.forEach(sh => {
+          if (!next[sh.year]) next[sh.year] = {};
+          const { merged } = mergeHalf(next[sh.year][sh.half], sh.schools);
+          next[sh.year][sh.half] = merged;
+        });
         return next;
       });
-      parsed.sheets.forEach(sh => logAction("추가", `엑셀 가져오기 · ${sh.year} ${sh.half}`, null, `${sh.count}개 학교 / ${sh.bCount}개 동`));
+      parsed.sheets.forEach(sh => logAction("수정", `엑셀 병합 · ${sh.year} ${sh.half}`, null, `${sh.count}개 학교 / ${sh.bCount}개 동${sh.budHit?` / 예산 ${sh.budHit}건`:""}`));
       setImporting(false); setDone(true); setParsed(null);
     }, 400);
   };
@@ -1467,8 +1548,14 @@ function ExportImportPage({ db, setDb }) {
             <div>
               <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:14,padding:"10px 14px",background:C.greenL,borderRadius:8,border:`1px solid ${C.green}30` }}>
                 <span>✓</span><div style={{ flex:1 }}><div style={{ fontSize:12,fontWeight:700,color:C.green }}>{parsed.fileName} 파싱 완료</div>
-                  <div style={{ fontSize:11,color:C.t2,marginTop:1 }}>{parsed.sheets.length}개 시트 인식 · 확인 후 가져오기</div></div>
+                  <div style={{ fontSize:11,color:C.t2,marginTop:1 }}>{parsed.sheets.length}개 시트 인식{parsed.budYears&&parsed.budYears.length?` · 예산표 ${parsed.budYears.join(",")} 인식`:""} · 확인 후 가져오기</div></div>
                 <button onClick={()=>setParsed(null)} style={{ padding:"4px 10px",borderRadius:6,border:BD,background:"transparent",color:C.t3,fontSize:11,cursor:"pointer" }}>취소</button>
+              </div>
+              <div style={{ display:"flex",alignItems:"flex-start",gap:7,marginBottom:12,padding:"9px 12px",background:C.blueL,borderRadius:8,border:`1px solid ${C.blue}25` }}>
+                <span style={{ fontSize:13 }}>🔄</span>
+                <div style={{ fontSize:11,color:C.t2,lineHeight:1.55 }}>
+                  <b style={{ color:C.blue }}>병합 방식</b> — 학교명+No로 같은 현장을 찾아 <b>일정·동·예산만 갱신</b>하고, 웹에서 입력한 <b>진행단계·투입인원은 그대로 유지</b>해요. 중복으로 쌓이지 않아요.
+                </div>
               </div>
               {parsed.sheets.map((sh,i)=>{
                 const hc=sh.half==="상반기"?C.blue:C.orange, teams={};
@@ -1479,6 +1566,7 @@ function ExportImportPage({ db, setDb }) {
                       <span>{sh.half==="상반기"?"🌱":"🍂"}</span>
                       <span style={{ fontSize:14,fontWeight:800,color:C.t1 }}>{sh.year}년 {sh.half}</span>
                       <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:hc+"18",color:hc,fontWeight:700 }}>{sh.count}개 학교 · {sh.bCount}개 동</span>
+                      {sh.budHit>0 && <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:C.green+"18",color:C.green,fontWeight:700 }}>💰 예산 {sh.budHit}건</span>}
                     </div>
                     <div style={{ display:"flex",gap:5,flexWrap:"wrap",marginBottom:6 }}>
                       {Object.entries(teams).map(([t,n])=>(
