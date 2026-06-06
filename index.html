@@ -706,13 +706,13 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
             <div style={{ fontSize:18,fontWeight:800,color:C.t1,minWidth:120,textAlign:"center" }}>{yr}년 {mo}월</div>
             <button onClick={nextMonth} style={{ width:30,height:30,borderRadius:7,border:BD,background:C.surface,color:C.t2,fontSize:16,cursor:"pointer" }}>›</button>
             <button onClick={goToday} style={{ padding:"5px 12px",borderRadius:7,border:`1.5px solid ${C.blue}`,background:C.blueL,color:C.blue,fontSize:11,fontWeight:700,cursor:"pointer" }}>오늘</button>
-            <div style={{ display:"flex",gap:4,marginLeft:6 }}>
+            <div style={{ display:isMobile?"none":"flex",gap:4,marginLeft:6 }}>
               {[2024,2025,2026,2027].map(y=>(
                 <button key={y} onClick={()=>setYr(y)} style={{ padding:"4px 9px",borderRadius:6,border:`1px solid ${yr===y?C.blue:C.border}`,
                   background:yr===y?C.blueL:"transparent",color:yr===y?C.blue:C.t3,fontSize:11,fontWeight:600,cursor:"pointer" }}>{y}</button>
               ))}
             </div>
-            <div style={{ display:"flex",gap:3 }}>
+            <div style={{ display:isMobile?"none":"flex",gap:3 }}>
               {Array.from({length:12},(_,i)=>i+1).map(m=>(
                 <button key={m} onClick={()=>setMo(m)} style={{ width:24,height:24,borderRadius:5,border:`1px solid ${mo===m?C.blue:C.border}`,
                   background:mo===m?C.blueL:"transparent",color:mo===m?C.blue:C.t3,fontSize:10,fontWeight:600,cursor:"pointer" }}>{m}</button>
@@ -817,6 +817,7 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
    현장 수정 슬라이드 패널 (학교 + 동별)
 ══════════════════════════════════════════════════════════════ */
 function EditPanel({ sc, yr, half, setDb, onClose }) {
+  const isMobile = useIsMobile();
   const tc = TC[sc.team]||{a:C.t3,b:C.surfaceL,c:C.t2};
   const [f, setF] = useState({
     team:sc.team||"", region:sc.region||"", kind:sc.kind||"정기점검",
@@ -978,7 +979,7 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
                   <button onClick={()=>setBf(p=>p.filter((_,i)=>i!==bi))} style={{ padding:"3px 6px",borderRadius:5,fontSize:10,cursor:"pointer",border:`1px solid ${C.red}30`,background:C.redL,color:C.red,fontWeight:700 }}>✕</button>
                 </div>
               </div>
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8 }}>
+              <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"1fr 1fr 1fr",gap:8,marginBottom:8 }}>
                 <LI label="동명" val={b.b} on={v=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,b:v}))}/>
                 <LI label="층수" val={b.floor} on={v=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,floor:v}))}/>
                 <LI label="연면적㎡" val={b.area} on={v=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,area:v}))} type="number"/>
@@ -1941,13 +1942,14 @@ function OverviewPage({ allSchools, db, isMobile, onGo }) {
 /* ══════════════════════════════════════════════════════════════
    팀 채팅 (방별 · 이미지 첨부 · 새 메시지 푸시)
 ══════════════════════════════════════════════════════════════ */
-const CHAT_ROOMS = ["전체","현장조사","보고서작성","공지사항"];
-const CHAT_RCOL = { "전체":C.blue, "현장조사":C.green, "보고서작성":C.purple, "공지사항":C.red };
+/* 채팅 방: 전체 · 공지 + 팀별(설정의 팀 목록 자동 반영) */
+const chatRoomColor = (r) => r==="전체" ? C.blue : r==="공지사항" ? C.red : (TC[r] && TC[r].a) || C.t2;
+const chatRoomIcon  = (r) => r==="전체" ? "💬 " : r==="공지사항" ? "📢 " : "👥 ";
 
 function ChatPage({ editor, isMobile }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
-  const [room, setRoom] = useState("전체");
+  const [room, setRoom] = useState(() => TEAM_LIST.find(t => (TEAM_MEMBERS[t]||[]).includes(editor)) || "전체");
   const [uploading, setUploading] = useState(false);
   const imgRef = useRef();
   const bottomRef = useRef();
@@ -1994,14 +1996,17 @@ function ChatPage({ editor, isMobile }) {
         <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>TEAM CHAT</div>
         <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>팀 채팅</h1>
       </div>
-      {/* 방 선택 */}
+      {/* 방 선택 — 전체 · 공지 + 팀별 */}
       <div style={{ display:"flex",gap:6,marginBottom:10,flexWrap:"wrap" }}>
-        {CHAT_ROOMS.map(r=>(
-          <button key={r} onClick={()=>setRoom(r)} style={{ padding:"6px 13px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",
-            border:`1.5px solid ${room===r?CHAT_RCOL[r]:C.border}`, background:room===r?CHAT_RCOL[r]+"15":"transparent", color:room===r?CHAT_RCOL[r]:C.t3 }}>
-            {r==="공지사항"?"📢 ":r==="현장조사"?"📍 ":r==="보고서작성"?"📄 ":"💬 "}{r}
-          </button>
-        ))}
+        {["전체", ...TEAM_LIST, "공지사항"].map(r=>{
+          const rc = chatRoomColor(r);
+          return (
+            <button key={r} onClick={()=>setRoom(r)} style={{ padding:"6px 13px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",
+              border:`1.5px solid ${room===r?rc:C.border}`, background:room===r?rc+"15":"transparent", color:room===r?rc:C.t3,whiteSpace:"nowrap" }}>
+              {chatRoomIcon(r)}{r}
+            </button>
+          );
+        })}
       </div>
       {/* 메시지 영역 */}
       <div style={{ flex:1,overflowY:"auto",background:C.surface,border:BD,borderRadius:12,padding:"14px",display:"flex",flexDirection:"column",gap:8 }}>
@@ -2324,7 +2329,7 @@ function App() {
 
   return (
     <div style={{ fontFamily:F,background:C.bg,minHeight:"100vh",display:"flex",color:C.t1,fontSize:13 }}>
-      <style>{`*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:${C.surfaceL}}::-webkit-scrollbar-thumb{background:${C.borderD};border-radius:4px}input::placeholder,textarea::placeholder{color:${C.t4}}button{cursor:pointer;transition:all .12s}button:hover{opacity:.85}input[type="date"]{color-scheme:light}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`*{box-sizing:border-box}html,body{overflow-x:hidden;max-width:100%}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:${C.surfaceL}}::-webkit-scrollbar-thumb{background:${C.borderD};border-radius:4px}input::placeholder,textarea::placeholder{color:${C.t4}}button{cursor:pointer;transition:all .12s}button:hover{opacity:.85}input,textarea,select{max-width:100%}input[type="date"]{color-scheme:light}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
       {!loaded && (
         <div style={{ position:"fixed",inset:0,background:C.bg,zIndex:9999,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16 }}>
