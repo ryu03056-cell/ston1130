@@ -14,7 +14,7 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -453,32 +453,169 @@ function parseSheet(ws) {
   out2.forEach(s => { if (!s.buildings.length) s.buildings.push({ b:s.school||"본관", floor:null, area:null, height:null, len:null, jong:null, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null }); });
   return out2;
 }
+/* 엑셀 출력용 팀 색상 [배경ARGB, 글자ARGB] */
+function XL_TEAM_COLOR(t) {
+  return ({ "1팀":["FFE3EEFF","FF1D6FF2"],"2팀":["FFDFF3EA","FF0A9260"],"3팀":["FFFBE3E0","FFD93B2B"],"4팀":["FFEDE4FB","FF7C3AED"],"관리팀":["FFE7EAF0","FF475569"] })[t] || ["FFEFF1F4","FF8A94A6"];
+}
+function xlHalfLabel(yr, half) { return `${String(yr).slice(2)}년(${half==="상반기"?"상":"하"})`; }
+function xlDate(v) { if (!v) return ""; const p=String(v).split("-").map(Number); return (p.length===3 && p[0]) ? new Date(p[0],p[1]-1,p[2],12) : ""; }
 function buildSheet(schools) {
   const today = new Date();
-  const rows = [
-    ["","","","","","","","","","","","현장완료","","","","","","","보고서완료","납품방법","FMS"],
-    ["담당팀","No.","점검종류","지역","학교명","시설명","층수","연면적(㎡)","높이(m)","길이(m)",
-     "종별","현장조사","착수일","완수일","용역기간","FMS아이디/비번","드론/피난/1년",
-     "특기사항","보고서완료","납품방법","FMS등록"],
-  ];
+  const HEAD = ["담당팀","No.","점검종류","지역","학교명","시설명","층수","연면적(㎡)","높이(m)","길이(m)",
+    "종별","현장조사","착수일","완수일","용역기간","FMS 아이디/비번","드론/피난/1년","특기사항","보고서완료","납품방법","FMS등록"];
+  const nCols = HEAD.length;
+  const aoa = [HEAD];
+  const blocks = [];                                  // 학교 단위 블록 (병합·줄무늬용)
+  const mkDate = v => { if (!v) return ""; const p=String(v).split("-").map(Number); return (p.length===3 && p[0]) ? new Date(p[0],p[1]-1,p[2],12) : ""; };
+  let zeb = 0;
   schools.forEach(s => {
-    let first = true;
-    s.buildings.forEach(b => {
-      const end = s.end ? new Date(s.end) : null;
-      const d   = end ? Math.floor((end-today)/86400000) : null;
-      const dd  = d===null ? "" : d>=0 ? `D+${d}` : `D${d}`;
-      rows.push([
-        first?s.team:"", first?s.no:"", first?s.kind:"", first?s.region:"", first?s.school:"",
-        b.b||"", b.floor||"", b.area||"", b.height||"", b.len||"", b.jong||"",
-        first?(s.field||""):"", first?(s.start||""):"", first?(s.end||""):"", first?dd:"",
+    const bs = (s.buildings && s.buildings.length) ? s.buildings : [{ b:s.school||"본관" }];
+    const startRow = aoa.length;                      // 0-based(헤더 포함) 엑셀 행
+    const end = s.end ? new Date(s.end) : null;
+    const dd  = end ? Math.floor((end-today)/86400000) : null;
+    const ddStr = dd===null ? "" : dd>=0 ? `D-${dd}` : `D+${-dd}`;
+    bs.forEach((b,bi) => {
+      const first = bi===0;
+      const area = (b.area!=null && b.area!=="") ? Number(b.area) : "";
+      aoa.push([
+        first?(s.team||"미지정"):"", first?(s.no||""):"", first?(s.kind||""):"", first?(s.region||""):"", first?(s.school||""):"",
+        b.b||"", b.floor||"", isNaN(area)?"":area, b.height||"", b.len||"", b.jong||"",
+        first?mkDate(s.field):"", first?mkDate(s.start):"", first?mkDate(s.end):"", first?ddStr:"",
         b.fms||"", b.flag||"", b.note||"", b.rep?"◎":"", b.delivery||"", b.fmsD?"◎":"",
       ]);
-      first = false;
     });
+    blocks.push({ startRow, rows:bs.length, team:s.team||"미지정", zebra:zeb%2 });
+    zeb++;
   });
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [6,5,10,8,22,20,6,11,8,8,18,11,11,11,9,26,11,42,10,9,8].map(w=>({wch:w}));
+  const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
+  const lastRow = aoa.length-1;
+  ws["!cols"] = [7,5,9,7,24,22,6,12,8,8,16,11,11,11,9,24,12,40,9,8,8].map(w=>({ wch:w }));
+  ws["!rows"] = [{ hpt:28 }];
+  ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:0,c:nCols-1} }) };
+  ws["!freeze"] = { xSplit:0, ySplit:1, topLeftCell:"A2", activePane:"bottomLeft", state:"frozen" };
+
+  const SCHOOL_COLS = [0,1,2,3,4,11,12,13,14];        // 학교 단위(병합)
+  const DATE_COLS = new Set([11,12,13]);
+  const LEFT_COLS = new Set([4,5,15,17]);
+  const CENTER_COLS = new Set([0,1,2,3,6,8,9,10,11,12,13,14,16,18,19,20]);
+  const teamColor = XL_TEAM_COLOR;
+  const sty = (cell, s) => { if (ws[cell]) ws[cell].s = s; };
+
+  /* 헤더 */
+  for (let c=0;c<nCols;c++) {
+    const a = XLSX.utils.encode_cell({ r:0, c });
+    if (!ws[a]) ws[a] = { t:"s", v:HEAD[c] };
+    ws[a].s = { font:{ name:"맑은 고딕", sz:10, bold:true, color:{ rgb:"FFFFFFFF" } },
+      fill:{ patternType:"solid", fgColor:{ rgb:"FF1D6FF2" } },
+      alignment:{ horizontal:"center", vertical:"center", wrapText:true },
+      border:{ top:{style:"thin",color:{rgb:"FF1559C9"}}, bottom:{style:"medium",color:{rgb:"FF1559C9"}}, left:{style:"thin",color:{rgb:"FF4D8AE8"}}, right:{style:"thin",color:{rgb:"FF4D8AE8"}} } };
+  }
+  /* 데이터 */
+  blocks.forEach(bk => {
+    const [tbg,tfg] = teamColor(bk.team);
+    const zbg = bk.zebra ? "FFF4F8FD" : "FFFFFFFF";
+    for (let ri=0; ri<bk.rows; ri++) {
+      const r = bk.startRow + ri;
+      const lastOfSchool = ri===bk.rows-1;
+      for (let c=0;c<nCols;c++) {
+        const a = XLSX.utils.encode_cell({ r, c });
+        if (!ws[a]) ws[a] = { t:"s", v:"" };
+        const schoolCol = SCHOOL_COLS.includes(c);
+        let fill = zbg;
+        let font = { name:"맑은 고딕", sz:9.5, color:{ rgb:"FF1A2332" } };
+        if (c===0) { fill = tbg; font = { ...font, bold:true, color:{ rgb:tfg } }; }
+        if (c===4) font = { ...font, bold:true };
+        if (c===1) font = { ...font, bold:true, color:{ rgb:"FF5A6478" } };
+        if (c===18) font = { ...font, bold:true, sz:11, color:{ rgb:"FF7C3AED" } };
+        if (c===20) font = { ...font, bold:true, sz:11, color:{ rgb:"FF1D6FF2" } };
+        if (c===14) font = { ...font, bold:true, color:{ rgb:"FF0A9260" } };
+        if (c===17) { font = { ...font, sz:8.5, color:{ rgb:"FF8A6D0B" } }; fill = "FFFFFBEB"; }
+        const align = { vertical: schoolCol?"center":"top",
+          horizontal: CENTER_COLS.has(c)?"center":(LEFT_COLS.has(c)?"left":"center"),
+          wrapText: (c===17) };
+        ws[a].s = { font, fill:{ patternType:"solid", fgColor:{ rgb:fill } }, alignment:align,
+          border:{ top:{style:"thin",color:{rgb:"FFE3E8F0"}},
+            bottom:{ style: lastOfSchool?"medium":"thin", color:{ rgb: lastOfSchool?"FFC2CCDC":"FFEDF0F5" } },
+            left:{style:"thin",color:{rgb:"FFE3E8F0"}}, right:{style:"thin",color:{rgb:"FFE3E8F0"}} } };
+        if (DATE_COLS.has(c) && ws[a].t==="d") ws[a].z = "yyyy-mm-dd";
+        if (c===7 && typeof ws[a].v==="number") ws[a].z = "#,##0.00";
+      }
+    }
+    if (bk.rows>1) {
+      ws["!merges"] = ws["!merges"] || [];
+      SCHOOL_COLS.forEach(c => ws["!merges"].push({ s:{r:bk.startRow,c}, e:{r:bk.startRow+bk.rows-1,c} }));
+    }
+  });
   return ws;
+}
+
+/* 범용 스타일 표 — headers:[…], rows:[[…]], meta:[{align,date,num,bold,wrap,team,w}], opts:{totalRow} */
+function buildAuxSheet(headers, rows, meta, opts={}) {
+  const aoa = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
+  const nC = headers.length, last = aoa.length-1;
+  ws["!cols"] = meta.map(m => ({ wch: m.w||12 }));
+  ws["!rows"] = [{ hpt:26 }];
+  ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:0,c:nC-1} }) };
+  ws["!freeze"] = { xSplit:0, ySplit:1, topLeftCell:"A2", activePane:"bottomLeft", state:"frozen" };
+  for (let c=0;c<nC;c++) {
+    const a = XLSX.utils.encode_cell({ r:0, c });
+    if (!ws[a]) ws[a] = { t:"s", v:headers[c] };
+    ws[a].s = { font:{ name:"맑은 고딕", sz:10, bold:true, color:{ rgb:"FFFFFFFF" } },
+      fill:{ patternType:"solid", fgColor:{ rgb:"FF1D6FF2" } },
+      alignment:{ horizontal:"center", vertical:"center", wrapText:true },
+      border:{ top:{style:"thin",color:{rgb:"FF1559C9"}}, bottom:{style:"medium",color:{rgb:"FF1559C9"}}, left:{style:"thin",color:{rgb:"FF4D8AE8"}}, right:{style:"thin",color:{rgb:"FF4D8AE8"}} } };
+  }
+  for (let r=1;r<=last;r++) {
+    const totalRow = opts.totalRow && r===last;
+    const zbg = totalRow ? "FFEAF3FF" : (r%2 ? "FFF7FAFE" : "FFFFFFFF");
+    for (let c=0;c<nC;c++) {
+      const m = meta[c]||{};
+      const a = XLSX.utils.encode_cell({ r, c });
+      if (!ws[a]) ws[a] = { t:"s", v:"" };
+      let fill = zbg;
+      let font = { name:"맑은 고딕", sz:9.5, color:{ rgb:"FF1A2332" } };
+      if (totalRow) font = { ...font, bold:true, color:{ rgb:"FF1559C9" } };
+      else {
+        if (m.bold) font = { ...font, bold:true };
+        if (m.team) { const [tb,tf]=XL_TEAM_COLOR(String(ws[a].v||"")); fill=tb; font={ ...font, bold:true, color:{ rgb:tf } }; }
+        if (m.num)  font = { ...font, bold:true, color:{ rgb:"FF0A9260" } };
+      }
+      ws[a].s = { font, fill:{ patternType:"solid", fgColor:{ rgb:fill } },
+        alignment:{ vertical: m.wrap?"top":"center", horizontal: m.align||"center", wrapText: !!m.wrap },
+        border:{ top:{style:"thin",color:{rgb:"FFE3E8F0"}}, bottom:{style:"thin",color:{rgb:"FFEDF0F5"}}, left:{style:"thin",color:{rgb:"FFE3E8F0"}}, right:{style:"thin",color:{rgb:"FFE3E8F0"}} } };
+      if (m.date && ws[a].t==="d") ws[a].z = "yyyy-mm-dd";
+      if (m.num  && typeof ws[a].v==="number") ws[a].z = "#,##0";
+    }
+  }
+  return ws;
+}
+
+/* 예산표 시트 — entries:[{yr,half,schools}] */
+function buildBudgetSheet(entries) {
+  const headers = ["연도","담당팀","지역","학교명","동수","점검종류","착수일","완수일","예산(원)"];
+  const meta = [{align:"center",w:11},{align:"center",team:true,w:8},{align:"center",w:8},{align:"left",bold:true,w:26},
+    {align:"center",w:6},{align:"center",w:11},{align:"center",date:true,w:11},{align:"center",date:true,w:11},{align:"right",num:true,w:15}];
+  const rows = []; let total = 0;
+  entries.forEach(({yr,half,schools}) => (schools||[]).forEach(s => {
+    const amt = Number(s.contract)||0; total += amt;
+    rows.push([ xlHalfLabel(yr,half), s.team||"미지정", s.region||"", s.school||"", (s.buildings||[]).length,
+      s.kind||"", xlDate(s.start), xlDate(s.end), amt||"" ]);
+  }));
+  rows.push(["합계","","","","","","","", total]);
+  return buildAuxSheet(headers, rows, meta, { totalRow:true });
+}
+
+/* 특이사항 시트 — entries:[{yr,half,schools}] */
+function buildNotesSheet(entries) {
+  const headers = ["연도","담당팀","학교명","시설명","특기사항"];
+  const meta = [{align:"center",w:11},{align:"center",team:true,w:8},{align:"left",bold:true,w:22},{align:"left",w:20},{align:"left",wrap:true,w:62}];
+  const rows = [];
+  entries.forEach(({yr,half,schools}) => (schools||[]).forEach(s =>
+    (s.buildings||[]).forEach(b => { if (b.note && String(b.note).trim()) rows.push([ xlHalfLabel(yr,half), s.team||"미지정", s.school||"", b.b||"", b.note ]); })
+  ));
+  if (!rows.length) rows.push(["","","","","특이사항이 입력된 현장이 없습니다."]);
+  return buildAuxSheet(headers, rows, meta);
 }
 
 /* 예산 시트 → { 학교명: 금액(원) }  (예산액 '합계' 천원 → 원, 학교별 합산) */
@@ -1554,14 +1691,22 @@ function ExportImportPage({ db, setDb }) {
     const schools = db[yr]?.[half]; if (!schools) return;
     const wb = XLSX.utils.book_new();
     const sn = `${yr.slice(2)}년(${half==="상반기"?"상":"하"})`;
-    XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn);
+    const entries = [{ yr, half, schools }];
+    XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn);            // 현장일정
+    XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");  // 예산표
+    XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");  // 특이사항
     XLSX.writeFile(wb, `시설물_리스트_${yr}_${half}.xlsx`);
   };
   const doExportAll = () => {
     const wb = XLSX.utils.book_new();
+    const entries = [];
     Object.entries(db).forEach(([yr,hs]) => Object.entries(hs).forEach(([half,schools]) => {
       XLSX.utils.book_append_sheet(wb, buildSheet(schools), `${yr.slice(2)}년(${half==="상반기"?"상":"하"})`);
+      entries.push({ yr, half, schools });
     }));
+    if (!entries.length) return;
+    XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");   // 전체 예산표
+    XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");   // 전체 특이사항
     XLSX.writeFile(wb, "시설물_리스트_전체.xlsx");
   };
 
@@ -1676,7 +1821,7 @@ function ExportImportPage({ db, setDb }) {
         <div style={{ padding:"16px 20px",borderBottom:BD,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
             <span style={{ fontSize:20 }}>📤</span>
-            <div><div style={{ fontSize:14,fontWeight:800,color:C.t1 }}>엑셀 내보내기</div><div style={{ fontSize:11,color:C.t3,marginTop:1 }}>원본 엑셀 형식으로 저장</div></div>
+            <div><div style={{ fontSize:14,fontWeight:800,color:C.t1 }}>엑셀 내보내기</div><div style={{ fontSize:11,color:C.t3,marginTop:1 }}>현장일정 · 예산표 · 특이사항 시트로 저장</div></div>
           </div>
           <button onClick={doExportAll} style={{ padding:"9px 18px",background:C.green,border:"none",borderRadius:9,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 12px ${C.green}40` }}>↗ 전체 다운로드</button>
         </div>
