@@ -994,6 +994,21 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
 
   const showToast = m => { setToast(m); setTimeout(()=>setToast(null), 2200); };
   const pad = n => String(n).padStart(2,"0");
+
+  /* 일정이 들어왔는데 현재 보는 달에 일정이 없으면, 일정이 가장 가까운 달로 자동 이동 (최초 1회) */
+  const didJump = useRef(false);
+  useEffect(() => {
+    if (didJump.current) return;
+    const dates = allSchools.flatMap(s => [s.field, s.start, s.end]).filter(Boolean).sort();
+    if (!dates.length) return;
+    const ref = `${yr}-${pad(mo)}`;
+    didJump.current = true;
+    if (dates.some(d => d.slice(0,7) === ref)) return;
+    const upcoming = dates.find(d => d.slice(0,7) >= ref) || dates[dates.length-1];
+    const [y,m] = upcoming.split("-").map(Number);
+    setYr(y); setMo(m);
+  }, [allSchools]);
+
   const toStr = day => `${yr}-${pad(mo)}-${pad(day)}`;
 
   const prevMonth = () => { if(mo===1){setYr(y=>y-1);setMo(12);}else setMo(m=>m-1); setSelDay(null); };
@@ -1405,6 +1420,18 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
 function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
   const [yr, setYr] = useState("2026");
   const [half, setHalf] = useState("상반기");
+  /* 데이터가 들어왔는데 현재 탭이 비어 있으면, 데이터 있는 연/반기로 자동 이동 (최초 1회) */
+  const didInit = useRef(false);
+  useEffect(() => {
+    if (didInit.current) return;
+    const anyData = Object.values(db).some(hs => Object.values(hs||{}).some(a => (a||[]).length));
+    if (!anyData) return;                              // 아직 데이터 없음 → 대기
+    if ((db[yr]?.[half]||[]).length) { didInit.current = true; return; }   // 현재 탭에 데이터 있음
+    const years = Object.keys(db).sort((a,b)=>b-a);
+    for (const y of years) for (const h of ["상반기","하반기"]) {
+      if ((db[y]?.[h]||[]).length) { setYr(y); setHalf(h); didInit.current = true; return; }
+    }
+  }, [db]);
   const [teamF, setTeamF] = useState(globalTeam);
   const [stF, setStF] = useState("전체");
   const [search, setSearch] = useState("");
