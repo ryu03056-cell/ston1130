@@ -1757,8 +1757,8 @@ function ExportImportPage({ db, setDb }) {
           id: old.id,                                   // 안정적 ID 유지
           progress: old.progress || {},                 // 진행단계(웹 전용) 보존
           assignees: old.assignees || [],               // 투입인원(웹 전용) 보존
-          headcount: old.headcount || ins.headcount,
-          contract: (ins.contract!=null && ins.contract>0) ? ins.contract : old.contract,  // 예산 갱신/보존
+          headcount: old.headcount || ins.headcount || 2,
+          contract: (ins.contract!=null && ins.contract>0) ? ins.contract : (old.contract ?? null),  // 예산 갱신/보존 (undefined 금지)
         };
       }
       return ins;                                       // 신규 학교
@@ -2070,7 +2070,7 @@ function dbToFb(db) {
     out[yr] = {};
     Object.entries(halves).forEach(([half, schools]) => {
       out[yr][half] = {};
-      schools.forEach(s => { out[yr][half][s.id] = s; });
+      schools.forEach(s => { out[yr][half][s.id] = stripUndefined(s); });
     });
   });
   return out;
@@ -2078,6 +2078,16 @@ function dbToFb(db) {
 
 /* 두 db를 학교 단위로 비교 → 변경된 경로만 추출 (부분 저장용)
    결과: { "2026/상반기/26u1": {school} | null(삭제) } */
+/* Firebase는 undefined 값을 거부(전체 저장 실패) → 재귀적으로 제거 */
+function stripUndefined(v) {
+  if (Array.isArray(v)) return v.map(stripUndefined);
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const k in v) { if (v[k] !== undefined) o[k] = stripUndefined(v[k]); }
+    return o;
+  }
+  return v;
+}
 function diffDb(prev, next) {
   const updates = {};
   const pv = prev || {};
@@ -2089,7 +2099,7 @@ function diffDb(prev, next) {
       schools.forEach(s => {
         const before = prevById[s.id];
         if (!before || JSON.stringify(before) !== JSON.stringify(s)) {
-          updates[`${yr}/${half}/${s.id}`] = s;
+          updates[`${yr}/${half}/${s.id}`] = stripUndefined(s);    // undefined 제거 후 저장
         }
         delete prevById[s.id];
       });
