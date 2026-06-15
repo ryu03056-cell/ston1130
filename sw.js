@@ -1,5 +1,5 @@
 /* FACIL 서비스워커 — 홈 화면 앱(PWA) 설치 지원 */
-const CACHE = "ston-v1";
+const CACHE = "ston-v2";
 
 self.addEventListener("install", (e) => { self.skipWaiting(); });
 
