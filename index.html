@@ -1669,7 +1669,38 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
             </div>
           );
         })}
-        {filtered.length===0 && <div style={{ textAlign:"center",padding:48,color:C.t4 }}>해당 기간 현장 없음</div>}
+        {filtered.length===0 && (()=>{
+          const totalDb = Object.values(db).reduce((a,hs)=>a+Object.values(hs||{}).reduce((b,arr)=>b+(arr||[]).length,0),0);
+          const filterOn = teamF!=="전체" || stF!=="전체" || !!search;
+          const bucketEmpty = schools.length===0;
+          const firstFull = (()=>{ for(const y of Object.keys(db).sort((a,b)=>b-a)) for(const h of ["상반기","하반기"]) if((db[y]?.[h]||[]).length) return {y,h}; return null; })();
+          return (
+            <div style={{ textAlign:"center",padding:"40px 20px",color:C.t4 }}>
+              <div style={{ fontSize:13,fontWeight:600,color:C.t3,marginBottom:6 }}>
+                {bucketEmpty
+                  ? `이 기간(${yr} ${half})에 등록된 현장이 없습니다.`
+                  : `필터에 맞는 현장이 없습니다. (${yr} ${half} 전체 ${schools.length}개)`}
+              </div>
+              <div style={{ fontSize:11,color:C.t4,marginBottom:14 }}>
+                전체 저장된 학교: {totalDb}개{firstFull && bucketEmpty ? ` · 데이터가 있는 기간: ${firstFull.y} ${firstFull.h}` : ""}
+              </div>
+              <div style={{ display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap" }}>
+                {filterOn && (
+                  <button onClick={()=>{ setTeamF("전체"); setStF("전체"); setSearch(""); }}
+                    style={{ padding:"10px 18px",borderRadius:9,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer" }}>
+                    필터 모두 해제
+                  </button>
+                )}
+                {bucketEmpty && firstFull && (
+                  <button onClick={()=>{ setYr(firstFull.y); setHalf(firstFull.h); setTeamF("전체"); setStF("전체"); setSearch(""); }}
+                    style={{ padding:"10px 18px",borderRadius:9,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer" }}>
+                    데이터 있는 기간으로 이동 ({firstFull.y} {firstFull.h})
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         </div>
       </div>
 
