@@ -2088,6 +2088,11 @@ function stripUndefined(v) {
   }
   return v;
 }
+function countSchools(db) {
+  let n = 0;
+  Object.values(db||{}).forEach(hs => Object.values(hs||{}).forEach(a => { n += (a||[]).length; }));
+  return n;
+}
 function diffDb(prev, next) {
   const updates = {};
   const pv = prev || {};
@@ -2646,6 +2651,9 @@ function App() {
   const lastSynced = useRef(null);    // 마지막으로 FB와 일치한 db
   const skipWrite  = useRef(false);   // 원격 반영분 재저장 차단
   const fbReady    = useRef(false);
+  const dbLive     = useRef(db);       // 항상 현재 db (onData 클로저용)
+  dbLive.current = db;
+  const dirty      = useRef(false);    // 저장 안 된 로컬 변경 있음
   const editorRef  = useRef(editor);
   editorRef.current = editor;
   const saveTimer  = useRef(null);
@@ -2694,8 +2702,15 @@ function App() {
 
     const onData = (snap) => {
       const val = fbToDb(snap.val());
-      if (val && Object.keys(val).length) { skipWrite.current=true; lastSynced.current=val; setDb(val); }
-      else { dRef.set(dbToFb(DB)).catch(()=>{}); lastSynced.current = DB; }
+      if (val && Object.keys(val).length) {
+        /* 저장 대기 중인 로컬 변경이 있고, 원격이 로컬보다 학교가 적으면(아직 우리 저장이
+           반영 안 된 불완전 스냅샷) → 덮어쓰지 않고 로컬 유지 (학교 사라짐 방지) */
+        if (dirty.current && countSchools(val) < countSchools(dbLive.current)) {
+          fbReady.current = true; setLoaded(true); return;
+        }
+        skipWrite.current=true; lastSynced.current=val; setDb(val);
+      }
+      else { dRef.set(stripUndefined(dbToFb(dbLive.current && countSchools(dbLive.current)>countSchools(DB) ? dbLive.current : DB))).catch(()=>{}); lastSynced.current = dbLive.current; }
       fbReady.current = true; setLoaded(true);
     };
     const onErr = (err) => { console.error("[Firebase] 구독 오류:", err); setFbStatus("오프라인 (권한 확인)"); setLoaded(true); };
@@ -2730,7 +2745,7 @@ function App() {
     };
   }, [authUser]);
 
-  /* 2) 로컬 db 변경 → 변경된 학교만 부분 저장 (디바운스 + 에코 차단) */
+  /* 2) 로컬 db 변경 → 저장 (소량은 부분 update, 대량 가져오기는 전체 set / 디바운스 + 에코 차단) */
   useEffect(() => {
     if (!fbReady.current || !dataRef.current) return;
     if (skipWrite.current) { skipWrite.current = false; lastSynced.current = db; return; }
@@ -2739,14 +2754,21 @@ function App() {
     const keys = Object.keys(updates);
     if (keys.length === 0) { lastSynced.current = db; return; }
 
+    dirty.current = true;                          // 저장 안 된 로컬 변경 표시
+    const snapshot = db;                           // 이 시점의 db 고정
+    const bulk = keys.length > 40;                 // 가져오기 등 대량 변경
     setSyncing(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      dataRef.current.update(updates)
+      const writeP = bulk
+        ? dataRef.current.set(stripUndefined(dbToFb(snapshot)))   // 전체 권위적 저장(불완전 상태 방지)
+        : dataRef.current.update(updates);
+      writeP
         .then(() => {
           metaRef.current?.set({ at: Date.now(), by: editorRef.current || "익명",
             cnt: keys.length }).catch(()=>{});
-          lastSynced.current = db;
+          lastSynced.current = snapshot;
+          if (dbLive.current === snapshot) dirty.current = false;   // 그 사이 변경 없으면 깨끗
         })
         .catch(e => console.error("[Firebase] 저장 실패:", e))
         .finally(() => setSyncing(false));
