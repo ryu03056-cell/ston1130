@@ -2141,7 +2141,7 @@ function diffDb(prev, next) {
 /* ══════════════════════════════════════════════════════════════
    설정 / 관리자 모드 (팀·인원 관리 + 수정 로그)
 ══════════════════════════════════════════════════════════════ */
-function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, db, setDb }) {
+function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db, setDb }) {
   const [admin, setAdmin] = useState(false);
   const [pw, setPw] = useState("");
   const [pwErr, setPwErr] = useState("");
@@ -2286,11 +2286,8 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, db, setDb }) {
               <button onClick={()=>{
                 if(!window.confirm("⚠️ 서버의 모든 데이터를 삭제하고 처음부터 다시 시작합니다.\n삭제 후 엑셀을 다시 가져와야 합니다. 계속할까요?")) return;
                 if(!window.confirm("정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.")) return;
-                try {
-                  firebase.database().ref(FB_DATA).set(null)
-                    .then(()=>{ window.alert("초기화 완료. 새로고침 후 엑셀을 다시 가져오세요."); setTimeout(()=>location.reload(),300); })
-                    .catch(e=>window.alert("실패: "+e.message));
-                } catch(e){ window.alert("Firebase 연결을 확인하세요."); }
+                if (onResetAll) onResetAll();
+                else window.alert("초기화 기능을 사용할 수 없습니다.");
               }} style={{ padding:"11px 16px",borderRadius:9,background:C.surface,border:`1.5px solid ${C.red}55`,color:C.red,fontSize:13,fontWeight:700,cursor:"pointer" }}>
                 🗑 전체 초기화
               </button>
@@ -2682,7 +2679,10 @@ function LoginScreen({ onLogin }) {
 function App() {
   const isMobile = useIsMobile();
   const [authUser, setAuthUser] = useState(undefined); // undefined=확인중, null=미로그인, obj=로그인
-  const [db, setDb] = useState(DB);
+  const [db, setDb] = useState(() => {
+    try { if (localStorage.getItem("ston_fresh")) { localStorage.removeItem("ston_fresh"); return {}; } } catch {}
+    return DB;
+  });
   const [sideOpen, setSideOpen] = useState(typeof window!=="undefined" ? window.innerWidth>=820 : true);
   const [menu, setMenuRaw] = useState("overview");
   const [globalTeam, setGlobalTeam] = useState("전체");
@@ -2709,6 +2709,7 @@ function App() {
   const dbLive     = useRef(db);       // 항상 현재 db (onData 클로저용)
   dbLive.current = db;
   const dirty      = useRef(false);    // 저장 안 된 로컬 변경 있음
+  const seededOnce = useRef(false);    // 빈 Firebase 최초 1회만 시드(루프 방지)
   const editorRef  = useRef(editor);
   editorRef.current = editor;
   const saveTimer  = useRef(null);
@@ -2767,10 +2768,17 @@ function App() {
         lastSynced.current = val;     // 로컬 전용 학교는 다음 저장에서 Firebase로 다시 올라가 합쳐짐
       }
       else {
-        /* Firebase가 비었으면 현재 로컬을 권위적으로 올림(시드보다 데이터 많으면 로컬 우선) */
-        const seed = (countSchools(dbLive.current) > countSchools(DB)) ? dbLive.current : DB;
-        dRef.set(stripUndefined(dbToFb(seed))).catch(()=>{});
-        lastSynced.current = seed;
+        /* Firebase가 비었을 때: 최초 1회만 시드. 로컬에 데이터가 있으면 그걸 올리고,
+           로컬도 비었으면(초기화 직후 등) 아무것도 올리지 않고 빈 상태 유지 → 초기화가 유지됨 */
+        if (!seededOnce.current) {
+          seededOnce.current = true;
+          if (countSchools(dbLive.current) > 0) {
+            dRef.set(stripUndefined(dbToFb(dbLive.current))).catch(()=>{});
+            lastSynced.current = dbLive.current;
+          } else {
+            lastSynced.current = {};
+          }
+        }
       }
       fbReady.current = true; setLoaded(true);
     };
@@ -2845,6 +2853,19 @@ function App() {
     try { firebase.auth().signOut(); } catch {}
   };
 
+  /* 전체 초기화: 리스너 끊고 → Firebase 비우고 → 빈 상태로 새로고침 (재시드 차단) */
+  const resetAll = () => {
+    try { localStorage.setItem("ston_fresh", "1"); } catch {}
+    try { if (dataRef.current) dataRef.current.off(); } catch {}
+    skipWrite.current = true;            // 남은 저장 effect 차단
+    lastSynced.current = {};
+    const done = () => setTimeout(() => { try { location.reload(); } catch { window.location.href = window.location.href; } }, 300);
+    try {
+      if (dataRef.current) dataRef.current.set(null).then(done).catch(done);
+      else done();
+    } catch { done(); }
+  };
+
   /* 푸시 알림 켜기 */
   const enablePush = () => {
     registerOneSignal(editor || (authUser && authUser.email) || "익명");
@@ -2904,7 +2925,7 @@ function App() {
       </div>
     ),
     export: <ExportImportPage db={db} setDb={setDb}/>,
-    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} db={db} setDb={setDb}/>,
+    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb}/>,
   };
 
   /* 인증 게이트 */
