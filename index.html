@@ -706,6 +706,77 @@ function buildScheduleSheet(entries) {
   if (!rows.length) rows.push(new Array(headers.length).fill(""));
   return buildAuxSheet(headers, rows, meta);
 }
+
+/* 현장일정 캘린더 시트 — 월별 달력 그리드, 각 날짜 칸에 그날의 조사/착수/완수+학교명. entries:[{yr,half,schools}] */
+function buildCalendarSheet(entries) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tkey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+  const LABEL = { 현장조사:"조사", 착수:"착수", 완수:"완수" };
+  const ev = {};
+  const add = (d,type,s) => { const k=String(d||"").slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(k))return; (ev[k]=ev[k]||[]).push(`${LABEL[type]}·${s.school||""}`); };
+  entries.forEach(({schools}) => (schools||[]).forEach(s => { add(s.field,"현장조사",s); add(s.start,"착수",s); add(s.end,"완수",s); }));
+  const keys = Object.keys(ev).sort();
+  if (!keys.length) { const w0=XLSX.utils.aoa_to_sheet([["등록된 현장일정이 없습니다."]]); w0["!cols"]=[{wch:40}]; return w0; }
+
+  const WD = ["일","월","화","수","목","금","토"];
+  const FNT = "맑은 고딕";
+  const thin = c => ({ style:"thin", color:{ rgb:c } });
+  const bd = c => ({ top:thin(c), bottom:thin(c), left:thin(c), right:thin(c) });
+  const wkC = c => c===0 ? "FFD64545" : c===6 ? "FF1559C9" : "FF1A2332";   // 일=빨강, 토=파랑
+
+  const aoa = [], rowH = [], merges = [], styles = {};
+  const setS = (r,c,st) => { styles[`${r}_${c}`] = st; };
+  const [fy,fm] = keys[0].split("-").map(Number);
+  const [ly,lm] = keys[keys.length-1].split("-").map(Number);
+  let y=fy, m=fm;
+  while (y<ly || (y===ly && m<=lm)) {
+    if (keys.some(k => { const a=k.split("-"); return +a[0]===y && +a[1]===m; })) {
+      const rT = aoa.length;
+      aoa.push([`${y}년 ${m}월`,"","","","","",""]);
+      merges.push({ s:{r:rT,c:0}, e:{r:rT,c:6} });
+      setS(rT,0,{ font:{name:FNT,sz:13,bold:true,color:{rgb:"FFFFFFFF"}}, fill:{patternType:"solid",fgColor:{rgb:"FF1D6FF2"}}, alignment:{horizontal:"center",vertical:"center"}, border:bd("FF1559C9") });
+      rowH[rT] = { hpt:26 };
+      const rW = aoa.length;
+      aoa.push(WD.slice());
+      WD.forEach((w,c)=> setS(rW,c,{ font:{name:FNT,sz:10,bold:true,color:{rgb:wkC(c)}}, fill:{patternType:"solid",fgColor:{rgb:"FFF0F4FA"}}, alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") }));
+      rowH[rW] = { hpt:20 };
+      const firstDow = new Date(y,m-1,1).getDay();
+      const daysIn = new Date(y,m,0).getDate();
+      const weeks = Math.ceil((firstDow+daysIn)/7);
+      let day = 1;
+      for (let w=0; w<weeks; w++) {
+        const vals = [], cells = []; let maxLines = 1;
+        for (let c=0; c<7; c++) {
+          const idx = w*7+c;
+          if (idx<firstDow || day>daysIn) { vals.push(""); cells.push({c,blank:true}); }
+          else {
+            const dk = `${y}-${String(m).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const es = ev[dk]||[];
+            vals.push([String(day), ...es].join("\n"));
+            maxLines = Math.max(maxLines, 1+es.length);
+            cells.push({ c, dow:c, today:dk===tkey }); day++;
+          }
+        }
+        const rR = aoa.length;
+        aoa.push(vals);
+        rowH[rR] = { hpt: Math.max(38, maxLines*15+8) };
+        cells.forEach(cl => {
+          let bg = "FFFFFFFF";
+          if (cl.blank) bg = "FFF7F8FA"; else if (cl.today) bg = "FFFFF6D8"; else if (cl.dow===0) bg = "FFFDEEEE"; else if (cl.dow===6) bg = "FFEDF3FC";
+          setS(rR, cl.c, { font:{ name:FNT, sz:9, color:{ rgb: cl.blank?"FFB8C0CC":"FF1A2332" } }, fill:{ patternType:"solid", fgColor:{ rgb:bg } }, alignment:{ horizontal:"left", vertical:"top", wrapText:true }, border:bd(cl.today?"FFF0B400":"FFE0E6EE") });
+        });
+      }
+      aoa.push(["","","","","","",""]); rowH[aoa.length-1] = { hpt:8 };
+    }
+    m++; if (m>12){m=1;y++;}
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = new Array(7).fill(0).map(()=>({ wch:21 }));
+  ws["!merges"] = merges;
+  ws["!rows"] = aoa.map((_,i)=> rowH[i] || { hpt:16 });
+  Object.entries(styles).forEach(([rc,st]) => { const p=rc.split("_"); const a=XLSX.utils.encode_cell({ r:+p[0], c:+p[1] }); if(!ws[a])ws[a]={t:"s",v:""}; ws[a].s=st; });
+  return ws;
+}
 function parseBudget(ws) {
   const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
   const clean = v => v==null ? "" : String(v).replace(/\u00a0/g," ").trim();
@@ -2052,10 +2123,11 @@ function ExportImportPage({ db, setDb, saveNow }) {
     const wb = XLSX.utils.book_new();
     const sn = `${yr.slice(2)}년(${half==="상반기"?"상":"하"})`;
     const entries = [{ yr, half, schools }];
-    XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn);                  // 시설물 리스트
-    XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정");    // 현장일정(날짜·담당자)
-    XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");        // 예산표
-    XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");       // 특이사항
+    XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn);                       // 시설물 리스트
+    XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries), "현장일정");          // 현장일정(달력)
+    XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정(목록)");     // 현장일정(목록)
+    XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");             // 예산표
+    XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");            // 특이사항
     XLSX.writeFile(wb, `시설물_리스트_${yr}_${half}.xlsx`);
   };
   const doExportAll = () => {
@@ -2066,9 +2138,10 @@ function ExportImportPage({ db, setDb, saveNow }) {
       entries.push({ yr, half, schools });
     }));
     if (!entries.length) return;
-    XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정");   // 전체 현장일정(날짜·담당자)
-    XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");   // 전체 예산표
-    XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");   // 전체 특이사항
+    XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries), "현장일정");          // 전체 현장일정(달력)
+    XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정(목록)");     // 전체 현장일정(목록)
+    XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");             // 전체 예산표
+    XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");            // 전체 특이사항
     XLSX.writeFile(wb, "시설물_리스트_전체.xlsx");
   };
 
