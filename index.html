@@ -2332,7 +2332,12 @@ function stripUndefined(v) {
   if (Array.isArray(v)) return v.map(stripUndefined);
   if (v && typeof v === "object") {
     const o = {};
-    for (const k in v) { if (v[k] !== undefined) o[k] = stripUndefined(v[k]); }
+    for (const k in v) {
+      if (v[k] === undefined) continue;
+      /* Firebase 키 금지 문자(. $ # [ ] / 와 제어문자) → _ 로 치환해야 저장이 거부되지 않음 */
+      const safeK = String(k).replace(/[.$#\[\]\/\u0000-\u001F\u007F]/g, "_");
+      o[safeK] = stripUndefined(v[k]);
+    }
     return o;
   }
   if (typeof v === "number" && !isFinite(v)) return null;   // NaN/Infinity → null (Firebase가 거부 → 전체 저장 실패 방지)
@@ -2351,8 +2356,9 @@ function countSchools(db) {
    실수로 지우는 일이 없음. 삭제는 null로 명시 → 되살아나지 않음. */
 function flatMapDb(db) {
   const m = {};
+  const safe = s => String(s).replace(/[.$#\[\]\/\u0000-\u001F\u007F]/g, "_");
   Object.entries(db||{}).forEach(([yr,hs]) => Object.entries(hs||{}).forEach(([half,arr]) => {
-    (arr||[]).forEach(s => { if (s && s.id != null) m[`${yr}/${half}/${s.id}`] = s; });
+    (arr||[]).forEach(s => { if (s && s.id != null) m[`${safe(yr)}/${safe(half)}/${safe(s.id)}`] = s; });
   }));
   return m;
 }
@@ -2547,7 +2553,7 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
           <span style={{color:C.t3}}>화면 데이터</span>
           <span style={{fontWeight:700,color:C.t1}}>{countSchools(db)}개 학교 ({localBuckets})</span>
           <span style={{color:C.t3}}>마지막 저장</span>
-          <span style={{fontWeight:700,color:lastSync?(lastSync.ok?C.green:C.red):C.t4}}>{lastSync ? (lastSync.ok ? `성공 ✓ (${lastSync.n}건, ${fmtT(lastSync.at)})` : `실패 ✗ ${lastSync.err}`) : "아직 변경/저장 없음"}</span>
+          <span style={{fontWeight:700,color:lastSync?(lastSync.ok===null?C.blue:lastSync.ok?C.green:C.red):C.t4}}>{lastSync ? (lastSync.ok===null ? `저장 중… (${lastSync.n}건)` : lastSync.ok ? `성공 ✓ (${lastSync.n}건, ${fmtT(lastSync.at)})` : `실패 ✗ ${lastSync.err}`) : "아직 변경/저장 없음"}</span>
         </div>
         <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
           <button onClick={checkFirebase} disabled={diagBusy} style={{ padding:"10px 15px",borderRadius:9,border:`1.5px solid ${C.blue}50`,background:C.blueL,color:C.blue,fontSize:12,fontWeight:700,cursor:diagBusy?"default":"pointer",opacity:diagBusy?.6:1 }}>🔍 서버에 저장된 것 확인</button>
@@ -2603,9 +2609,9 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
                 if(!window.confirm(`지금 화면의 데이터(${countSchools(db)}개 학교)를 서버(Firebase)에 강제로 저장합니다.\n서버의 기존 데이터는 이 데이터로 교체됩니다. 계속할까요?`)) return;
                 try {
                   firebase.database().ref(FB_DATA).set(stripUndefined(dbToFb(db)))
-                    .then(()=>window.alert("✅ 저장 완료! 다른 기기에서도 동일하게 보입니다."))
-                    .catch(e=>window.alert("저장 실패: "+e.message));
-                } catch(e){ window.alert("Firebase 연결을 확인하세요."); }
+                    .then(()=>window.alert(`✅ 저장 완료! 서버에 ${countSchools(db)}개 학교 저장됨. 다른 기기에서도 동일하게 보입니다.`))
+                    .catch(e=>window.alert("❌ 저장 실패: "+((e&&e.message)||e)));
+                } catch(e){ window.alert("❌ 저장 실패(즉시 오류): "+((e&&e.message)||e)+"\n\n데이터에 Firebase 금지 문자가 있었을 수 있어요. 이번 업데이트로 자동 정리됩니다."); }
               }} style={{ padding:"11px 16px",borderRadius:9,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",boxShadow:`0 3px 10px ${C.blue}33` }}>
                 🔄 Firebase에 강제 저장
               </button>
@@ -3155,9 +3161,12 @@ function App() {
     if (keys.length === 0) { lastSynced.current = snapshot; return; }   // 변경 없음/원격 에코 → 저장 안 함
 
     setSyncing(true);
+    setLastSync({ ok:null, at:Date.now(), n:keys.length });   // 저장 시도 시작(진행 중)
     const doSave = () => {
-      dataRef.current.update(updates)
-        .then(() => {
+      let p;
+      try { p = dataRef.current.update(updates); }            // update()가 동기적으로 throw할 수 있음(잘못된 키 등)
+      catch (e) { console.error("[Firebase] update 호출 실패:", e); setLastSync({ ok:false, at:Date.now(), n:keys.length, err:(e&&e.message)||String(e) }); setSyncing(false); return; }
+      p.then(() => {
           metaRef.current?.set({ at: Date.now(), by: editorRef.current || "익명",
             cnt: countSchools(snapshot) }).catch(()=>{});
           lastSynced.current = snapshot;
