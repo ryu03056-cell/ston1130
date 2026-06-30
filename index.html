@@ -110,7 +110,7 @@ function getProgress(s) {
 }
 
 /* ── 기준일 & D-day ── */
-const BASE_DATE = "2026-05-26";
+const BASE_DATE = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })();
 const calcDday = (end, base = BASE_DATE) => {
   if (!end) return null;
   const [y,m,d]   = end.split("-").map(Number);
@@ -125,9 +125,9 @@ const BD = `1px solid ${C.border}`;
 const F  = `'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif`;
 
 const MENUS = [
-  { id:"overview", icon:"📊", label:"전체 현황" },
   { id:"schedule", icon:"📅", label:"현장 일정" },
   { id:"sites",    icon:"🏫", label:"현장 관리" },
+  { id:"overview", icon:"📊", label:"전체 현황" },
   { id:"chat",     icon:"💬", label:"팀 채팅" },
   { id:"urgent",   icon:"🚨", label:"긴급 보고서" },
   { id:"done",     icon:"✅", label:"완료 보고서" },
@@ -987,9 +987,9 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
    현장 일정 — 영구 캘린더 (드래그로 일정 변경)
 ══════════════════════════════════════════════════════════════ */
 function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
-  const today = new Date(2026, 4, 26);
-  const [yr, setYr] = useState(2026);
-  const [mo, setMo] = useState(5);
+  const today = new Date();
+  const [yr, setYr] = useState(today.getFullYear());
+  const [mo, setMo] = useState(today.getMonth()+1);
   const [teamF, setTeamF] = useState(globalTeam);
   const [dragging, setDragging] = useState(null);
   const [overDay, setOverDay] = useState(null);
@@ -1001,20 +1001,6 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
 
   const showToast = m => { setToast(m); setTimeout(()=>setToast(null), 2200); };
   const pad = n => String(n).padStart(2,"0");
-
-  /* 일정이 들어왔는데 현재 보는 달에 일정이 없으면, 일정이 가장 가까운 달로 자동 이동 (최초 1회) */
-  const didJump = useRef(false);
-  useEffect(() => {
-    if (didJump.current) return;
-    const dates = allSchools.flatMap(s => [s.field, s.start, s.end]).filter(Boolean).sort();
-    if (!dates.length) return;
-    const ref = `${yr}-${pad(mo)}`;
-    didJump.current = true;
-    if (dates.some(d => d.slice(0,7) === ref)) return;
-    const upcoming = dates.find(d => d.slice(0,7) >= ref) || dates[dates.length-1];
-    const [y,m] = upcoming.split("-").map(Number);
-    setYr(y); setMo(m);
-  }, [allSchools]);
 
   const toStr = day => `${yr}-${pad(mo)}-${pad(day)}`;
 
@@ -1094,10 +1080,10 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
       <div style={{ display:"flex",gap:16,flexDirection:isMobile?"column":"row" }}>
         <div style={{ flex:1,minWidth:0 }}>
           <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap" }}>
-            <button onClick={prevMonth} style={{ width:30,height:30,borderRadius:7,border:BD,background:C.surface,color:C.t2,fontSize:16,cursor:"pointer" }}>‹</button>
-            <div style={{ fontSize:18,fontWeight:800,color:C.t1,minWidth:120,textAlign:"center" }}>{yr}년 {mo}월</div>
-            <button onClick={nextMonth} style={{ width:30,height:30,borderRadius:7,border:BD,background:C.surface,color:C.t2,fontSize:16,cursor:"pointer" }}>›</button>
-            <button onClick={goToday} style={{ padding:"5px 12px",borderRadius:7,border:`1.5px solid ${C.blue}`,background:C.blueL,color:C.blue,fontSize:11,fontWeight:700,cursor:"pointer" }}>오늘</button>
+            <button onClick={prevMonth} style={{ width:isMobile?34:38,height:isMobile?34:38,borderRadius:8,border:BD,background:C.surface,color:C.t2,fontSize:20,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>‹</button>
+            <div style={{ fontSize:isMobile?22:30,fontWeight:900,color:C.t1,minWidth:isMobile?140:180,textAlign:"center",letterSpacing:-0.5 }}>{yr}년 {mo}월</div>
+            <button onClick={nextMonth} style={{ width:isMobile?34:38,height:isMobile?34:38,borderRadius:8,border:BD,background:C.surface,color:C.t2,fontSize:20,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>›</button>
+            <button onClick={goToday} style={{ padding:isMobile?"7px 14px":"8px 16px",borderRadius:8,border:`1.5px solid ${C.blue}`,background:C.blueL,color:C.blue,fontSize:isMobile?12:14,fontWeight:800,cursor:"pointer" }}>오늘</button>
             <div style={{ display:isMobile?"none":"flex",gap:4,marginLeft:6 }}>
               {[2024,2025,2026,2027].map(y=>(
                 <button key={y} onClick={()=>setYr(y)} style={{ padding:"4px 9px",borderRadius:6,border:`1px solid ${yr===y?C.blue:C.border}`,
@@ -1118,8 +1104,8 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
               <thead>
                 <tr style={{ background:C.surfaceL,borderBottom:`1.5px solid ${C.borderD}` }}>
                   {DOW.map((d,i)=>(
-                    <th key={d} style={{ padding:"10px 0",textAlign:"center",fontSize:11,fontWeight:700,
-                      color:i===0?C.red:C.t3,letterSpacing:1,borderRight:i<6?BD:"none",fontFamily:F }}>{d}</th>
+                    <th key={d} style={{ padding:isMobile?"9px 0":"12px 0",textAlign:"center",fontSize:isMobile?12:15,fontWeight:800,
+                      color:i===0?C.red:i===6?C.blue:C.t2,letterSpacing:1,borderRight:i<6?BD:"none",fontFamily:F }}>{d}</th>
                   ))}
                 </tr>
               </thead>
@@ -1142,9 +1128,10 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
                             outline:sel?`2px solid ${C.blue}`:over?`2px dashed ${C.blue}`:"none",outlineOffset:-2,
                             transition:"background .1s",position:"relative" }}>
                           {day && <>
-                            <div style={{ width:isMobile?24:28,height:isMobile?24:28,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:"50%",
-                              background:isToday(day)?C.blue:"transparent",color:isToday(day)?"#fff":di===0?C.red:C.t2,
-                              fontSize:isMobile?12:14,fontWeight:isToday(day)?800:600,marginBottom:isMobile?4:5 }}>{day}</div>
+                            <div style={{ width:isMobile?26:34,height:isMobile?26:34,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:"50%",
+                              background:isToday(day)?C.blue:"transparent",color:isToday(day)?"#fff":di===0?C.red:di===6?C.blue:C.t1,
+                              fontSize:isMobile?14:18,fontWeight:isToday(day)?900:700,marginBottom:isMobile?4:5,
+                              boxShadow:isToday(day)?`0 2px 8px ${C.blue}55`:"none" }}>{day}</div>
                             {over && <div style={{ position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-60%)",
                               fontSize:9,color:C.blue,fontWeight:700,pointerEvents:"none",zIndex:2,background:C.blueL,
                               padding:"2px 7px",borderRadius:4,border:`1px solid ${C.blue}30` }}>놓기</div>}
@@ -1576,8 +1563,8 @@ function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
    현장 관리 — 연도/반기 탭 + 테이블
 ══════════════════════════════════════════════════════════════ */
 function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
-  const [yr, setYr] = useState("2026");
-  const [half, setHalf] = useState("상반기");
+  const [yr, setYr] = useState(String(new Date().getFullYear()));
+  const [half, setHalf] = useState((new Date().getMonth()+1) <= 6 ? "상반기" : "하반기");
   /* 데이터가 들어왔는데 현재 탭이 비어 있으면, 데이터 있는 연/반기로 자동 이동 (최초 1회) */
   const didInit = useRef(false);
   useEffect(() => {
@@ -2948,7 +2935,7 @@ function App() {
     return DB;
   });
   const [sideOpen, setSideOpen] = useState(typeof window!=="undefined" ? window.innerWidth>=820 : true);
-  const [menu, setMenuRaw] = useState("overview");
+  const [menu, setMenuRaw] = useState("schedule");
   const [globalTeam, setGlobalTeam] = useState("전체");
   // 모바일에서 메뉴 선택 시 사이드바 자동 닫힘
   const setMenu = (m) => { setMenuRaw(m); if (window.innerWidth < 820) setSideOpen(false); };
