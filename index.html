@@ -1433,6 +1433,7 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
 function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
   const [sel, setSel] = useState(new Set());
   const [search, setSearch] = useState("");
+  const [keepOrig, setKeepOrig] = useState(false);   // 원본 날짜·진행 그대로 이월
 
   const buckets = [];
   Object.keys(db||{}).sort((a,b)=>b-a).forEach(y => ["상반기","하반기"].forEach(h => {
@@ -1448,16 +1449,27 @@ function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
   const allSelInBucket = bk => { const ks=bucketKeys(bk); return ks.length>0 && ks.every(k=>sel.has(k)); };
   const toggleBucket = bk => { const ks=bucketKeys(bk); setSel(p=>{ const n=new Set(p); const all=ks.every(k=>n.has(k)); ks.forEach(k=>all?n.delete(k):n.add(k)); return n; }); };
 
+  /* 완수일이 목적지 반기에 속하는지 (1년계약 이월용) */
+  const range = toHalf==="상반기" ? [1,6] : [7,12];
+  const inDestHalf = (s) => {
+    if (!s.end) return false;
+    const y = String(s.end).slice(0,4); const m = parseInt(String(s.end).slice(5,7),10);
+    return y===String(toYr) && m>=range[0] && m<=range[1];
+  };
+  const autoCandidates = [];
+  buckets.forEach(bk => bk.arr.forEach(s => { if (inDestHalf(s) && !destKeys.has(`${(s.school||"").trim()}|${(s.no||"").toString().trim()}`)) autoCandidates.push(keyOf(bk,s)); }));
+  const autoSelect = () => { setSel(new Set(autoCandidates)); setKeepOrig(true); };
+
   const doCopy = () => {
     const picked = [];
     buckets.forEach(bk => bk.arr.forEach(s => { if (sel.has(keyOf(bk,s))) picked.push(s); }));
     if (!picked.length) return;
-    const copies = picked.map(s => ({
-      ...s,
-      id: `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
-      field:"", start:"", end:"", progress:{}, assignees:[], headcount:s.headcount||1,
-      buildings: (s.buildings||[]).map(b=>({ ...b, rep:false, fmsD:false, delivery:null })),
-    }));
+    const copies = picked.map(s => keepOrig
+      ? ({ ...s, id: `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
+           buildings: (s.buildings||[]).map(b=>({ ...b })) })   // 날짜·진행·상태 그대로 이월
+      : ({ ...s, id: `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
+           field:"", start:"", end:"", progress:{}, assignees:[], headcount:s.headcount||1,
+           buildings: (s.buildings||[]).map(b=>({ ...b, rep:false, fmsD:false, delivery:null })) }));   // 새 점검으로 초기화
     setDb(prev => { const n={...prev}; n[toYr]={...(prev[toYr]||{})}; n[toYr][toHalf]=[...(prev[toYr]?.[toHalf]||[]), ...copies]; return n; });
     onDone(copies.length);
   };
@@ -1473,9 +1485,31 @@ function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
         <div style={{ padding:"18px 20px",borderBottom:BD,flexShrink:0 }}>
           <div style={{ fontSize:17,fontWeight:900,color:C.t1 }}>📋 다른 반기에서 현장 복사</div>
           <div style={{ fontSize:12,color:C.t3,marginTop:4 }}>
-            선택한 현장을 <b style={{color:hc}}>{toYr}년 {toHalf}</b>로 복사해요. 날짜·진행·보고서/FMS/납품 상태는 초기화돼요.
+            선택한 현장을 <b style={{color:hc}}>{toYr}년 {toHalf}</b>로 복사해요.
           </div>
-          <div style={{ display:"flex",background:C.surfaceL,border:BD,borderRadius:8,padding:"7px 11px",gap:7,alignItems:"center",marginTop:12 }}>
+
+          {autoCandidates.length>0 && (
+            <div style={{ marginTop:12,padding:"11px 13px",background:hc+"0e",border:`1.5px solid ${hc}40`,borderRadius:10,display:"flex",alignItems:"center",gap:10 }}>
+              <span style={{ fontSize:18 }}>⚡</span>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:12,fontWeight:800,color:hc }}>완수일이 {toYr}년 {toHalf}인 현장 {autoCandidates.length}개</div>
+                <div style={{ fontSize:10,color:C.t3,marginTop:2 }}>1년 계약 등 하반기까지 이어지는 현장을 자동으로 골라줘요</div>
+              </div>
+              <button onClick={autoSelect} style={{ padding:"8px 14px",borderRadius:8,border:"none",background:hc,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}>자동 선택</button>
+            </div>
+          )}
+
+          <label style={{ marginTop:10,display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"8px 11px",background:C.surfaceL,borderRadius:8,border:BD }}>
+            <span onClick={()=>setKeepOrig(v=>!v)} style={{ width:38,height:22,borderRadius:11,background:keepOrig?C.green:C.borderD,position:"relative",transition:"background .15s",flexShrink:0 }}>
+              <span style={{ position:"absolute",top:2,left:keepOrig?18:2,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .15s",boxShadow:"0 1px 3px rgba(0,0,0,.3)" }}/>
+            </span>
+            <div style={{ flex:1 }} onClick={()=>setKeepOrig(v=>!v)}>
+              <div style={{ fontSize:12,fontWeight:700,color:C.t1 }}>날짜·진행상태 그대로 이월</div>
+              <div style={{ fontSize:10,color:C.t3,marginTop:1 }}>{keepOrig ? "완수일·진행단계·보고서/FMS/납품 상태를 그대로 가져와요 (이어지는 계약)" : "새 점검으로 날짜·진행·상태를 초기화해요"}</div>
+            </div>
+          </label>
+
+          <div style={{ display:"flex",background:C.surfaceL,border:BD,borderRadius:8,padding:"7px 11px",gap:7,alignItems:"center",marginTop:10 }}>
             <span style={{ color:C.t4 }}>⌕</span>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="학교명·지역 검색"
               style={{ background:"transparent",border:"none",color:C.t1,fontSize:13,outline:"none",flex:1 }}/>
