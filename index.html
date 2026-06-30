@@ -930,41 +930,45 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
   };
 
   return (
-    <div style={{ width:isMobile?"100%":248,flexShrink:0 }}>
-      <div style={{ background:C.surface,border:BD,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.05)",position:isMobile?"static":"sticky",top:0 }}>
-        <div style={{ padding:"13px 15px",borderBottom:BD,background:C.blueL,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+    <>
+      <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(30,35,50,.35)",backdropFilter:"blur(2px)",zIndex:290 }}/>
+      <div style={{ position:"fixed",top:0,right:0,height:"100vh",width:isMobile?"100vw":460,maxWidth:"96vw",
+        background:C.surface,borderLeft:`4px solid ${C.blue}`,boxShadow:"-10px 0 40px rgba(0,0,0,.20)",zIndex:291,
+        display:"flex",flexDirection:"column",animation:"daySlide .22s cubic-bezier(.2,.8,.2,1)" }}>
+        <style>{`@keyframes daySlide{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
+        <div style={{ padding:"18px 20px",borderBottom:BD,background:C.blueL,display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0 }}>
           <div>
-            <div style={{ fontSize:18,fontWeight:900,color:C.blue,lineHeight:1 }}>{label}</div>
-            <div style={{ fontSize:10,color:C.blue+"bb",marginTop:3 }}>현장 {fieldSchools.length} · 착수 {startSchools.length} · 완수 {endSchools.length} · 총 {total}건</div>
+            <div style={{ fontSize:22,fontWeight:900,color:C.blue,lineHeight:1.1 }}>{label}</div>
+            <div style={{ fontSize:12,color:C.blue+"bb",marginTop:5 }}>현장 {fieldSchools.length} · 착수 {startSchools.length} · 완수 {endSchools.length} · 총 {total}건</div>
           </div>
-          <button onClick={onClose} style={{ width:22,height:22,borderRadius:"50%",background:`${C.blue}20`,
-            border:`1px solid ${C.blue}40`,color:C.blue,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>×</button>
+          <button onClick={onClose} style={{ width:32,height:32,borderRadius:"50%",background:`${C.blue}20`,
+            border:`1px solid ${C.blue}40`,color:C.blue,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,flexShrink:0 }}>×</button>
         </div>
-        <div style={{ maxHeight:isMobile?"none":"calc(100vh - 240px)",overflowY:"auto",padding:"12px 13px" }}>
-          {total===0 && <div style={{ textAlign:"center",padding:"32px 0",color:C.t4 }}><div style={{ fontSize:24,marginBottom:8 }}>—</div><div style={{ fontSize:11 }}>등록된 일정 없음</div></div>}
+        <div style={{ flex:1,overflowY:"auto",padding:"16px 18px" }}>
+          {total===0 && <div style={{ textAlign:"center",padding:"60px 0",color:C.t4 }}><div style={{ fontSize:30,marginBottom:10 }}>—</div><div style={{ fontSize:13 }}>등록된 일정 없음</div></div>}
           {fieldSchools.length>0 && (
-            <div style={{ marginBottom:14 }}>
-              <div style={{ display:"flex",alignItems:"center",gap:5,marginBottom:8,padding:"5px 8px",background:C.blueL,borderRadius:6 }}>
-                <span style={{ fontSize:13 }}>📍</span><span style={{ fontSize:11,fontWeight:700,color:C.blue }}>현장조사</span>
-                <span style={{ marginLeft:"auto",background:C.blue,color:"#fff",padding:"1px 7px",borderRadius:10,fontSize:10,fontWeight:700 }}>{fieldSchools.length}</span>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:9,padding:"7px 10px",background:C.blueL,borderRadius:7 }}>
+                <span style={{ fontSize:15 }}>📍</span><span style={{ fontSize:13,fontWeight:800,color:C.blue }}>현장조사</span>
+                <span style={{ marginLeft:"auto",background:C.blue,color:"#fff",padding:"2px 9px",borderRadius:10,fontSize:11,fontWeight:700 }}>{fieldSchools.length}</span>
               </div>
               {fieldSchools.map(s=><FieldCard key={s.id} s={s}/>)}
             </div>
           )}
           {startSchools.length>0 && (
-            <div style={{ marginBottom:14 }}>
-              <div style={{ display:"flex",alignItems:"center",gap:5,marginBottom:8,padding:"5px 8px",background:C.greenL,borderRadius:6 }}>
-                <span style={{ fontSize:13 }}>▶</span><span style={{ fontSize:11,fontWeight:700,color:C.green }}>착수일</span>
-                <span style={{ marginLeft:"auto",background:C.green,color:"#fff",padding:"1px 7px",borderRadius:10,fontSize:10,fontWeight:700 }}>{startSchools.length}</span>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:9,padding:"7px 10px",background:C.greenL,borderRadius:7 }}>
+                <span style={{ fontSize:15 }}>▶</span><span style={{ fontSize:13,fontWeight:800,color:C.green }}>착수일</span>
+                <span style={{ marginLeft:"auto",background:C.green,color:"#fff",padding:"2px 9px",borderRadius:10,fontSize:11,fontWeight:700 }}>{startSchools.length}</span>
               </div>
               {startSchools.map(s=><StartCard key={s.id} s={s}/>)}
             </div>
           )}
           {endSchools.length>0 && (
             <div>
-              <div style={{ display:"flex",alignItems:"center",gap:5,marginBottom:8,padding:"5px 8px",background:C.orangeL,borderRadius:6 }}>
-                <span style={{ fontSize:13 }}>📦</span><span style={{ fontSize:11,fontWeight:700,color:C.orange }}>완수일</span>
-                <span style={{ marginLeft:"auto",background:C.orange,color:"#fff",padding:"1px 7px",borderRadius:10,fontSize:10,fontWeight:700 }}>{endSchools.length}</span>
+              <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:9,padding:"7px 10px",background:C.orangeL,borderRadius:7 }}>
+                <span style={{ fontSize:15 }}>📦</span><span style={{ fontSize:13,fontWeight:800,color:C.orange }}>완수일</span>
+                <span style={{ marginLeft:"auto",background:C.orange,color:"#fff",padding:"2px 9px",borderRadius:10,fontSize:11,fontWeight:700 }}>{endSchools.length}</span>
               </div>
               {endSchools.map(s=><EndCard key={s.id} s={s}/>)}
             </div>
@@ -972,7 +976,7 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
         </div>
       </div>
       {editSc && <EditPanel sc={editSc} yr={editSc._year} half={editSc._half} setDb={setDb} onClose={()=>setEditId(null)}/>}
-    </div>
+    </>
   );
 }
 
@@ -1129,36 +1133,36 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
                           onDragOver={e=>{e.preventDefault();setOverDay(day);}}
                           onDragLeave={()=>setOverDay(null)}
                           onDrop={()=>handleDrop(day)}
-                          style={{ padding:"6px 6px 5px",verticalAlign:"top",height:isMobile?92:140,width:"14.285%",
+                          style={{ padding:isMobile?"6px 6px 5px":"7px 8px 7px",verticalAlign:"top",height:isMobile?92:118,width:"14.285%",
                             borderRight:di<6?BD:"none",cursor:day?"pointer":"default",
                             background:sel?"rgba(29,111,242,.11)":over?"rgba(29,111,242,.09)":isToday(day)?"rgba(29,111,242,.05)":"transparent",
                             outline:sel?`2px solid ${C.blue}`:over?`2px dashed ${C.blue}`:"none",outlineOffset:-2,
                             transition:"background .1s",position:"relative" }}>
                           {day && <>
-                            <div style={{ width:24,height:24,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:"50%",
+                            <div style={{ width:isMobile?24:28,height:isMobile?24:28,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:"50%",
                               background:isToday(day)?C.blue:"transparent",color:isToday(day)?"#fff":di===0?C.red:C.t2,
-                              fontSize:12,fontWeight:isToday(day)?700:500,marginBottom:4 }}>{day}</div>
+                              fontSize:isMobile?12:14,fontWeight:isToday(day)?800:600,marginBottom:isMobile?4:5 }}>{day}</div>
                             {over && <div style={{ position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-60%)",
                               fontSize:9,color:C.blue,fontWeight:700,pointerEvents:"none",zIndex:2,background:C.blueL,
                               padding:"2px 7px",borderRadius:4,border:`1px solid ${C.blue}30` }}>놓기</div>}
-                            <div style={{ display:"flex",flexDirection:"column",gap:2 }}>
-                              {evs.slice(0,isMobile?2:3).map((e,ei)=>(
+                            <div style={{ display:"flex",flexDirection:"column",gap:isMobile?2:3 }}>
+                              {evs.slice(0,isMobile?2:99).map((e,ei)=>(
                                 <div key={ei} draggable
                                   onDragStart={()=>setDragging({schoolId:e.schoolId,field:e.field,fromDay:day})}
                                   onDragEnd={()=>{setDragging(null);setOverDay(null);}}
                                   title={`${e.school} · ${e.label} · ${e.assignees.length>0?e.assignees.join(","):e.headcount+"명"}`}
-                                  style={{ padding:"2px 5px",borderRadius:4,background:`${evColor(e.field,e.team)}15`,
-                                    borderLeft:`2.5px solid ${evColor(e.field,e.team)}`,fontSize:9,color:evColor(e.field,e.team),
+                                  style={{ padding:isMobile?"2px 5px":"3px 7px",borderRadius:4,background:`${evColor(e.field,e.team)}15`,
+                                    borderLeft:`3px solid ${evColor(e.field,e.team)}`,fontSize:isMobile?9:12,color:evColor(e.field,e.team),
                                     fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"grab",
                                     boxShadow:"0 1px 3px rgba(0,0,0,.07)",
                                     opacity:dragging?.schoolId===e.schoolId&&dragging?.field===e.field?0.4:1 }}>
-                                  <span>{e.school.length>4?e.school.slice(0,4)+"…":e.school}</span>
+                                  <span>{e.school.length>(isMobile?4:11)?e.school.slice(0,isMobile?4:11)+"…":e.school}</span>
                                   {e.field==="end" && <span> 📦</span>}
                                   {e.field==="start" && <span> ▶</span>}
-                                  {e.field==="field" && <span style={{opacity:.85,fontSize:8}}>{e.assignees.length>0?` (${e.assignees.map(n=>n[0]).join("·")})`:` ${e.headcount}명`}</span>}
+                                  {e.field==="field" && <span style={{opacity:.85,fontSize:isMobile?8:10}}>{e.assignees.length>0?` (${e.assignees.map(n=>n[0]).join("·")})`:` ${e.headcount}명`}</span>}
                                 </div>
                               ))}
-                              {evs.length>(isMobile?2:3) && <div style={{ fontSize:9,color:C.t4,paddingLeft:4 }}>+{evs.length-(isMobile?2:3)}건</div>}
+                              {evs.length>(isMobile?2:99) && <div style={{ fontSize:isMobile?9:11,color:C.t4,paddingLeft:4 }}>+{evs.length-(isMobile?2:99)}건</div>}
                             </div>
                           </>}
                         </td>
@@ -1184,14 +1188,7 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
           </div>
         </div>
 
-        {selDay
-          ? <DayPanel dateStr={toStr(selDay)} label={selLabel} allSchools={allSchools} teamF={teamF} setDb={setDb} onClose={()=>setSelDay(null)} isMobile={isMobile}/>
-          : <div style={{ width:isMobile?"100%":248,flexShrink:0 }}>
-              <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"32px 16px",textAlign:"center",color:C.t4,boxShadow:"0 2px 8px rgba(0,0,0,.05)" }}>
-                <div style={{ fontSize:32,marginBottom:8 }}>📅</div>
-                <div style={{ fontSize:11,lineHeight:1.6 }}>날짜를 클릭하면<br/>현장·완수·인원 정보가<br/>표시됩니다</div>
-              </div>
-            </div>}
+        {selDay && <DayPanel dateStr={toStr(selDay)} label={selLabel} allSchools={allSchools} teamF={teamF} setDb={setDb} onClose={()=>setSelDay(null)} isMobile={isMobile}/>}
       </div>
       <Toast msg={toast}/>
     </div>
