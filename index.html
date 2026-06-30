@@ -2414,7 +2414,7 @@ function diffDb(prev, next) {
 /* ══════════════════════════════════════════════════════════════
    설정 / 관리자 모드 (팀·인원 관리 + 수정 로그)
 ══════════════════════════════════════════════════════════════ */
-function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db, setDb }) {
+function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db, setDb, online, fbStatus, lastSync, meta, users }) {
   const [admin, setAdmin] = useState(false);
   const [pw, setPw] = useState("");
   const [pwErr, setPwErr] = useState("");
@@ -2422,6 +2422,8 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
   const [newTeam, setNewTeam] = useState("");
   const [revEdit, setRevEdit] = useState(null);    // 매출 편집중 학교 id
   const [revVal, setRevVal] = useState("");
+  const [diag, setDiag] = useState(null);          // Firebase 직접 확인 결과
+  const [diagBusy, setDiagBusy] = useState(false);
   const won = n => n ? `${Number(n).toLocaleString()}원` : "-";
 
   /* 모든 학교 평면화 (매출용) */
@@ -2498,11 +2500,60 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
   };
   const actColor = a => a==="추가"?C.green : a==="삭제"?C.red : C.blue;
 
+  /* 동기화 진단: 서버에 실제 뭐가 저장돼 있는지 직접 읽고, 쓰기 권한을 테스트 */
+  const fmtT = (ts) => { const d=new Date(ts); const p=n=>String(n).padStart(2,"0"); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+  const localBuckets = Object.entries(db||{}).flatMap(([yr,hs])=>Object.entries(hs||{}).map(([h,a])=>`${String(yr).slice(2)}${h==="상반기"?"상":"하"} ${(a||[]).length}`)).join(" · ") || "없음";
+  const checkFirebase = () => {
+    setDiagBusy(true); setDiag(null);
+    try {
+      firebase.database().ref(FB_DATA).once("value")
+        .then(snap => {
+          const raw = snap.val() || {}; const lines = []; let total = 0;
+          Object.entries(raw).forEach(([yr,hs]) => Object.entries(hs||{}).forEach(([half,obj]) => {
+            const n = obj ? Object.keys(obj).length : 0; total += n; lines.push(`  ${yr} ${half}: ${n}개`);
+          }));
+          const loc = countSchools(db);
+          setDiag({ text:`📡 서버에 실제 저장된 데이터:\n${lines.join("\n")||"  (비어 있음)"}\n\n서버 합계 ${total}개 · 화면 ${loc}개\n${total===loc?"→ 일치 ✓ 저장 정상":"→ 불일치 ✗ 화면 데이터가 서버에 저장 안 됨"}` });
+          setDiagBusy(false);
+        })
+        .catch(e => { setDiag({ err:true, text:`❌ 서버 읽기 실패: ${e.message}\n→ 인증 또는 보안 규칙 문제` }); setDiagBusy(false); });
+    } catch(e) { setDiag({ err:true, text:"Firebase 연결 안됨: "+e.message }); setDiagBusy(false); }
+  };
+  const testWrite = () => {
+    setDiagBusy(true); setDiag(null);
+    try {
+      const tRef = firebase.database().ref("ston/_writetest");
+      tRef.set({ at:Date.now(), by:editor||"test" })
+        .then(() => { setDiag({ text:"✅ 쓰기 성공! 서버에 저장할 권한이 있습니다.\n→ 저장 기능은 정상이에요." }); tRef.remove().catch(()=>{}); setDiagBusy(false); })
+        .catch(e => { setDiag({ err:true, text:`❌ 쓰기 실패: ${e.message}\n\n이게 데이터가 사라지는 원인일 수 있어요!\nFirebase 콘솔에서 확인하세요:\n1) Authentication → 로그인 방법 → 익명 사용 설정\n2) Realtime Database → 규칙 → ".write": "auth != null"` }); setDiagBusy(false); });
+    } catch(e) { setDiag({ err:true, text:"Firebase 연결 안됨: "+e.message }); setDiagBusy(false); }
+  };
+
   return (
     <div style={{ maxWidth:720,margin:"0 auto" }}>
       <div style={{ marginBottom:20 }}>
         <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>SETTINGS</div>
         <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>설정</h1>
+      </div>
+
+      {/* 🩺 동기화 진단 (항상 표시) */}
+      <div style={{ background:C.surface,border:`1.5px solid ${lastSync&&!lastSync.ok?C.red+"60":C.border}`,borderRadius:12,padding:"16px 18px",marginBottom:14 }}>
+        <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:10 }}>🩺 동기화 진단</div>
+        <div style={{ display:"grid",gridTemplateColumns:"auto 1fr",gap:"7px 12px",fontSize:12,marginBottom:12,alignItems:"center" }}>
+          <span style={{color:C.t3}}>인증</span>
+          <span style={{fontWeight:700,color:authUser?C.green:C.red}}>{authUser ? (authUser.isAnonymous ? "익명 로그인됨 ✓" : `이메일 로그인 (${authUser.email})`) : "❌ 인증 안 됨 — 저장 불가!"}</span>
+          <span style={{color:C.t3}}>실시간 연결</span>
+          <span style={{fontWeight:700,color:online?C.green:C.orange}}>{online ? "연결됨 ✓" : (fbStatus||"끊김")}</span>
+          <span style={{color:C.t3}}>화면 데이터</span>
+          <span style={{fontWeight:700,color:C.t1}}>{countSchools(db)}개 학교 ({localBuckets})</span>
+          <span style={{color:C.t3}}>마지막 저장</span>
+          <span style={{fontWeight:700,color:lastSync?(lastSync.ok?C.green:C.red):C.t4}}>{lastSync ? (lastSync.ok ? `성공 ✓ (${lastSync.n}건, ${fmtT(lastSync.at)})` : `실패 ✗ ${lastSync.err}`) : "아직 변경/저장 없음"}</span>
+        </div>
+        <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+          <button onClick={checkFirebase} disabled={diagBusy} style={{ padding:"10px 15px",borderRadius:9,border:`1.5px solid ${C.blue}50`,background:C.blueL,color:C.blue,fontSize:12,fontWeight:700,cursor:diagBusy?"default":"pointer",opacity:diagBusy?.6:1 }}>🔍 서버에 저장된 것 확인</button>
+          <button onClick={testWrite} disabled={diagBusy} style={{ padding:"10px 15px",borderRadius:9,border:`1.5px solid ${C.purple}50`,background:C.purpleL,color:C.purple,fontSize:12,fontWeight:700,cursor:diagBusy?"default":"pointer",opacity:diagBusy?.6:1 }}>🧪 쓰기 권한 테스트</button>
+        </div>
+        {diag && <div style={{ marginTop:11,padding:"11px 13px",background:diag.err?C.redL:C.surfaceL,border:`1px solid ${diag.err?C.red+"40":C.border}`,borderRadius:8,fontSize:11.5,color:diag.err?C.red:C.t2,whiteSpace:"pre-wrap",lineHeight:1.6 }}>{diag.text}</div>}
       </div>
 
       {/* 내 계정 */}
@@ -2968,6 +3019,7 @@ function App() {
   const [fbStatus, setFbStatus] = useState("연결 중...");
   const [online,   setOnline]   = useState(false);   // .info/connected
   const [syncing,  setSyncing]  = useState(false);    // 저장 중 표시
+  const [lastSync, setLastSync] = useState(null);     // 마지막 저장 결과 {ok,at,n,err}
   const [loaded,   setLoaded]   = useState(false);    // 첫 데이터 도착
   const [users,    setUsers]    = useState(0);        // 동시 접속자
   const [meta,     setMeta]     = useState(null);     // { at, by }
@@ -3109,8 +3161,9 @@ function App() {
           metaRef.current?.set({ at: Date.now(), by: editorRef.current || "익명",
             cnt: countSchools(snapshot) }).catch(()=>{});
           lastSynced.current = snapshot;
+          setLastSync({ ok:true, at:Date.now(), n:keys.length });
         })
-        .catch(e => console.error("[Firebase] 저장 실패:", e))
+        .catch(e => { console.error("[Firebase] 저장 실패:", e); setLastSync({ ok:false, at:Date.now(), n:keys.length, err:(e&&e.message)||String(e) }); })
         .finally(() => setSyncing(false));
     };
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -3200,7 +3253,7 @@ function App() {
       </div>
     ),
     export: <ExportImportPage db={db} setDb={setDb}/>,
-    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb}/>,
+    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb} online={online} fbStatus={fbStatus} lastSync={lastSync} meta={meta} users={users}/>,
   };
 
   /* 인증 게이트 */
