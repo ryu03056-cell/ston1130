@@ -2281,10 +2281,12 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
         <div style={{ width:40,height:40,borderRadius:"50%",background:C.blueL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>👤</div>
         <div style={{ flex:1 }}>
           <div style={{ fontSize:14,fontWeight:800,color:C.t1 }}>{editor || "이름 미설정"}</div>
-          <div style={{ fontSize:11,color:C.t3 }}>{authUser?.email}</div>
+          <div style={{ fontSize:11,color:C.t3 }}>{authUser?.email || (authUser?.isAnonymous ? "링크 접속 (로그인 없음)" : "")}</div>
         </div>
-        <button onClick={onLogout} style={{ padding:"8px 16px",borderRadius:8,border:`1.5px solid ${C.red}40`,
-          background:C.redL,color:C.red,fontSize:12,fontWeight:700,cursor:"pointer" }}>로그아웃</button>
+        {authUser?.email
+          ? <button onClick={onLogout} style={{ padding:"8px 16px",borderRadius:8,border:`1.5px solid ${C.red}40`,
+              background:C.redL,color:C.red,fontSize:12,fontWeight:700,cursor:"pointer" }}>로그아웃</button>
+          : null}
       </div>
 
       {/* 관리자 모드 */}
@@ -2778,8 +2780,12 @@ function App() {
             CURRENT_USER = { uid:user.uid, email:user.email, name:(editorRef.current||user.email||"") };
             setAuthUser(user);
           } else {
-            CURRENT_USER = { uid:null, email:null, name:"" };
-            setAuthUser(null);
+            /* 로그인 화면 없이 자동 익명 로그인 → 링크만 있으면 누구나 접속 */
+            firebase.auth().signInAnonymously().catch((e) => {
+              console.error("[Firebase] 익명 로그인 실패:", e);
+              setFbStatus("익명 로그인 실패 (Firebase에서 익명 인증을 켜세요)");
+              setAuthUser(null);   // 실패 시에만 로그인 화면
+            });
           }
         });
       } else { setAuthUser(null); setFbStatus("오프라인 (인증 SDK 없음)"); }
@@ -2973,7 +2979,7 @@ function App() {
       <div style={{ minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,fontFamily:F }}>
         <div style={{ fontSize:26,fontWeight:900,color:C.t1 }}><span style={{ color:C.blue }}>◈</span> STON</div>
         <div style={{ width:30,height:30,border:`3px solid ${C.border}`,borderTopColor:C.blue,borderRadius:"50%",animation:"spin .8s linear infinite" }}/>
-        <div style={{ fontSize:12,color:C.t3 }}>로그인 상태 확인 중…</div>
+        <div style={{ fontSize:12,color:C.t3 }}>불러오는 중…</div>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </div>
     );
