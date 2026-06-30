@@ -707,15 +707,20 @@ function buildScheduleSheet(entries) {
   return buildAuxSheet(headers, rows, meta);
 }
 
-/* 현장일정 캘린더 시트 — 월별 달력 그리드, 각 날짜 칸에 그날의 조사/착수/완수+학교명. entries:[{yr,half,schools}] */
+/* 현장일정 캘린더 시트 — 월별 달력. 왼쪽 팀 라벨 + 팀색, 각 날짜 칸에 학교명+담당자(누가 나가는지). entries:[{yr,half,schools}] */
 function buildCalendarSheet(entries) {
   const today = new Date(); today.setHours(0,0,0,0);
   const tkey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
   const LABEL = { 현장조사:"조사", 착수:"착수", 완수:"완수" };
-  const ev = {};
-  const add = (d,type,s) => { const k=String(d||"").slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(k))return; (ev[k]=ev[k]||[]).push(`${LABEL[type]}·${s.school||""}`); };
-  entries.forEach(({schools}) => (schools||[]).forEach(s => { add(s.field,"현장조사",s); add(s.start,"착수",s); add(s.end,"완수",s); }));
-  const keys = Object.keys(ev).sort();
+  const byDay = {};   // dk -> { team -> ["조사·성남중\n(한상오,채승준)", ...] }
+  const addEv = (d,type,s) => {
+    const k = String(d||"").slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+    const team = s.team || "기타";
+    const who = (s.assignees||[]).join(",") || "미정";
+    (byDay[k]=byDay[k]||{}); (byDay[k][team]=byDay[k][team]||[]).push(`${LABEL[type]}·${s.school||""}\n(${who})`);
+  };
+  entries.forEach(({schools})=> (schools||[]).forEach(s => { addEv(s.field,"현장조사",s); addEv(s.start,"착수",s); addEv(s.end,"완수",s); }));
+  const keys = Object.keys(byDay).sort();
   if (!keys.length) { const w0=XLSX.utils.aoa_to_sheet([["등록된 현장일정이 없습니다."]]); w0["!cols"]=[{wch:40}]; return w0; }
 
   const WD = ["일","월","화","수","목","금","토"];
@@ -723,58 +728,75 @@ function buildCalendarSheet(entries) {
   const thin = c => ({ style:"thin", color:{ rgb:c } });
   const bd = c => ({ top:thin(c), bottom:thin(c), left:thin(c), right:thin(c) });
   const wkC = c => c===0 ? "FFD64545" : c===6 ? "FF1559C9" : "FF1A2332";   // 일=빨강, 토=파랑
+  const fill = h => ({ patternType:"solid", fgColor:{ rgb:h } });
 
-  const aoa = [], rowH = [], merges = [], styles = {};
-  const setS = (r,c,st) => { styles[`${r}_${c}`] = st; };
-  const [fy,fm] = keys[0].split("-").map(Number);
-  const [ly,lm] = keys[keys.length-1].split("-").map(Number);
-  let y=fy, m=fm;
+  const aoa=[], rowH=[], merges=[], styles={};
+  const setS=(r,c,st)=>{ styles[`${r}_${c}`]=st; };
+  const present = new Set(); Object.values(byDay).forEach(tm=>Object.keys(tm).forEach(t=>present.add(t)));
+  const orderTeams = set => [...TEAM_LIST.filter(t=>set.has(t)), ...[...set].filter(t=>!TEAM_LIST.includes(t))];
+
+  /* 팀 편성(명단) 범례 */
+  const rosterTeams = orderTeams(present);
+  if (rosterTeams.length && rosterTeams.length<=7) {
+    const rR = aoa.length;
+    const cells = rosterTeams.map(t=>`${t}\n${(TEAM_MEMBERS[t]||[]).join("·")||"—"}`);
+    aoa.push(["👥 팀", ...cells, ...new Array(7-cells.length).fill("")]);
+    setS(rR,0,{ font:{name:FNT,sz:10,bold:true,color:{rgb:"FF1A2332"}}, fill:fill("FFEAF1FB"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") });
+    rosterTeams.forEach((t,i)=>{ const [,tfg]=XL_TEAM_COLOR(t); setS(rR,i+1,{ font:{name:FNT,sz:9,bold:true,color:{rgb:"FFFFFFFF"}}, fill:fill(tfg), alignment:{horizontal:"center",vertical:"center",wrapText:true}, border:bd(tfg) }); });
+    for (let c=rosterTeams.length+1;c<=7;c++) setS(rR,c,{ fill:fill("FFFFFFFF"), border:bd("FFF2F4F7") });
+    rowH[rR]={hpt:40}; aoa.push(new Array(8).fill("")); rowH[aoa.length-1]={hpt:6};
+  }
+
+  const [fy,fm]=keys[0].split("-").map(Number); const [ly,lm]=keys[keys.length-1].split("-").map(Number);
+  let y=fy,m=fm;
   while (y<ly || (y===ly && m<=lm)) {
-    if (keys.some(k => { const a=k.split("-"); return +a[0]===y && +a[1]===m; })) {
-      const rT = aoa.length;
-      aoa.push([`${y}년 ${m}월`,"","","","","",""]);
-      merges.push({ s:{r:rT,c:0}, e:{r:rT,c:6} });
-      setS(rT,0,{ font:{name:FNT,sz:13,bold:true,color:{rgb:"FFFFFFFF"}}, fill:{patternType:"solid",fgColor:{rgb:"FF1D6FF2"}}, alignment:{horizontal:"center",vertical:"center"}, border:bd("FF1559C9") });
-      rowH[rT] = { hpt:26 };
-      const rW = aoa.length;
-      aoa.push(WD.slice());
-      WD.forEach((w,c)=> setS(rW,c,{ font:{name:FNT,sz:10,bold:true,color:{rgb:wkC(c)}}, fill:{patternType:"solid",fgColor:{rgb:"FFF0F4FA"}}, alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") }));
-      rowH[rW] = { hpt:20 };
-      const firstDow = new Date(y,m-1,1).getDay();
-      const daysIn = new Date(y,m,0).getDate();
-      const weeks = Math.ceil((firstDow+daysIn)/7);
-      let day = 1;
+    const monthKeys = keys.filter(k=>{const a=k.split("-");return +a[0]===y&&+a[1]===m;});
+    if (monthKeys.length) {
+      const mSet=new Set(); monthKeys.forEach(k=>Object.keys(byDay[k]).forEach(t=>mSet.add(t)));
+      const monthTeams = orderTeams(mSet);
+      /* 제목 */
+      const rT=aoa.length; aoa.push([`${y}년 ${m}월`,"","","","","","",""]);
+      merges.push({ s:{r:rT,c:0}, e:{r:rT,c:7} });
+      setS(rT,0,{ font:{name:FNT,sz:13,bold:true,color:{rgb:"FFFFFFFF"}}, fill:fill("FF1D6FF2"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FF1559C9") });
+      rowH[rT]={hpt:26};
+      /* 요일 헤더 */
+      const rW=aoa.length; aoa.push(["", ...WD]);
+      setS(rW,0,{ font:{name:FNT,sz:9,bold:true,color:{rgb:"FF8A94A6"}}, fill:fill("FFF0F4FA"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") });
+      WD.forEach((w,c)=> setS(rW,c+1,{ font:{name:FNT,sz:10,bold:true,color:{rgb:wkC(c)}}, fill:fill("FFF0F4FA"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") }));
+      rowH[rW]={hpt:20};
+      /* 주차별 */
+      const firstDow=new Date(y,m-1,1).getDay(); const daysIn=new Date(y,m,0).getDate(); const weeks=Math.ceil((firstDow+daysIn)/7);
       for (let w=0; w<weeks; w++) {
-        const vals = [], cells = []; let maxLines = 1;
-        for (let c=0; c<7; c++) {
-          const idx = w*7+c;
-          if (idx<firstDow || day>daysIn) { vals.push(""); cells.push({c,blank:true}); }
-          else {
-            const dk = `${y}-${String(m).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-            const es = ev[dk]||[];
-            vals.push([String(day), ...es].join("\n"));
-            maxLines = Math.max(maxLines, 1+es.length);
-            cells.push({ c, dow:c, today:dk===tkey }); day++;
-          }
-        }
-        const rR = aoa.length;
-        aoa.push(vals);
-        rowH[rR] = { hpt: Math.max(38, maxLines*15+8) };
-        cells.forEach(cl => {
-          let bg = "FFFFFFFF";
-          if (cl.blank) bg = "FFF7F8FA"; else if (cl.today) bg = "FFFFF6D8"; else if (cl.dow===0) bg = "FFFDEEEE"; else if (cl.dow===6) bg = "FFEDF3FC";
-          setS(rR, cl.c, { font:{ name:FNT, sz:9, color:{ rgb: cl.blank?"FFB8C0CC":"FF1A2332" } }, fill:{ patternType:"solid", fgColor:{ rgb:bg } }, alignment:{ horizontal:"left", vertical:"top", wrapText:true }, border:bd(cl.today?"FFF0B400":"FFE0E6EE") });
+        const dayNums=[], dayMeta=[];
+        for (let c=0;c<7;c++){ const idx=w*7+c; const dnum=idx-firstDow+1;
+          if (idx<firstDow || dnum>daysIn){ dayNums.push(""); dayMeta.push({c,blank:true}); }
+          else { const dk=`${y}-${String(m).padStart(2,"0")}-${String(dnum).padStart(2,"0")}`; dayNums.push(String(dnum)); dayMeta.push({c,dnum,dk,dow:c,today:dk===tkey}); } }
+        /* 날짜 행 */
+        const rD=aoa.length; aoa.push(["", ...dayNums]);
+        setS(rD,0,{ font:{name:FNT,sz:9,color:{rgb:"FFB8C0CC"}}, fill:fill("FFFAFBFC"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFE0E6EE") });
+        dayMeta.forEach(dm=>{ const bg=dm.blank?"FFF7F8FA":dm.today?"FFFFF6D8":"FFFFFFFF"; setS(rD,dm.c+1,{ font:{name:FNT,sz:11,bold:true,color:{rgb:dm.blank?"FFCBD2DB":wkC(dm.dow)}}, fill:fill(bg), alignment:{horizontal:"left",vertical:"center"}, border:bd(dm.today?"FFF0B400":"FFE0E6EE") }); });
+        rowH[rD]={hpt:18};
+        /* 팀별 행 (그 주에 일정 있는 팀만) */
+        monthTeams.forEach(team=>{
+          const [tbg,tfg]=XL_TEAM_COLOR(team);
+          const cellVals=[]; let maxLines=1;
+          for (let c=0;c<7;c++){ const dm=dayMeta[c]; if(dm.blank){cellVals.push("");continue;} const es=(byDay[dm.dk]&&byDay[dm.dk][team])||[]; const txt=es.join("\n"); cellVals.push(txt); if(txt) maxLines=Math.max(maxLines,txt.split("\n").length); }
+          if (!cellVals.some(v=>v)) return;   // 그 주 해당 팀 일정 없으면 행 생략
+          const rTm=aoa.length; aoa.push([team, ...cellVals]);
+          setS(rTm,0,{ font:{name:FNT,sz:10.5,bold:true,color:{rgb:"FFFFFFFF"}}, fill:fill(tfg), alignment:{horizontal:"center",vertical:"center"}, border:{ top:thin(tfg), bottom:thin(tfg), left:{style:"medium",color:{rgb:tfg}}, right:thin("FFE0E6EE") } });
+          for (let c=0;c<7;c++){ const has=!!cellVals[c]; const dm=dayMeta[c]; setS(rTm,c+1,{ font:{name:FNT,sz:9,bold:has,color:{rgb: has?tfg:"FFB8C0CC"}}, fill:fill(has?tbg:(dm.blank?"FFF7F8FA":"FFFFFFFF")), alignment:{horizontal:"left",vertical:"top",wrapText:true}, border:{ top:thin("FFEEF1F5"), bottom:{ style: has?"medium":"thin", color:{ rgb: has?tfg:"FFEEF1F5" } }, left:thin("FFEEF1F5"), right:thin("FFEEF1F5") } }); }
+          rowH[rTm]={hpt:Math.max(20,maxLines*13+6)};
         });
       }
-      aoa.push(["","","","","","",""]); rowH[aoa.length-1] = { hpt:8 };
+      aoa.push(new Array(8).fill("")); rowH[aoa.length-1]={hpt:8};
     }
-    m++; if (m>12){m=1;y++;}
+    m++; if(m>12){m=1;y++;}
   }
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = new Array(7).fill(0).map(()=>({ wch:21 }));
-  ws["!merges"] = merges;
-  ws["!rows"] = aoa.map((_,i)=> rowH[i] || { hpt:16 });
-  Object.entries(styles).forEach(([rc,st]) => { const p=rc.split("_"); const a=XLSX.utils.encode_cell({ r:+p[0], c:+p[1] }); if(!ws[a])ws[a]={t:"s",v:""}; ws[a].s=st; });
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"]=[{wch:7}, ...new Array(7).fill(0).map(()=>({wch:18}))];
+  ws["!merges"]=merges;
+  ws["!rows"]=aoa.map((_,i)=>rowH[i]||{hpt:16});
+  Object.entries(styles).forEach(([rc,st])=>{const p=rc.split("_");const a=XLSX.utils.encode_cell({r:+p[0],c:+p[1]});if(!ws[a])ws[a]={t:"s",v:""};ws[a].s=st;});
   return ws;
 }
 function parseBudget(ws) {
