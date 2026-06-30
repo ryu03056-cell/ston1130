@@ -321,8 +321,11 @@ function useIsMobile(bp = 820) {
             18특기 19보고서완료(◎) 20납품 21FMS등록(◎)
 ══════════════════════════════════════════════════════════════ */
 function parseSheetName(name) {
-  /* 정확히 "26년(상)" 형식만 인식 — "26년(상) 특이사항" 같은 변형 시트는 제외 */
-  const m = String(name).match(/^\s*(\d{2})년\s*\(\s*([상하])\s*\)\s*$/);
+  /* 데이터 시트(반기) 인식 — "26년(상)", "2026년(하)", "26년 하반기", "26하", "2026 상반기" 등 다양한 형식 허용.
+     단, 예산·특이사항·메모 등 데이터가 아닌 시트는 제외. */
+  const s = String(name).trim();
+  if (/예산|특이|비고|메모|참고|양식|템플릿|요약|sample|sheet/i.test(s)) return null;
+  const m = s.match(/^(?:20)?(\d{2})\s*년?\s*[\(\[\s\-·]*([상하])(?:\s*반기)?\s*[\)\]]?\s*$/);
   if (!m) return null;
   return { year:`20${m[1]}`, half:m[2]==="상"?"상반기":"하반기" };
 }
@@ -1754,6 +1757,7 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
                     <span style={{ color:C.t4,fontSize:11,display:"inline-block",transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s" }}>›</span>
                     <span style={{ fontWeight:800,fontSize:14,color:C.t1 }}>{s.school}</span>
                     <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
+                    {s.carried && <Tag bg={C.orange+"18"} color={C.orange} border={`1px solid ${C.orange}40`}>🍂 이월</Tag>}
                     <span style={{ fontSize:10,color:C.t3 }}>{s.region}</span>
                     {urgent && <Tag bg={C.redL} color={C.red} border={`1px solid ${C.red}30`}>⚡긴급</Tag>}
                     {s.buildings.some(b=>b.flag==="●") && <span style={{ fontSize:10,color:C.orange }}>🚁</span>}
@@ -1893,6 +1897,8 @@ function ExportImportPage({ db, setDb }) {
   const [importing, setImporting] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState(null);
+  const [autoCarry, setAutoCarry] = useState(true);   // 상반기 완수일 7월+ → 하반기 자동 추가
+  const [carryInfo, setCarryInfo] = useState(null);
   const fileRef = useRef();
 
   const processFile = (file) => {
@@ -1938,7 +1944,7 @@ function ExportImportPage({ db, setDb }) {
           sheets.push({ name, year:info.year, half:info.half, schools, count:schools.length,
             bCount:schools.reduce((a,s)=>a+s.buildings.length,0), budHit, noteHit });
         });
-        if (!sheets.length) { setErr('인식된 시트가 없어요. 시트 이름이 "26년(상)" 형식인지 확인해주세요.'); return; }
+        if (!sheets.length) { setErr('인식된 반기 시트가 없어요. 시트 이름이 "26년(상)", "26년(하)", "2026년(하)", "26년 하반기" 같은 형식인지 확인해주세요.'); return; }
         setParsed({ sheets, fileName:file.name, budYears:Object.keys(budgetByYear) });
       } catch(e) { setErr("파일 읽기 오류: "+e.message); }
     };
@@ -1976,6 +1982,7 @@ function ExportImportPage({ db, setDb }) {
     if (!parsed) return;
     setImporting(true);
     setTimeout(() => {
+      let carryReport = [];
       setDb(prev => {
         const next = {...prev};
         parsed.sheets.forEach(sh => {
@@ -1983,9 +1990,34 @@ function ExportImportPage({ db, setDb }) {
           const { merged } = mergeHalf(next[sh.year][sh.half], sh.schools);
           next[sh.year][sh.half] = merged;
         });
+        /* 상반기 완수일이 7월 이후(같은 해 하반기)인 현장 → 하반기에 자동 추가 (날짜·진행 그대로 이월) */
+        if (autoCarry) {
+          Object.keys(next).forEach(yr => {
+            const first = next[yr]?.["상반기"] || [];
+            if (!first.length) return;
+            const carry = first.filter(s => {
+              if (!s.end) return false;
+              const ey = String(s.end).slice(0,4); const mo = parseInt(String(s.end).slice(5,7),10);
+              return ey===String(yr) && mo>=7 && mo<=12;
+            });
+            if (!carry.length) return;
+            const dest = next[yr]["하반기"] || [];
+            const keyOf = s => `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
+            const have = new Set(dest.map(keyOf));
+            const adds = carry.filter(s => !have.has(keyOf(s))).map(s => ({
+              ...s,
+              id: `carry-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
+              carried: true,
+              buildings: (s.buildings||[]).map(b=>({ ...b })),
+            }));
+            if (adds.length) { next[yr]["하반기"] = dest.concat(adds); carryReport.push({ yr, n:adds.length }); }
+          });
+        }
         return next;
       });
       parsed.sheets.forEach(sh => logAction("수정", `엑셀 병합 · ${sh.year} ${sh.half}`, null, `${sh.count}개 학교 / ${sh.bCount}개 동${sh.budHit?` / 예산 ${sh.budHit}건`:""}${sh.noteHit?` / 특이사항 ${sh.noteHit}건`:""}`));
+      carryReport.forEach(c => logAction("추가", `하반기 자동 이월 · ${c.yr}`, null, `상반기 완수일 7월 이후 ${c.n}개 → 하반기`));
+      setCarryInfo(carryReport.length ? carryReport : null);
       setImporting(false); setDone(true); setParsed(null);
     }, 400);
   };
@@ -2089,6 +2121,24 @@ function ExportImportPage({ db, setDb }) {
                   </div>
                 );
               })}
+              {(() => {
+                const carryCount = parsed.sheets.filter(sh=>sh.half==="상반기").reduce((a,sh)=>a+sh.schools.filter(s=>{
+                  if(!s.end) return false; const ey=String(s.end).slice(0,4); const mo=parseInt(String(s.end).slice(5,7),10);
+                  return ey===String(sh.year)&&mo>=7&&mo<=12;
+                }).length,0);
+                return (
+                  <label style={{ display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:autoCarry?C.orange+"0e":C.surfaceL,
+                    border:`1.5px solid ${autoCarry?C.orange+"50":C.border}`,borderRadius:10,cursor:"pointer",marginBottom:12 }}>
+                    <span onClick={()=>setAutoCarry(v=>!v)} style={{ width:38,height:22,borderRadius:11,background:autoCarry?C.orange:C.borderD,position:"relative",flexShrink:0 }}>
+                      <span style={{ position:"absolute",top:2,left:autoCarry?18:2,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .15s",boxShadow:"0 1px 3px rgba(0,0,0,.3)" }}/>
+                    </span>
+                    <div style={{ flex:1 }} onClick={()=>setAutoCarry(v=>!v)}>
+                      <div style={{ fontSize:12,fontWeight:800,color:C.t1 }}>🍂 상반기 완수일 7월 이후 → 하반기 자동 추가 {carryCount>0 && <span style={{color:C.orange}}>({carryCount}개)</span>}</div>
+                      <div style={{ fontSize:10,color:C.t3,marginTop:2,lineHeight:1.5 }}>{autoCarry ? "1년 계약 등 하반기까지 이어지는 현장을 하반기에도 자동 등록해요 (완수일·진행단계 그대로)" : "자동 추가 안 함"}</div>
+                    </div>
+                  </label>
+                );
+              })()}
               <div style={{ display:"flex",gap:10,marginTop:4 }}>
                 <button onClick={()=>setParsed(null)} style={{ flex:1,padding:11,borderRadius:9,border:BD,background:"transparent",color:C.t3,fontSize:13,cursor:"pointer" }}>취소</button>
                 <button onClick={doImport} style={{ flex:2,padding:11,borderRadius:9,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 14px ${C.blue}40`,opacity:importing?.7:1 }}>{importing?"가져오는 중...":"✓ 웹에 가져오기 · 현장관리 자동 반영"}</button>
@@ -2099,8 +2149,15 @@ function ExportImportPage({ db, setDb }) {
             <div style={{ textAlign:"center",padding:24,background:C.greenL,borderRadius:10,border:`1px solid ${C.green}30` }}>
               <div style={{ fontSize:28,marginBottom:8 }}>✅</div>
               <div style={{ fontSize:14,fontWeight:800,color:C.green,marginBottom:4 }}>가져오기 완료!</div>
-              <div style={{ fontSize:12,color:C.t2,marginBottom:16 }}>현장관리·캘린더에 즉시 반영됐어요</div>
-              <button onClick={()=>setDone(false)} style={{ padding:"8px 20px",borderRadius:8,border:`1px solid ${C.green}`,background:"transparent",color:C.green,fontSize:12,fontWeight:700,cursor:"pointer" }}>다른 파일 올리기</button>
+              <div style={{ fontSize:12,color:C.t2,marginBottom:carryInfo?10:16 }}>현장관리·캘린더에 즉시 반영됐어요</div>
+              {carryInfo && (
+                <div style={{ display:"inline-block",fontSize:11,color:"#9A5B0A",background:C.orange+"18",border:`1px solid ${C.orange}40`,borderRadius:8,padding:"8px 12px",marginBottom:16 }}>
+                  🍂 자동 이월: {carryInfo.map(c=>`${c.yr}년 하반기 +${c.n}개`).join(" · ")}
+                </div>
+              )}
+              <div>
+                <button onClick={()=>{ setDone(false); setCarryInfo(null); }} style={{ padding:"8px 20px",borderRadius:8,border:`1px solid ${C.green}`,background:"transparent",color:C.green,fontSize:12,fontWeight:700,cursor:"pointer" }}>다른 파일 올리기</button>
+              </div>
             </div>
           )}
           {err && (
@@ -2112,7 +2169,7 @@ function ExportImportPage({ db, setDb }) {
           <div style={{ marginTop:14,padding:"12px 14px",background:C.surfaceL,borderRadius:8,border:BD }}>
             <div style={{ fontSize:10,fontWeight:700,color:C.t2,marginBottom:7 }}>📋 자동 인식 컬럼</div>
             <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
-              {["시트명 26년(상)/(하)","1열 팀","5열 학교","6열 시설","12열 현장조사","14열 완수","16열 FMS","17열 플래그","18열 특기","19열 보고서◎","20열 납품","21열 FMS◎"].map(t=>(
+              {["시트명 26년(상)/(하)·하반기·26하","1열 팀","5열 학교","6열 시설","12열 현장조사","14열 완수","16열 FMS","17열 플래그","18열 특기","19열 보고서◎","20열 납품","21열 FMS◎"].map(t=>(
                 <span key={t} style={{ fontSize:9,padding:"2px 7px",borderRadius:4,background:C.surface,border:BD,color:C.t2 }}>{t}</span>
               ))}
             </div>
