@@ -684,7 +684,28 @@ function buildNotesSheet(entries) {
   return buildAuxSheet(headers, rows, meta);
 }
 
-/* 예산 시트 → { 학교명: 금액(원) }  (예산액 '합계' 천원 → 원, 학교별 합산) */
+/* 현장일정 시트 — 학교별 현장조사·착수·완수일 + 담당자, 일정 순 정렬. entries:[{yr,half,schools}] */
+function buildScheduleSheet(entries) {
+  const multi = entries.length > 1;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const ddStr = end => { if (!end) return ""; const d=Math.floor((new Date(end)-today)/86400000); return d>=0?`D-${d}`:`D+${-d}`; };
+  const sortKey = s => { const ds=[s.field,s.start,s.end].filter(Boolean).map(x=>new Date(x).getTime()).filter(t=>!isNaN(t)); return ds.length?Math.min(...ds):Infinity; };
+  const headers = multi
+    ? ["구분","담당팀","지역","학교명","현장조사","착수일","완수일","잔여","담당자"]
+    : ["담당팀","지역","학교명","현장조사","착수일","완수일","잔여","담당자"];
+  const meta = multi
+    ? [{align:"center",w:9},{align:"center",team:true,w:9},{align:"center",w:9},{align:"left",bold:true,w:26},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",w:8},{align:"left",w:28}]
+    : [{align:"center",team:true,w:9},{align:"center",w:9},{align:"left",bold:true,w:26},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",w:8},{align:"left",w:28}];
+  const all = [];
+  entries.forEach(({yr,half,schools}) => (schools||[]).forEach(s => all.push({ s, label: xlHalfLabel(yr,half) })));
+  all.sort((a,b) => sortKey(a.s) - sortKey(b.s));
+  const rows = all.map(({s,label}) => {
+    const base = [ s.team||"미지정", s.region||"", s.school||"", xlDate(s.field), xlDate(s.start), xlDate(s.end), ddStr(s.end), (s.assignees||[]).join(", ") ];
+    return multi ? [label, ...base] : base;
+  });
+  if (!rows.length) rows.push(new Array(headers.length).fill(""));
+  return buildAuxSheet(headers, rows, meta);
+}
 function parseBudget(ws) {
   const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
   const clean = v => v==null ? "" : String(v).replace(/\u00a0/g," ").trim();
@@ -2031,9 +2052,10 @@ function ExportImportPage({ db, setDb, saveNow }) {
     const wb = XLSX.utils.book_new();
     const sn = `${yr.slice(2)}년(${half==="상반기"?"상":"하"})`;
     const entries = [{ yr, half, schools }];
-    XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn);            // 현장일정
-    XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");  // 예산표
-    XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");  // 특이사항
+    XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn);                  // 시설물 리스트
+    XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정");    // 현장일정(날짜·담당자)
+    XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");        // 예산표
+    XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");       // 특이사항
     XLSX.writeFile(wb, `시설물_리스트_${yr}_${half}.xlsx`);
   };
   const doExportAll = () => {
@@ -2044,6 +2066,7 @@ function ExportImportPage({ db, setDb, saveNow }) {
       entries.push({ yr, half, schools });
     }));
     if (!entries.length) return;
+    XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정");   // 전체 현장일정(날짜·담당자)
     XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표");   // 전체 예산표
     XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항");   // 전체 특이사항
     XLSX.writeFile(wb, "시설물_리스트_전체.xlsx");
