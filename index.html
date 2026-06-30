@@ -1459,7 +1459,8 @@ function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
     if (!picked.length) return;
     const copies = picked.map(s => keepOrig
       ? ({ ...s, id: `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
-           buildings: (s.buildings||[]).map(b=>({ ...b })) })   // 날짜·진행·상태 그대로 이월
+           progress: {},                                                                  // 진행단계 초기화
+           buildings: (s.buildings||[]).map(b=>({ ...b, rep:false, fmsD:false, delivery:null })) })   // 날짜는 유지, 보고서·FMS·납품은 미완으로
       : ({ ...s, id: `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
            field:"", start:"", end:"", progress:{}, assignees:[], headcount:s.headcount||1,
            buildings: (s.buildings||[]).map(b=>({ ...b, rep:false, fmsD:false, delivery:null })) }));   // 새 점검으로 초기화
@@ -1498,7 +1499,7 @@ function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
             </span>
             <div style={{ flex:1 }} onClick={()=>setKeepOrig(v=>!v)}>
               <div style={{ fontSize:12,fontWeight:700,color:C.t1 }}>날짜·진행상태 그대로 이월</div>
-              <div style={{ fontSize:10,color:C.t3,marginTop:1 }}>{keepOrig ? "완수일·진행단계·보고서/FMS/납품 상태를 그대로 가져와요 (이어지는 계약)" : "새 점검으로 날짜·진행·상태를 초기화해요"}</div>
+              <div style={{ fontSize:10,color:C.t3,marginTop:1 }}>{keepOrig ? "완수일·날짜는 그대로, 보고서·FMS·납품은 미완으로 초기화 (이어지는 계약)" : "새 점검으로 날짜·진행·상태 모두 초기화해요"}</div>
             </div>
           </label>
 
@@ -1989,16 +1990,26 @@ function ExportImportPage({ db, setDb, saveNow }) {
             return ey===String(yr) && mo>=7 && mo<=12;
           });
           if (!carry.length) return;
-          const dest = next[yr]["하반기"] || [];
           const keyOf = s => `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
-          const have = new Set(dest.map(keyOf));
-          const adds = carry.filter(s => !have.has(keyOf(s))).map(s => ({
-            ...s,
-            id: `carry-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
-            carried: true,
-            buildings: (s.buildings||[]).map(b=>({ ...b })),
-          }));
-          if (adds.length) { next[yr]["하반기"] = [...dest, ...adds]; carryReport.push({ yr, n:adds.length }); }
+          const destByKey = new Map((next[yr]["하반기"]||[]).map(d => [keyOf(d), d]));
+          let n = 0, ci = 0;
+          carry.forEach(s => {
+            const k = keyOf(s);
+            const existing = destByKey.get(k);
+            const fresh = {
+              ...s,
+              carried: true,
+              progress: {},                                                                   // 진행단계 초기화
+              buildings: (s.buildings||[]).map(b=>({ ...b, rep:false, fmsD:false, delivery:null })),  // 보고서·FMS·납품 미완으로
+            };
+            if (existing) {
+              if (existing.carried) { destByKey.set(k, { ...fresh, id: existing.id }); n++; }   // 기존 이월본 → 초기화 갱신(id 유지)
+              /* 실제 하반기 데이터(이월 아님)는 건드리지 않음 */
+            } else {
+              destByKey.set(k, { ...fresh, id: `carry-${Date.now().toString(36)}-${(ci++).toString(36)}-${Math.random().toString(36).slice(2,6)}` }); n++;
+            }
+          });
+          if (n) { next[yr]["하반기"] = Array.from(destByKey.values()); carryReport.push({ yr, n }); }
         });
       }
 
@@ -2127,7 +2138,7 @@ function ExportImportPage({ db, setDb, saveNow }) {
                     </span>
                     <div style={{ flex:1 }} onClick={()=>setAutoCarry(v=>!v)}>
                       <div style={{ fontSize:12,fontWeight:800,color:C.t1 }}>🍂 상반기 완수일 7월 이후 → 하반기 자동 추가 {carryCount>0 && <span style={{color:C.orange}}>({carryCount}개)</span>}</div>
-                      <div style={{ fontSize:10,color:C.t3,marginTop:2,lineHeight:1.5 }}>{autoCarry ? "1년 계약 등 하반기까지 이어지는 현장을 하반기에도 자동 등록해요 (완수일·진행단계 그대로)" : "자동 추가 안 함"}</div>
+                      <div style={{ fontSize:10,color:C.t3,marginTop:2,lineHeight:1.5 }}>{autoCarry ? "1년 계약 등 하반기까지 이어지는 현장을 하반기에도 자동 등록해요 (날짜는 유지, 보고서·FMS·납품은 미완으로)" : "자동 추가 안 함"}</div>
                     </div>
                   </label>
                 );
