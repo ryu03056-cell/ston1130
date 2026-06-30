@@ -2342,6 +2342,29 @@ function countSchools(db) {
   Object.values(db||{}).forEach(hs => Object.values(hs||{}).forEach(a => { n += (a||[]).length; }));
   return n;
 }
+
+/* 두 db를 학교 단위로 비교 → 바뀐 경로만 추출 (부분 저장).
+   - 추가/수정된 학교: "yr/half/id" → 학교객체
+   - 삭제된 학교(이전엔 있었는데 지금 없음): "yr/half/id" → null (명시적 삭제)
+   전체 트리를 .set()으로 덮어쓰지 않으므로, 다른 기기가 모르는 데이터(예: 다른 기기가 추가한 하반기)를
+   실수로 지우는 일이 없음. 삭제는 null로 명시 → 되살아나지 않음. */
+function flatMapDb(db) {
+  const m = {};
+  Object.entries(db||{}).forEach(([yr,hs]) => Object.entries(hs||{}).forEach(([half,arr]) => {
+    (arr||[]).forEach(s => { if (s && s.id != null) m[`${yr}/${half}/${s.id}`] = s; });
+  }));
+  return m;
+}
+function diffPaths(prev, next) {
+  const updates = {};
+  const pm = flatMapDb(prev), nm = flatMapDb(next);
+  for (const k in nm) {
+    const cur = stripUndefined(nm[k]);
+    if (!(k in pm) || JSON.stringify(stripUndefined(pm[k])) !== JSON.stringify(cur)) updates[k] = cur;
+  }
+  for (const k in pm) { if (!(k in nm)) updates[k] = null; }   // 삭제 → null
+  return updates;
+}
 /* 원격(Firebase) db를 로컬에 병합 — 로컬 학교를 절대 삭제하지 않고, 같은 ID는 원격으로 갱신,
    원격에만 있는 학교는 추가. → 어떤 echo가 와도 화면에서 학교가 사라지지 않음. */
 function mergeRemote(local, remote) {
@@ -3067,24 +3090,24 @@ function App() {
     };
   }, [authUser]);
 
-  /* 2) 로컬 db 변경 → 전체 저장 (set). 부분 저장 안 함 → 추가·수정·삭제가 항상 정확,
-        불완전 상태/유령 삭제 없음. 디바운스 + 에코 차단. */
+  /* 2) 로컬 db 변경 → 바뀐 학교만 부분 저장 (update + 삭제는 null).
+        전체 트리를 .set()으로 덮어쓰지 않으므로, 다른 기기가 추가한 데이터(예: 하반기)가
+        오래된 화면 때문에 통째로 날아가는 일이 없음. 디바운스 + 에코 차단. */
   useEffect(() => {
     if (!fbReady.current || !dataRef.current) return;
     if (skipWrite.current) { skipWrite.current = false; lastSynced.current = db; return; }
 
-    /* 변경 없으면 저장 안 함 */
-    if (JSON.stringify(stripUndefined(dbToFb(db))) === JSON.stringify(stripUndefined(dbToFb(lastSynced.current || {})))) {
-      lastSynced.current = db; return;
-    }
     /* 빈 db는 자동 저장하지 않음(실수로 전체 삭제 방지). 전체 비우기는 설정의 '전체 초기화' 사용 */
-    if (countSchools(db) === 0) { return; }
+    if (countSchools(db) === 0) { lastSynced.current = db; return; }
 
     const snapshot = db;
+    const updates = diffPaths(lastSynced.current || {}, snapshot);
+    if (Object.keys(updates).length === 0) { lastSynced.current = snapshot; return; }
+
     setSyncing(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      dataRef.current.set(stripUndefined(dbToFb(snapshot)))
+      dataRef.current.update(updates)
         .then(() => {
           metaRef.current?.set({ at: Date.now(), by: editorRef.current || "익명",
             cnt: countSchools(snapshot) }).catch(()=>{});
