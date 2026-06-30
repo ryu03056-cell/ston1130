@@ -1202,13 +1202,14 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
   const isMobile = useIsMobile();
   const tc = TC[sc.team]||{a:C.t3,b:C.surfaceL,c:C.t2};
   const [f, setF] = useState({
-    team:sc.team||"", region:sc.region||"", kind:sc.kind||"정기점검",
+    school:sc.school||"", no:sc.no||"", team:sc.team||"", region:sc.region||"", kind:sc.kind||"정기점검",
     field:sc.field||"", start:sc.start||"", end:sc.end||"", assignees:sc.assignees||[],
   });
   const [bf, setBf] = useState(sc.buildings.map(b=>({
     b:b.b||"", floor:b.floor||"", area:b.area?String(b.area):"",
     fms:b.fms||"", flag:b.flag||"", note:b.note||"",
     rep:!!b.rep, fmsD:!!b.fmsD, delivery:b.delivery||"",
+    height:b.height??null, len:b.len??null, jong:b.jong??null, budget:b.budget??null,
   })));
   const [prog, setProg] = useState(() => {
     const o = {}; STEPS.forEach(k => { o[k] = !!(sc.progress && sc.progress[k]); }); return o;
@@ -1225,11 +1226,12 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
       next[yr] = {...prev[yr]};
       next[yr][half] = prev[yr][half].map(s => {
         if (s.id!==sc.id) return s;
-        return { ...s, team:f.team, region:f.region, kind:f.kind, field:f.field, start:f.start, end:f.end,
+        return { ...s, school:f.school||s.school, no:f.no, team:f.team, region:f.region, kind:f.kind, field:f.field, start:f.start, end:f.end,
           assignees:f.assignees, headcount:f.assignees.length||s.headcount, progress:{...prog},
-          buildings: bf.map((b,i)=>({ ...(sc.buildings[i]||{}), b:b.b, floor:b.floor,
+          buildings: bf.map((b)=>({ b:b.b||"동", floor:b.floor||null,
             area:b.area?parseFloat(b.area):null, fms:b.fms||null, flag:b.flag||null, note:b.note||null,
-            rep:b.rep, fmsD:b.fmsD, delivery:b.delivery||null })) };
+            rep:b.rep, fmsD:b.fmsD, delivery:b.delivery||null,
+            height:b.height??null, len:b.len??null, jong:b.jong??null, budget:b.budget??null })) };
       });
       return next;
     });
@@ -1275,6 +1277,8 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
           <div style={{ padding:14,background:C.surfaceL,borderRadius:10,border:BD,marginBottom:16 }}>
             <div style={{ fontSize:10,fontWeight:700,color:C.t2,marginBottom:12 }}>🏫 학교 기본 정보</div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div style={{ gridColumn:"span 2" }}><LI label="🏫 학교명 / 현장명" val={f.school} on={v=>setF(p=>({...p,school:v}))}/></div>
+              <div style={{ gridColumn:"span 2" }}><LI label="No (관리번호 · 선택)" val={f.no} on={v=>setF(p=>({...p,no:v}))}/></div>
               <div style={{ gridColumn:"span 2",display:"flex",flexDirection:"column",gap:4 }}>
                 <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>담당팀</label>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -1424,6 +1428,111 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   다른 반기에서 현장 복사 (상반기 → 하반기 등)
+══════════════════════════════════════════════════════════════ */
+function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
+  const [sel, setSel] = useState(new Set());
+  const [search, setSearch] = useState("");
+
+  const buckets = [];
+  Object.keys(db||{}).sort((a,b)=>b-a).forEach(y => ["상반기","하반기"].forEach(h => {
+    if (y===toYr && h===toHalf) return;
+    const arr = db[y]?.[h] || [];
+    if (arr.length) buckets.push({ y, h, arr });
+  }));
+  const destKeys = new Set((db[toYr]?.[toHalf]||[]).map(s=>`${(s.school||"").trim()}|${(s.no||"").toString().trim()}`));
+  const keyOf = (bk,s) => `${bk.y}|${bk.h}|${s.id}`;
+  const ms = s => !search || (s.school||"").includes(search) || (s.region||"").includes(search);
+  const toggle = k => setSel(p => { const n=new Set(p); n.has(k)?n.delete(k):n.add(k); return n; });
+  const bucketKeys = bk => bk.arr.filter(ms).map(s=>keyOf(bk,s));
+  const allSelInBucket = bk => { const ks=bucketKeys(bk); return ks.length>0 && ks.every(k=>sel.has(k)); };
+  const toggleBucket = bk => { const ks=bucketKeys(bk); setSel(p=>{ const n=new Set(p); const all=ks.every(k=>n.has(k)); ks.forEach(k=>all?n.delete(k):n.add(k)); return n; }); };
+
+  const doCopy = () => {
+    const picked = [];
+    buckets.forEach(bk => bk.arr.forEach(s => { if (sel.has(keyOf(bk,s))) picked.push(s); }));
+    if (!picked.length) return;
+    const copies = picked.map(s => ({
+      ...s,
+      id: `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
+      field:"", start:"", end:"", progress:{}, assignees:[], headcount:s.headcount||1,
+      buildings: (s.buildings||[]).map(b=>({ ...b, rep:false, fmsD:false, delivery:null })),
+    }));
+    setDb(prev => { const n={...prev}; n[toYr]={...(prev[toYr]||{})}; n[toYr][toHalf]=[...(prev[toYr]?.[toHalf]||[]), ...copies]; return n; });
+    onDone(copies.length);
+  };
+
+  const selCount = sel.size;
+  const hc = toHalf==="상반기"?C.blue:C.orange;
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(30,35,50,.4)",backdropFilter:"blur(2px)",zIndex:300 }}/>
+      <div style={{ position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:isMobile?"94vw":560,maxWidth:"94vw",maxHeight:"88vh",
+        background:C.surface,borderRadius:16,zIndex:301,display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,.3)",overflow:"hidden" }}>
+        <div style={{ padding:"18px 20px",borderBottom:BD,flexShrink:0 }}>
+          <div style={{ fontSize:17,fontWeight:900,color:C.t1 }}>📋 다른 반기에서 현장 복사</div>
+          <div style={{ fontSize:12,color:C.t3,marginTop:4 }}>
+            선택한 현장을 <b style={{color:hc}}>{toYr}년 {toHalf}</b>로 복사해요. 날짜·진행·보고서/FMS/납품 상태는 초기화돼요.
+          </div>
+          <div style={{ display:"flex",background:C.surfaceL,border:BD,borderRadius:8,padding:"7px 11px",gap:7,alignItems:"center",marginTop:12 }}>
+            <span style={{ color:C.t4 }}>⌕</span>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="학교명·지역 검색"
+              style={{ background:"transparent",border:"none",color:C.t1,fontSize:13,outline:"none",flex:1 }}/>
+          </div>
+        </div>
+
+        <div style={{ flex:1,overflowY:"auto",padding:"12px 16px" }}>
+          {buckets.length===0 && <div style={{ textAlign:"center",padding:"40px 0",color:C.t4,fontSize:13 }}>복사할 다른 반기 데이터가 없습니다.</div>}
+          {buckets.map(bk => {
+            const rows = bk.arr.filter(ms);
+            if (!rows.length) return null;
+            const bhc = bk.h==="상반기"?C.blue:C.orange;
+            return (
+              <div key={bk.y+bk.h} style={{ marginBottom:16 }}>
+                <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8,position:"sticky",top:0,background:C.surface,padding:"4px 0",zIndex:1 }}>
+                  <span style={{ fontSize:13,fontWeight:800,color:bhc }}>{bk.h==="상반기"?"🌱":"🍂"} {bk.y}년 {bk.h}</span>
+                  <span style={{ fontSize:11,color:C.t4 }}>{rows.length}개</span>
+                  <button onClick={()=>toggleBucket(bk)} style={{ marginLeft:"auto",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,
+                    border:`1px solid ${bhc}40`,background:allSelInBucket(bk)?bhc:C.surfaceL,color:allSelInBucket(bk)?"#fff":bhc,cursor:"pointer" }}>
+                    {allSelInBucket(bk)?"전체 해제":"전체 선택"}
+                  </button>
+                </div>
+                {rows.map(s => {
+                  const k = keyOf(bk,s); const on = sel.has(k);
+                  const tc = TC[s.team]||{a:C.t3,b:C.surfaceL};
+                  const dup = destKeys.has(`${(s.school||"").trim()}|${(s.no||"").toString().trim()}`);
+                  return (
+                    <div key={k} onClick={()=>toggle(k)} style={{ display:"flex",alignItems:"center",gap:10,padding:"9px 11px",borderRadius:8,cursor:"pointer",
+                      border:`1.5px solid ${on?C.blue:C.border}`,background:on?C.blueL:C.surface,marginBottom:6 }}>
+                      <div style={{ width:20,height:20,borderRadius:5,border:`2px solid ${on?C.blue:C.borderD}`,background:on?C.blue:"transparent",
+                        display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:"#fff",fontSize:13,fontWeight:900 }}>{on?"✓":""}</div>
+                      <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
+                      <span style={{ fontSize:13,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
+                      <span style={{ fontSize:11,color:C.t4 }}>{s.region} · {(s.buildings||[]).length}동</span>
+                      {dup && <span style={{ fontSize:9,color:C.orange,fontWeight:700,background:C.orangeL,padding:"2px 6px",borderRadius:4,whiteSpace:"nowrap" }}>이미 있음</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ padding:"14px 18px",borderTop:BD,flexShrink:0,display:"flex",gap:10,alignItems:"center" }}>
+          <span style={{ fontSize:13,color:C.t2,fontWeight:600 }}>{selCount}개 선택됨</span>
+          <button onClick={onClose} style={{ marginLeft:"auto",padding:"11px 18px",borderRadius:9,border:BD,background:"transparent",color:C.t3,fontSize:13,cursor:"pointer" }}>취소</button>
+          <button onClick={doCopy} disabled={selCount===0} style={{ padding:"11px 22px",borderRadius:9,border:"none",
+            background:selCount===0?C.surfaceD:C.blue,color:selCount===0?C.t4:"#fff",fontSize:13,fontWeight:700,cursor:selCount===0?"default":"pointer" }}>
+            {toHalf}로 복사 ({selCount})
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    현장 관리 — 연도/반기 탭 + 테이블
 ══════════════════════════════════════════════════════════════ */
 function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
@@ -1447,6 +1556,7 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
   const [open, setOpen] = useState(new Set());
   const [copied, setCopied] = useState(null);
   const [editId, setEditId] = useState(null);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [toast, setToast] = useState(null);
 
   const prevGT = useRef(globalTeam);
@@ -1454,6 +1564,17 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
 
   const showToast = m => { setToast(m); setTimeout(()=>setToast(null), 2000); };
   const copy = (t,id) => { navigator.clipboard?.writeText(t).catch(()=>{}); setCopied(id); setTimeout(()=>setCopied(null),1500); };
+
+  /* 새 현장 추가 → 현재 연/반기에 빈 학교 생성 후 편집창 열기 */
+  const addNewSite = () => {
+    const id = `new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
+    const newSc = { id, school:"새 현장", no:"", team:(globalTeam!=="전체"?globalTeam:"미지정"),
+      region:"", kind:"정기점검", field:"", start:"", end:"", headcount:1, assignees:[], progress:{},
+      buildings:[{ b:"본관", floor:null, area:null, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null }] };
+    setDb(prev => { const n={...prev}; n[yr]={...(prev[yr]||{})}; n[yr][half]=[...(prev[yr]?.[half]||[]), newSc]; return n; });
+    setEditId(id);
+    showToast("새 현장 추가됨 · 내용을 입력하세요");
+  };
 
   const schools = useMemo(()=>db[yr]?.[half]||[], [db,yr,half]);
 
@@ -1562,6 +1683,12 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
         {["전체","보고서 미완","FMS 미완","납품 미정","완료"].map(ff=>(
           <Pill key={ff} active={stF===ff} ac={C.purple} onClick={()=>setStF(ff)} style={{ fontSize:11 }}>{ff}</Pill>
         ))}
+        <div style={{ marginLeft:"auto",display:"flex",gap:8 }}>
+          <button onClick={()=>setCopyOpen(true)} style={{ padding:"8px 14px",borderRadius:8,border:`1.5px solid ${C.blue}40`,
+            background:C.blueL,color:C.blue,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}>📋 다른 반기에서 복사</button>
+          <button onClick={addNewSite} style={{ padding:"8px 16px",borderRadius:8,border:"none",
+            background:C.blue,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",boxShadow:`0 3px 10px ${C.blue}33` }}>+ 현장 추가</button>
+        </div>
       </div>
 
       {/* 테이블 */}
@@ -1714,6 +1841,7 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
       </div>
 
       {editSc && <EditPanel sc={editSc} yr={yr} half={half} setDb={setDb} onClose={()=>setEditId(null)}/>}
+      {copyOpen && <CopyHalfModal db={db} setDb={setDb} toYr={yr} toHalf={half} onClose={()=>setCopyOpen(false)} onDone={(n)=>{ setCopyOpen(false); showToast(`${n}개 현장 복사됨`); }} isMobile={isMobile}/>}
       <Toast msg={toast}/>
     </div>
   );
