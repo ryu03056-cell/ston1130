@@ -2335,6 +2335,7 @@ function stripUndefined(v) {
     for (const k in v) { if (v[k] !== undefined) o[k] = stripUndefined(v[k]); }
     return o;
   }
+  if (typeof v === "number" && !isFinite(v)) return null;   // NaN/Infinity → null (Firebase가 거부 → 전체 저장 실패 방지)
   return v;
 }
 function countSchools(db) {
@@ -2978,7 +2979,6 @@ function App() {
   const dataRef    = useRef(null);
   const metaRef    = useRef(null);
   const lastSynced = useRef(null);    // 마지막으로 FB와 일치한 db
-  const skipWrite  = useRef(false);   // 원격 반영분 재저장 차단
   const fbReady    = useRef(false);
   const dbLive     = useRef(db);       // 항상 현재 db (onData 클로저용)
   dbLive.current = db;
@@ -3038,8 +3038,7 @@ function App() {
       const val = fbToDb(snap.val());
       if (val && Object.keys(val).length) {
         /* Firebase value 이벤트는 항상 전체 상태 → 그대로 반영(추가·수정·삭제 모두 정확).
-           삭제한 학교가 되살아나지 않음. */
-        skipWrite.current = true;
+           lastSynced를 원격값으로 갱신 → 저장 effect의 diff가 비어 에코 재저장이 안 됨(플래그 불필요). */
         lastSynced.current = val;
         setDb(val);
       }
@@ -3091,22 +3090,20 @@ function App() {
   }, [authUser]);
 
   /* 2) 로컬 db 변경 → 바뀐 학교만 부분 저장 (update + 삭제는 null).
-        전체 트리를 .set()으로 덮어쓰지 않으므로, 다른 기기가 추가한 데이터(예: 하반기)가
-        오래된 화면 때문에 통째로 날아가는 일이 없음. 디바운스 + 에코 차단. */
+        에코 차단은 lastSynced와의 diff로만 처리(플래그 없음) → 진짜 변경을 절대 건너뛰지 않음.
+        변경이 크면(가져오기 등) 즉시 저장, 작은 편집은 0.4초 디바운스. */
   useEffect(() => {
     if (!fbReady.current || !dataRef.current) return;
-    if (skipWrite.current) { skipWrite.current = false; lastSynced.current = db; return; }
-
     /* 빈 db는 자동 저장하지 않음(실수로 전체 삭제 방지). 전체 비우기는 설정의 '전체 초기화' 사용 */
     if (countSchools(db) === 0) { lastSynced.current = db; return; }
 
     const snapshot = db;
     const updates = diffPaths(lastSynced.current || {}, snapshot);
-    if (Object.keys(updates).length === 0) { lastSynced.current = snapshot; return; }
+    const keys = Object.keys(updates);
+    if (keys.length === 0) { lastSynced.current = snapshot; return; }   // 변경 없음/원격 에코 → 저장 안 함
 
     setSyncing(true);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    const doSave = () => {
       dataRef.current.update(updates)
         .then(() => {
           metaRef.current?.set({ at: Date.now(), by: editorRef.current || "익명",
@@ -3115,7 +3112,10 @@ function App() {
         })
         .catch(e => console.error("[Firebase] 저장 실패:", e))
         .finally(() => setSyncing(false));
-    }, 400);
+    };
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (keys.length > 5) doSave();                              // 큰 변경(가져오기 등) → 즉시 저장
+    else saveTimer.current = setTimeout(doSave, 400);          // 작은 편집 → 디바운스
   }, [db]);
 
   /* 내 이름 변경 시 로그 기록용 사용자명 갱신 + 푸시 등록 */
@@ -3130,12 +3130,13 @@ function App() {
   /* 전체 초기화: 리스너 끊고 → Firebase 비우고 → 빈 상태로 새로고침 (재시드 차단) */
   const resetAll = () => {
     try { localStorage.setItem("ston_fresh", "1"); } catch {}
-    try { if (dataRef.current) dataRef.current.off(); } catch {}
-    skipWrite.current = true;            // 남은 저장 effect 차단
     lastSynced.current = {};
+    const ref = dataRef.current;
+    dataRef.current = null;              // 저장 effect 차단 (guard: !dataRef.current → return)
+    try { if (ref) ref.off(); } catch {}
     const done = () => setTimeout(() => { try { location.reload(); } catch { window.location.href = window.location.href; } }, 300);
     try {
-      if (dataRef.current) dataRef.current.set(null).then(done).catch(done);
+      if (ref) ref.set(null).then(done).catch(done);
       else done();
     } catch { done(); }
   };
