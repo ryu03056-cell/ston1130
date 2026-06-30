@@ -1878,7 +1878,7 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
 /* ══════════════════════════════════════════════════════════════
    엑셀 가져오기 / 내보내기 페이지
 ══════════════════════════════════════════════════════════════ */
-function ExportImportPage({ db, setDb }) {
+function ExportImportPage({ db, setDb, saveNow }) {
   const [dragOver, setDragOver] = useState(false);
   const [parsed, setParsed] = useState(null);
   const [importing, setImporting] = useState(false);
@@ -1886,6 +1886,7 @@ function ExportImportPage({ db, setDb }) {
   const [err, setErr] = useState(null);
   const [autoCarry, setAutoCarry] = useState(true);   // 상반기 완수일 7월+ → 하반기 자동 추가
   const [carryInfo, setCarryInfo] = useState(null);
+  const [saveResult, setSaveResult] = useState(null); // 가져오기 후 서버 저장 결과 {ok,err,total}
   const fileRef = useRef();
 
   const processFile = (file) => {
@@ -1970,42 +1971,47 @@ function ExportImportPage({ db, setDb }) {
     setImporting(true);
     setTimeout(() => {
       let carryReport = [];
-      setDb(prev => {
-        const next = {...prev};
-        parsed.sheets.forEach(sh => {
-          if (!next[sh.year]) next[sh.year] = {};
-          const { merged } = mergeHalf(next[sh.year][sh.half], sh.schools);
-          next[sh.year][sh.half] = merged;
-        });
-        /* 상반기 완수일이 7월 이후(같은 해 하반기)인 현장 → 하반기에 자동 추가 (날짜·진행 그대로 이월) */
-        if (autoCarry) {
-          Object.keys(next).forEach(yr => {
-            const first = next[yr]?.["상반기"] || [];
-            if (!first.length) return;
-            const carry = first.filter(s => {
-              if (!s.end) return false;
-              const ey = String(s.end).slice(0,4); const mo = parseInt(String(s.end).slice(5,7),10);
-              return ey===String(yr) && mo>=7 && mo<=12;
-            });
-            if (!carry.length) return;
-            const dest = next[yr]["하반기"] || [];
-            const keyOf = s => `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
-            const have = new Set(dest.map(keyOf));
-            const adds = carry.filter(s => !have.has(keyOf(s))).map(s => ({
-              ...s,
-              id: `carry-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
-              carried: true,
-              buildings: (s.buildings||[]).map(b=>({ ...b })),
-            }));
-            if (adds.length) { next[yr]["하반기"] = dest.concat(adds); carryReport.push({ yr, n:adds.length }); }
-          });
-        }
-        return next;
+      /* 현재 db 기준으로 최종 결과(next) 계산 */
+      const next = { ...(db||{}) };
+      parsed.sheets.forEach(sh => {
+        next[sh.year] = { ...(next[sh.year]||{}) };
+        const { merged } = mergeHalf(next[sh.year][sh.half], sh.schools);
+        next[sh.year][sh.half] = merged;
       });
+      /* 상반기 완수일이 7월 이후(같은 해 하반기)인 현장 → 하반기에 자동 추가 (날짜·진행 그대로 이월) */
+      if (autoCarry) {
+        Object.keys(next).forEach(yr => {
+          const first = next[yr]?.["상반기"] || [];
+          if (!first.length) return;
+          const carry = first.filter(s => {
+            if (!s.end) return false;
+            const ey = String(s.end).slice(0,4); const mo = parseInt(String(s.end).slice(5,7),10);
+            return ey===String(yr) && mo>=7 && mo<=12;
+          });
+          if (!carry.length) return;
+          const dest = next[yr]["하반기"] || [];
+          const keyOf = s => `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
+          const have = new Set(dest.map(keyOf));
+          const adds = carry.filter(s => !have.has(keyOf(s))).map(s => ({
+            ...s,
+            id: `carry-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}-${Math.floor(Math.random()*9999)}`,
+            carried: true,
+            buildings: (s.buildings||[]).map(b=>({ ...b })),
+          }));
+          if (adds.length) { next[yr]["하반기"] = [...dest, ...adds]; carryReport.push({ yr, n:adds.length }); }
+        });
+      }
+
+      setDb(next);                                  // 화면 반영
       parsed.sheets.forEach(sh => logAction("수정", `엑셀 병합 · ${sh.year} ${sh.half}`, null, `${sh.count}개 학교 / ${sh.bCount}개 동${sh.budHit?` / 예산 ${sh.budHit}건`:""}${sh.noteHit?` / 특이사항 ${sh.noteHit}건`:""}`));
       carryReport.forEach(c => logAction("추가", `하반기 자동 이월 · ${c.yr}`, null, `상반기 완수일 7월 이후 ${c.n}개 → 하반기`));
       setCarryInfo(carryReport.length ? carryReport : null);
-      setImporting(false); setDone(true); setParsed(null);
+
+      /* 자동 effect에 의존하지 않고, 여기서 직접 서버에 저장하고 결과 확인 */
+      const finish = (ok, err) => { setImporting(false); setDone(true); setParsed(null); setSaveResult({ ok, err, total:countSchools(next) }); };
+      if (saveNow) {
+        Promise.resolve(saveNow(next)).then(()=>finish(true)).catch(e=>finish(false,(e&&e.message)||String(e)));
+      } else { finish(true); }
     }, 400);
   };
 
@@ -2133,17 +2139,28 @@ function ExportImportPage({ db, setDb }) {
             </div>
           )}
           {done && (
-            <div style={{ textAlign:"center",padding:24,background:C.greenL,borderRadius:10,border:`1px solid ${C.green}30` }}>
-              <div style={{ fontSize:28,marginBottom:8 }}>✅</div>
-              <div style={{ fontSize:14,fontWeight:800,color:C.green,marginBottom:4 }}>가져오기 완료!</div>
-              <div style={{ fontSize:12,color:C.t2,marginBottom:carryInfo?10:16 }}>현장관리·캘린더에 즉시 반영됐어요</div>
+            <div style={{ textAlign:"center",padding:24,background:saveResult&&!saveResult.ok?C.redL:C.greenL,borderRadius:10,border:`1px solid ${saveResult&&!saveResult.ok?C.red:C.green}30` }}>
+              <div style={{ fontSize:28,marginBottom:8 }}>{saveResult&&!saveResult.ok?"⚠️":"✅"}</div>
+              <div style={{ fontSize:14,fontWeight:800,color:saveResult&&!saveResult.ok?C.red:C.green,marginBottom:4 }}>
+                {saveResult&&!saveResult.ok ? "화면 반영됨 · 서버 저장 실패" : "가져오기 + 서버 저장 완료!"}
+              </div>
+              <div style={{ fontSize:12,color:C.t2,marginBottom:10 }}>
+                {saveResult&&!saveResult.ok
+                  ? "데이터는 화면에 있지만 서버에 저장되지 않았어요. 아래 오류를 확인하세요."
+                  : `서버에 ${saveResult?saveResult.total:countSchools(db)}개 학교 저장됨 · 껐다 켜도 유지돼요`}
+              </div>
+              {saveResult&&!saveResult.ok && (
+                <div style={{ display:"inline-block",fontSize:11,color:C.red,background:C.surface,border:`1px solid ${C.red}40`,borderRadius:8,padding:"8px 12px",marginBottom:14,maxWidth:"90%",wordBreak:"break-all" }}>
+                  ❌ {saveResult.err}
+                </div>
+              )}
               {carryInfo && (
-                <div style={{ display:"inline-block",fontSize:11,color:"#9A5B0A",background:C.orange+"18",border:`1px solid ${C.orange}40`,borderRadius:8,padding:"8px 12px",marginBottom:16 }}>
+                <div style={{ display:"block",fontSize:11,color:"#9A5B0A",background:C.orange+"18",border:`1px solid ${C.orange}40`,borderRadius:8,padding:"8px 12px",marginBottom:16,maxWidth:"90%",marginLeft:"auto",marginRight:"auto" }}>
                   🍂 자동 이월: {carryInfo.map(c=>`${c.yr}년 하반기 +${c.n}개`).join(" · ")}
                 </div>
               )}
               <div>
-                <button onClick={()=>{ setDone(false); setCarryInfo(null); }} style={{ padding:"8px 20px",borderRadius:8,border:`1px solid ${C.green}`,background:"transparent",color:C.green,fontSize:12,fontWeight:700,cursor:"pointer" }}>다른 파일 올리기</button>
+                <button onClick={()=>{ setDone(false); setCarryInfo(null); setSaveResult(null); }} style={{ padding:"8px 20px",borderRadius:8,border:`1px solid ${C.green}`,background:"transparent",color:C.green,fontSize:12,fontWeight:700,cursor:"pointer" }}>다른 파일 올리기</button>
               </div>
             </div>
           )}
@@ -3203,6 +3220,27 @@ function App() {
     } catch { done(); }
   };
 
+  /* 명시적 즉시 저장 — 가져오기 등에서 직접 호출. 자동 effect 타이밍과 무관하게 확실히 서버에 기록하고
+     결과(성공/실패+에러)를 화면에 표시. 바뀐 학교만 update(삭제는 null) → 다른 데이터 안 건드림. */
+  const saveNow = (newDb) => {
+    const ref = dataRef.current || (typeof firebase!=="undefined" && firebase.apps && firebase.apps.length ? firebase.database().ref(FB_DATA) : null);
+    if (!ref) { setLastSync({ ok:false, at:Date.now(), n:0, err:"Firebase 미연결" }); return Promise.reject(new Error("no-ref")); }
+    const updates = diffPaths(lastSynced.current || {}, newDb);
+    const keys = Object.keys(updates);
+    if (!keys.length) { lastSynced.current = newDb; setLastSync({ ok:true, at:Date.now(), n:0 }); return Promise.resolve(); }
+    setSyncing(true); setLastSync({ ok:null, at:Date.now(), n:keys.length });
+    let p;
+    try { p = ref.update(updates); }
+    catch (e) { console.error("[Firebase] saveNow update throw:", e); setLastSync({ ok:false, at:Date.now(), n:keys.length, err:(e&&e.message)||String(e) }); setSyncing(false); return Promise.reject(e); }
+    return p.then(() => {
+        lastSynced.current = newDb;
+        setLastSync({ ok:true, at:Date.now(), n:keys.length });
+        metaRef.current?.set({ at:Date.now(), by:editorRef.current||"익명", cnt:countSchools(newDb) }).catch(()=>{});
+      })
+      .catch(e => { console.error("[Firebase] saveNow 저장 실패:", e); setLastSync({ ok:false, at:Date.now(), n:keys.length, err:(e&&e.message)||String(e) }); throw e; })
+      .finally(() => setSyncing(false));
+  };
+
   /* 푸시 알림 켜기 */
   const enablePush = () => {
     registerOneSignal(editor || (authUser && authUser.email) || "익명");
@@ -3261,7 +3299,7 @@ function App() {
         ))}
       </div>
     ),
-    export: <ExportImportPage db={db} setDb={setDb}/>,
+    export: <ExportImportPage db={db} setDb={setDb} saveNow={saveNow}/>,
     settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb} online={online} fbStatus={fbStatus} lastSync={lastSync} meta={meta} users={users}/>,
   };
 
