@@ -73,12 +73,8 @@ const MEMBERS = ["한상오","장민태","채승준","함예린","김동영","�
 const allMembers = () => MEMBERS.slice();
 
 /* 인원별 고정 색상 — 이름 해시로 일관된 색을 주어 일정에서 구분이 쉽도록 */
-const MEMBER_COLORS = [C.blue, C.green, C.purple, C.orange, "#0891B2", "#DB2777", "#65A30D", "#D97706"];
-const memberColor = (name) => {
-  let h = 0; const s = String(name||"");
-  for (let i=0;i<s.length;i++) h = (h*31 + s.charCodeAt(i)) >>> 0;
-  return MEMBER_COLORS[h % MEMBER_COLORS.length];
-};
+/* 인원 색상 — 사람마다 다르게 하지 않고 검정으로 통일 (가독성 우선) */
+const memberColor = () => C.t1;
 
 /* 카테고리 — 학교 / LH 아파트 정밀점검을 구분해서 관리 */
 const CAT_LH = "LH";
@@ -465,9 +461,6 @@ function parseSheet(ws) {
   out2.forEach(s => { if (!s.buildings.length) s.buildings.push({ b:s.school||"본관", floor:null, area:null, height:null, len:null, jong:null, fms:null, note:null, rep:false, fmsD:false, delivery:null }); });
   return out2;
 }
-/* 엑셀 출력용 — 학교 블록 강조색 (중립) */
-function XL_BLOCK_COLOR() { return ["FFEAF1FB","FF1559C9"]; }
-
 /* ── LH 아파트 정밀점검 시트 파서 ──
    학교 양식과 열 구성이 달라 별도로 읽는다. 단지명으로 묶고 시설물명(101동 등)을 동으로,
    관리사무소를 전화번호로, 현장점검을 현장조사일, 정밀안전점검 도래시기를 완수일로 매핑. */
@@ -584,7 +577,6 @@ function buildSheet(schools) {
   const aoa = [HEAD];
   const blocks = [];                                  // 학교 단위 블록 (병합·줄무늬용)
   const mkDate = v => { if (!v) return ""; const p=String(v).split("-").map(Number); return (p.length===3 && p[0]) ? new Date(p[0],p[1]-1,p[2],12) : ""; };
-  let zeb = 0;
   schools.forEach(s => {
     const bs = (s.buildings && s.buildings.length) ? s.buildings : [{ b:s.school||"본관" }];
     const startRow = aoa.length;                      // 0-based(헤더 포함) 엑셀 행
@@ -601,8 +593,7 @@ function buildSheet(schools) {
         b.fms||"", first?getFlags(s).join(","):"", b.note||"", b.rep?"◎":"", b.delivery||"", b.fmsD?"◎":"",
       ]);
     });
-    blocks.push({ startRow, rows:bs.length, zebra:zeb%2 });
-    zeb++;
+    blocks.push({ startRow, rows:bs.length });
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
   const lastRow = aoa.length-1;
@@ -628,8 +619,6 @@ function buildSheet(schools) {
   }
   /* 데이터 */
   blocks.forEach(bk => {
-    const [tbg,tfg] = XL_BLOCK_COLOR();
-    const zbg = bk.zebra ? "FFF4F8FD" : "FFFFFFFF";
     for (let ri=0; ri<bk.rows; ri++) {
       const r = bk.startRow + ri;
       const lastOfSchool = ri===bk.rows-1;
@@ -637,15 +626,11 @@ function buildSheet(schools) {
         const a = XLSX.utils.encode_cell({ r, c });
         if (!ws[a]) ws[a] = { t:"s", v:"" };
         const schoolCol = SCHOOL_COLS.includes(c);
-        let fill = zbg;
+        /* 데이터 행은 색 없이 흰 배경 · 검정 글자 (헤더만 색) */
+        let fill = "FFFFFFFF";
         let font = { name:"맑은 고딕", sz:9.5, color:{ rgb:"FF1A2332" } };
-        if (c===0) { fill = tbg; font = { ...font, bold:true, color:{ rgb:tfg } }; }
-        if (c===4) font = { ...font, bold:true };
-        if (c===1) font = { ...font, bold:true, color:{ rgb:"FF5A6478" } };
-        if (c===18) font = { ...font, bold:true, sz:11, color:{ rgb:"FF7C3AED" } };
-        if (c===20) font = { ...font, bold:true, sz:11, color:{ rgb:"FF1D6FF2" } };
-        if (c===14) font = { ...font, bold:true, color:{ rgb:"FF0A9260" } };
-        if (c===17) { font = { ...font, sz:8.5, color:{ rgb:"FF8A6D0B" } }; fill = "FFFFFBEB"; }
+        if (c===0 || c===4) font = { ...font, bold:true };
+        if (c===17) font = { ...font, sz:8.5 };
         const align = { vertical: schoolCol?"center":"top",
           horizontal: CENTER_COLS.has(c)?"center":(LEFT_COLS.has(c)?"left":"center"),
           wrapText: (c===17) };
@@ -684,18 +669,15 @@ function buildAuxSheet(headers, rows, meta, opts={}) {
   }
   for (let r=1;r<=last;r++) {
     const totalRow = opts.totalRow && r===last;
-    const zbg = totalRow ? "FFEAF3FF" : (r%2 ? "FFF7FAFE" : "FFFFFFFF");
+    /* 데이터 행은 색 없이 흰 배경 · 검정 글자 (헤더만 색) */
     for (let c=0;c<nC;c++) {
       const m = meta[c]||{};
       const a = XLSX.utils.encode_cell({ r, c });
       if (!ws[a]) ws[a] = { t:"s", v:"" };
-      let fill = zbg;
+      let fill = "FFFFFFFF";
       let font = { name:"맑은 고딕", sz:9.5, color:{ rgb:"FF1A2332" } };
-      if (totalRow) font = { ...font, bold:true, color:{ rgb:"FF1559C9" } };
-      else {
-        if (m.bold) font = { ...font, bold:true };
-        if (m.num)  font = { ...font, bold:true, color:{ rgb:"FF0A9260" } };
-      }
+      if (totalRow) font = { ...font, bold:true };
+      else if (m.bold || m.num) font = { ...font, bold:true };
       ws[a].s = { font, fill:{ patternType:"solid", fgColor:{ rgb:fill } },
         alignment:{ vertical: m.wrap?"top":"center", horizontal: m.align||"center", wrapText: !!m.wrap },
         border:{ top:{style:"thin",color:{rgb:"FFE3E8F0"}}, bottom:{style:"thin",color:{rgb:"FFEDF0F5"}}, left:{style:"thin",color:{rgb:"FFE3E8F0"}}, right:{style:"thin",color:{rgb:"FFE3E8F0"}} } };
@@ -711,7 +693,7 @@ function buildBudgetSheet(entries) {
   const HEAD = ["연도","담당자","지역","학교명","시설명","시설 예산(원)","학교 합계(원)"];
   const nC = HEAD.length;
   const aoa = [HEAD];
-  const blocks = []; let zeb = 0; let grand = 0;
+  const blocks = []; let grand = 0;
   entries.forEach(({yr,half,schools}) => (schools||[]).forEach(s => {
     const bs = (s.buildings && s.buildings.length) ? s.buildings : [{ b:s.school||"본관" }];
     const startRow = aoa.length;
@@ -722,8 +704,7 @@ function buildBudgetSheet(entries) {
       aoa.push([ first?xlHalfLabel(yr,half):"", first?((s.assignees||[]).join(", ")):"", first?(s.region||""):"", first?(s.school||""):"",
         b.b||"", isNaN(ba)?"":ba, first?(total||""):"" ]);
     });
-    blocks.push({ startRow, rows:bs.length, zebra:zeb%2 });
-    zeb++;
+    blocks.push({ startRow, rows:bs.length });
   }));
   aoa.push(["합계","","","","", "", grand]);
   const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
@@ -747,27 +728,23 @@ function buildBudgetSheet(entries) {
   for (let c=0;c<nC;c++) {
     const a = XLSX.utils.encode_cell({ r:last, c });
     if (!ws[a]) ws[a]={ t:"s", v:"" };
-    ws[a].s = { font:{ name:"맑은 고딕", sz:10, bold:true, color:{ rgb:"FF1559C9" } },
-      fill:{ patternType:"solid", fgColor:{ rgb:"FFEAF3FF" } },
+    ws[a].s = { font:{ name:"맑은 고딕", sz:10, bold:true, color:{ rgb:"FF1A2332" } },
+      fill:{ patternType:"solid", fgColor:{ rgb:"FFFFFFFF" } },
       alignment:{ horizontal: c===6?"right":"center", vertical:"center" },
       border:{ top:{style:"medium",color:{rgb:"FFC2CCDC"}}, bottom:{style:"medium",color:{rgb:"FFC2CCDC"}}, left:{style:"thin",color:{rgb:"FFE3E8F0"}}, right:{style:"thin",color:{rgb:"FFE3E8F0"}} } };
     if (c===6 && typeof ws[a].v==="number") ws[a].z = "#,##0";
   }
   /* 데이터 블록 */
   blocks.forEach(bk => {
-    const [tbg,tfg] = XL_BLOCK_COLOR();
-    const zbg = bk.zebra ? "FFF4F8FD" : "FFFFFFFF";
     for (let ri=0; ri<bk.rows; ri++) {
       const r = bk.startRow + ri;
       const lastOfSchool = ri===bk.rows-1;
       for (let c=0;c<nC;c++) {
         const a = XLSX.utils.encode_cell({ r, c });
         if (!ws[a]) ws[a]={ t:"s", v:"" };
-        let fill = zbg, font = { name:"맑은 고딕", sz:9.5, color:{ rgb:"FF1A2332" } };
-        if (c===1) { fill=tbg; font={ ...font, bold:true, color:{ rgb:tfg } }; }
-        if (c===3) font={ ...font, bold:true };
-        if (c===5) font={ ...font, color:{ rgb:"FF0A9260" } };
-        if (c===6) font={ ...font, bold:true, color:{ rgb:"FF1559C9" } };
+        /* 데이터 행은 색 없이 흰 배경 · 검정 글자 (헤더만 색) */
+        let fill = "FFFFFFFF", font = { name:"맑은 고딕", sz:9.5, color:{ rgb:"FF1A2332" } };
+        if (c===3 || c===6) font={ ...font, bold:true };
         ws[a].s = { font, fill:{ patternType:"solid", fgColor:{ rgb:fill } },
           alignment:{ vertical: SCHOOL_COLS.includes(c)?"center":"top", horizontal: LEFT_COLS.has(c)?"left":(c===5||c===6?"right":"center") },
           border:{ top:{style:"thin",color:{rgb:"FFE3E8F0"}},
@@ -842,7 +819,6 @@ function buildCalendarSheet(entries) {
   const FNT = "맑은 고딕";
   const thin = c => ({ style:"thin", color:{ rgb:c } });
   const bd = c => ({ top:thin(c), bottom:thin(c), left:thin(c), right:thin(c) });
-  const wkC = c => c===0 ? "FFD64545" : c===6 ? "FF1559C9" : "FF1A2332";   // 일=빨강, 토=파랑
   const fill = h => ({ patternType:"solid", fgColor:{ rgb:h } });
 
   const aoa=[], rowH=[], merges=[], styles={};
@@ -860,7 +836,7 @@ function buildCalendarSheet(entries) {
       rowH[rT]={hpt:26};
       /* 요일 헤더 */
       const rW=aoa.length; aoa.push(WD.slice());
-      WD.forEach((w,c)=> setS(rW,c,{ font:{name:FNT,sz:10,bold:true,color:{rgb:wkC(c)}}, fill:fill("FFF0F4FA"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") }));
+      WD.forEach((w,c)=> setS(rW,c,{ font:{name:FNT,sz:10,bold:true,color:{rgb:"FF1A2332"}}, fill:fill("FFF0F4FA"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") }));
       rowH[rW]={hpt:20};
       /* 주차별 — 한 칸에 날짜 + 그날 일정 전부 */
       const firstDow=new Date(y,m-1,1).getDay(); const daysIn=new Date(y,m,0).getDate(); const weeks=Math.ceil((firstDow+daysIn)/7);
@@ -877,12 +853,14 @@ function buildCalendarSheet(entries) {
         }
         const rR=aoa.length; aoa.push(vals);
         rowH[rR]={hpt:Math.max(40, maxLines*14+8)};
+        /* 날짜 칸은 색 없이 흰 배경 · 검정 글자 (제목/요일 머리만 색). 오늘만 굵은 테두리로 표시 */
         meta.forEach(dm=>{
-          let bg="FFFFFFFF";
-          if (dm.blank) bg="FFF7F8FA"; else if (dm.today) bg="FFFFF6D8"; else if (dm.has) bg="FFF4F8FF"; else if (dm.dow===0) bg="FFFDEEEE"; else if (dm.dow===6) bg="FFEDF3FC";
-          setS(rR,dm.c,{ font:{name:FNT,sz:9,color:{rgb:dm.blank?"FFB8C0CC":"FF1A2332"}}, fill:fill(bg),
+          setS(rR,dm.c,{ font:{name:FNT,sz:9,bold:!!dm.today,color:{rgb:dm.blank?"FFB8C0CC":"FF1A2332"}}, fill:fill("FFFFFFFF"),
             alignment:{horizontal:"left",vertical:"top",wrapText:true},
-            border:bd(dm.today?"FFF0B400":dm.has?"FFBFD4F5":"FFE0E6EE") });
+            border: dm.today
+              ? { top:{style:"medium",color:{rgb:"FF1559C9"}}, bottom:{style:"medium",color:{rgb:"FF1559C9"}},
+                  left:{style:"medium",color:{rgb:"FF1559C9"}}, right:{style:"medium",color:{rgb:"FF1559C9"}} }
+              : bd("FFE0E6EE") });
         });
       }
       aoa.push(new Array(7).fill("")); rowH[aoa.length-1]={hpt:8};
