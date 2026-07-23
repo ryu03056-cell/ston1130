@@ -67,35 +67,40 @@ const C = {
   yellow:"#B58A00",yellowL:"#FDF8E8",
 };
 
-/* ── 팀 메타 ── */
-const TC = {
-  "1팀":{a:C.team1,b:C.team1b,c:C.team1c},
-  "2팀":{a:C.team2,b:C.team2b,c:C.team2c},
-  "3팀":{a:C.team3,b:C.team3b,c:C.team3c},
-  "4팀":{a:C.team4,b:C.team4b,c:C.team4c},
-  "관리팀":{a:"#475569",b:"#4755691f",c:"#334155"},
-};
-const TEAM_LIST = ["1팀","2팀","3팀","4팀","관리팀"];
+/* ── 인원 명단 (팀 구분 없이 전체 인원) ── */
+const MEMBERS = ["한상오","장민태","채승준","함예린","김동영","한범용","권태민","김유빈",
+  "정도혁","윤종현","이동현","관우남","이준혁","박서연","최민준","윤지현"];
+const allMembers = () => MEMBERS.slice();
 
-/* ── 팀원 명단 (실제 명단으로 교체 가능) ── */
-const TEAM_MEMBERS = {
-  "1팀": ["김동영","한범용","권태민","김유빈"],
-  "2팀": ["정도혁","윤종현","이동현","관우남"],
-  "3팀": ["한상오","장민태","채승준","함예린"],
-  "4팀": ["이준혁","박서연","최민준","윤지현"],
-  "관리팀": [],
+/* 인원별 고정 색상 — 이름 해시로 일관된 색을 주어 일정에서 구분이 쉽도록 */
+const MEMBER_COLORS = [C.blue, C.green, C.purple, C.orange, "#0891B2", "#DB2777", "#65A30D", "#D97706"];
+const memberColor = (name) => {
+  let h = 0; const s = String(name||"");
+  for (let i=0;i<s.length;i++) h = (h*31 + s.charCodeAt(i)) >>> 0;
+  return MEMBER_COLORS[h % MEMBER_COLORS.length];
 };
 
-/* ── 팀/인원 헬퍼 ──
-   관리팀은 채팅 전용 — 현장 팀 구분(필터·일정)에서는 제외하지만
-   인원은 현장 투입 후보에 포함된다. 투입 인원은 전체 인원에서 선택 가능. */
-const NON_FIELD_TEAMS = ["관리팀"];
-const FIELD_TEAMS = () => TEAM_LIST.filter(t => !NON_FIELD_TEAMS.includes(t));
-const memberTeam = (name) => TEAM_LIST.find(t => (TEAM_MEMBERS[t]||[]).includes(name)) || null;
-const allMembers = () => {
-  const seen = new Set(), out = [];
-  TEAM_LIST.forEach(t => (TEAM_MEMBERS[t]||[]).forEach(n => { if (n && !seen.has(n)) { seen.add(n); out.push(n); } }));
-  return out;
+/* 카테고리 — 학교 / LH 아파트 정밀점검을 구분해서 관리 */
+const CAT_LH = "LH";
+const isLH = (yr) => String(yr) === CAT_LH;
+
+/* 현장 표시(드론·1년·피난) — 학교 단위, 중복 선택 가능 */
+const FLAG_OPTS = [
+  { v:"드론", label:"🚁 드론", color:C.orange },
+  { v:"1년",  label:"📅 1년",  color:C.blue },
+  { v:"피난", label:"🚪 피난", color:C.purple },
+];
+const getFlags = (s) => {
+  if (Array.isArray(s?.flags)) return s.flags;
+  /* 예전 데이터 호환: 동별 flag(●=드론)를 학교 단위로 합침 */
+  const set = new Set();
+  (s?.buildings||[]).forEach(b => {
+    if (!b || !b.flag) return;
+    if (b.flag === "●" || b.flag === "드론") set.add("드론");
+    else if (b.flag === "1년") set.add("1년");
+    else if (b.flag === "피난") set.add("피난");
+  });
+  return [...set];
 };
 const STEPS = ["착수계","현장조사","기타자료","보고서","검토","제본","납품","완수"];
 const STEP_ICON = { 착수계:"📝", 현장조사:"📍", 기타자료:"📎", 보고서:"📄", 검토:"🔍", 제본:"📚", 납품:"📦", 완수:"🏁" };
@@ -369,7 +374,6 @@ function parseSheet(ws) {
   const idxInc = (...keys) => H.findIndex(h => h && keys.some(k => h.includes(k)));
   const idxEq  = (...keys) => H.findIndex(h => h && keys.some(k => h === k));
   const col = {
-    team:     idxInc("담당팀"),
     no:       (()=>{ const e=idxEq("no","번호"); return e>=0?e:idxInc("번호"); })(),
     kind:     idxInc("점검종류"),
     region:   idxInc("지역"),
@@ -393,7 +397,6 @@ function parseSheet(ws) {
   if (col.school < 0) return [];                       // 학교 열 없으면 포기
 
   const gv = (r,i) => (i==null||i<0) ? null : r[i];
-  const cleanTeam = r => { const t = clean(gv(r,col.team)); return (t && t!=="-") ? t : ""; };
   const isMark = v => { const s=clean(v); return ["◎","○","●","O","o","Y","y","V","v","✓"].includes(s) || v===true; };
 
   const order = [], out = [];
@@ -416,15 +419,13 @@ function parseSheet(ws) {
       cur = {
         id:`imp-${Date.now().toString(36)}-${out.length}-${Math.random().toString(36).slice(2,6)}`,
         no, school, region: clean(gv(r,col.region)), kind: clean(gv(r,col.kind)) || "정기점검",
-        team: cleanTeam(r) || "미지정",
         field: parseExcelDate(gv(r,col.field)), start: parseExcelDate(gv(r,col.start)), end: parseExcelDate(gv(r,col.end)),
-        headcount:2, assignees:[], buildings:[],
+        headcount:2, assignees:[], buildings:[], flags:[], tel:"",
       };
       out.push(cur);
     } else {
       if (no && !cur.no) cur.no = no;
       if (school && !cur.school) cur.school = school;
-      if (!cur.team || cur.team==="미지정") { const t=cleanTeam(r); if(t) cur.team=t; }
       if (!cur.region) cur.region = clean(gv(r,col.region));
       if (!cur.kind || cur.kind==="정기점검") { const k=clean(gv(r,col.kind)); if(k) cur.kind=k; }
       if (!cur.field) cur.field = parseExcelDate(gv(r,col.field));
@@ -446,25 +447,138 @@ function parseSheet(ws) {
           height: col.height>=0 ? (clean(gv(r,col.height))||null) : null,
           len:    col.length>=0 ? (clean(gv(r,col.length))||null) : null,
           jong:   col.jong>=0   ? (clean(gv(r,col.jong))||null)   : null,
-          fms: clean(gv(r,col.fms))||null, flag: clean(gv(r,col.flag))||null, note: clean(gv(r,col.note))||null,
+          fms: clean(gv(r,col.fms))||null, note: clean(gv(r,col.note))||null,
           rep: isMark(gv(r,col.rep)), fmsD: isMark(gv(r,col.fmsD)), delivery: clean(gv(r,col.delivery))||null,
         });
+        /* 드론·1년·피난 표시는 학교 단위로 합침 (어느 동에라도 있으면 학교 표시) */
+        const fv = clean(gv(r,col.flag));
+        if (fv) {
+          cur.flags = cur.flags || [];
+          if (/드론|●|○|◎|o|O/.test(fv) && !cur.flags.includes("드론")) cur.flags.push("드론");
+          if (/1년|일년/.test(fv) && !cur.flags.includes("1년")) cur.flags.push("1년");
+          if (/피난/.test(fv) && !cur.flags.includes("피난")) cur.flags.push("피난");
+        }
       });
     }
   }
   const out2 = out.filter(s => s.school || s.buildings.length);
-  out2.forEach(s => { if (!s.buildings.length) s.buildings.push({ b:s.school||"본관", floor:null, area:null, height:null, len:null, jong:null, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null }); });
+  out2.forEach(s => { if (!s.buildings.length) s.buildings.push({ b:s.school||"본관", floor:null, area:null, height:null, len:null, jong:null, fms:null, note:null, rep:false, fmsD:false, delivery:null }); });
   return out2;
 }
-/* 엑셀 출력용 팀 색상 [배경ARGB, 글자ARGB] */
-function XL_TEAM_COLOR(t) {
-  return ({ "1팀":["FFE3EEFF","FF1D6FF2"],"2팀":["FFDFF3EA","FF0A9260"],"3팀":["FFFBE3E0","FFD93B2B"],"4팀":["FFEDE4FB","FF7C3AED"],"관리팀":["FFE7EAF0","FF475569"] })[t] || ["FFEFF1F4","FF8A94A6"];
+/* 엑셀 출력용 — 학교 블록 강조색 (중립) */
+function XL_BLOCK_COLOR() { return ["FFEAF1FB","FF1559C9"]; }
+
+/* ── LH 아파트 정밀점검 시트 파서 ──
+   학교 양식과 열 구성이 달라 별도로 읽는다. 단지명으로 묶고 시설물명(101동 등)을 동으로,
+   관리사무소를 전화번호로, 현장점검을 현장조사일, 정밀안전점검 도래시기를 완수일로 매핑. */
+function parseLHDate(v) {
+  if (v instanceof Date && !isNaN(v)) {
+    const q = n => String(n).padStart(2,"0");
+    return `${v.getFullYear()}-${q(v.getMonth()+1)}-${q(v.getDate())}`;
+  }
+  const t = String(v==null?"":v).replace(/\u00a0/g," ").trim();
+  if (!t) return null;
+  const q = n => String(parseInt(n,10)).padStart(2,"0");
+  /* 한 칸에 여러 날짜(줄바꿈·슬래시·물결)가 있으면 첫 날짜만 사용 */
+  let m = t.match(/(\d{4})\s*[-.\/]\s*(\d{1,2})\s*[-.\/]\s*(\d{1,2})/);      // 2026-03-18
+  if (m) return `${m[1]}-${q(m[2])}-${q(m[3])}`;
+  m = t.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{2,4})/);                 // 3/19/26 (월/일/년)
+  if (m) { let y = parseInt(m[3],10); if (y < 100) y += 2000; return `${y}-${q(m[1])}-${q(m[2])}`; }
+  const n = Number(t);                                                        // 엑셀 일련번호
+  if (!isNaN(n) && n > 20000 && n < 60000) {
+    const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+    if (!isNaN(d)) return `${d.getUTCFullYear()}-${q(d.getUTCMonth()+1)}-${q(d.getUTCDate())}`;
+  }
+  return null;
+}
+
+function parseLHSheet(ws) {
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+  const cl = v => v==null ? "" : String(v).replace(/\u00a0/g," ").trim();
+  const nz = v => cl(v).toLowerCase().replace(/[^a-z0-9가-힣]/g,"");
+  const hIdx = rows.findIndex(r => (r||[]).some(c => nz(c).includes("단지명")));
+  if (hIdx < 0) return [];
+  const H = (rows[hIdx]||[]).map(nz);
+  const idx = (...keys) => H.findIndex(h => h && keys.some(k => h.includes(k)));
+  const col = {
+    gubun:   idx("구분"),
+    complex: idx("단지명"),
+    loc:     idx("위치"),
+    b:       idx("시설물명"),
+    area:    idx("연면적"),
+    floor:   idx("층수"),
+    type:    idx("유형"),
+    tel:     idx("관리사무소"),
+    fms:     H.findIndex(h => h.includes("fms") && h.includes("아이디")),
+    field:   idx("현장점검"),
+    defect:  idx("결함조사"),
+    equip:   idx("장비조사"),
+    due:     idx("도래시기"),
+    who:     idx("담당팀","담당자"),
+  };
+  if (col.complex < 0) return [];
+
+  const shortRegion = a => { const m = String(a||"").match(/([가-힣]{2,4})시|([가-힣]{2,4})군/); return m ? (m[1]||m[2]) : ""; };
+  const splitNames = v => cl(v).split(/[,·\/]/).map(x=>x.trim()).filter(Boolean);
+  const num = v => { const n = parseFloat(String(v==null?"":v).replace(/[^0-9.]/g,"")); return isNaN(n)?null:n; };
+  const gv = (r,i) => (i==null||i<0) ? null : r[i];
+
+  const out = [];
+  let cur = null;
+  for (let i=hIdx+1; i<rows.length; i++) {
+    const r = rows[i]||[];
+    const name  = cl(gv(r,col.complex));
+    const bname = cl(gv(r,col.b));
+    if (!name && !bname) continue;
+    if (name && (!cur || cur.school !== name)) {
+      cur = {
+        id: `lh-${Date.now().toString(36)}-${out.length}-${Math.random().toString(36).slice(2,6)}`,
+        no: cl(gv(r,col.gubun)),
+        school: name,
+        region: shortRegion(gv(r,col.loc)),
+        addr: cl(gv(r,col.loc)),
+        kind: "정밀점검",
+        tel: cl(gv(r,col.tel)),
+        field: parseLHDate(gv(r,col.field)),
+        start: parseLHDate(gv(r,col.defect)),      // 결함조사
+        end:   parseLHDate(gv(r,col.due)),         // 정밀안전점검 도래시기
+        assignees: splitNames(gv(r,col.who)),
+        headcount: 2, buildings: [], flags: [], progress: {}, lh: true,
+      };
+      cur.headcount = cur.assignees.length || 2;
+      out.push(cur);
+    }
+    if (!cur) continue;
+    /* 병합 셀 탓에 아래 행에만 값이 있는 경우 보강 */
+    if (!cur.tel)   cur.tel   = cl(gv(r,col.tel));
+    if (!cur.field) cur.field = parseLHDate(gv(r,col.field));
+    if (!cur.start) cur.start = parseLHDate(gv(r,col.defect));
+    if (!cur.end)   cur.end   = parseLHDate(gv(r,col.due));
+    if (!cur.region) cur.region = shortRegion(gv(r,col.loc));
+    if (!cur.assignees.length) cur.assignees = splitNames(gv(r,col.who));
+    if (bname) {
+      const fmsRaw = cl(gv(r,col.fms));
+      const bits = [];
+      const ty = cl(gv(r,col.type));   if (ty) bits.push(`유형 ${ty}`);
+      const eq = cl(gv(r,col.equip));  if (eq) bits.push(`장비조사 ${eq}`);
+      cur.buildings.push({
+        b: bname,
+        floor: cl(gv(r,col.floor)) || null,
+        area:  num(gv(r,col.area)),
+        height:null, len:null, jong:null,
+        fms: (fmsRaw && fmsRaw !== '"') ? fmsRaw : null,     // " 는 윗행과 같다는 표시
+        note: bits.join(" · ") || null,
+        rep:false, fmsD:false, delivery:null,
+      });
+    }
+  }
+  return out.filter(s => s.school && s.buildings.length);
 }
 function xlHalfLabel(yr, half) { return `${String(yr).slice(2)}년(${half==="상반기"?"상":"하"})`; }
 function xlDate(v) { if (!v) return ""; const p=String(v).split("-").map(Number); return (p.length===3 && p[0]) ? new Date(p[0],p[1]-1,p[2],12) : ""; }
 function buildSheet(schools) {
   const today = new Date();
-  const HEAD = ["담당팀","No.","점검종류","지역","학교명","시설명","층수","연면적(㎡)","높이(m)","길이(m)",
+  const HEAD = ["담당자","No.","점검종류","지역","학교명","시설명","층수","연면적(㎡)","높이(m)","길이(m)",
     "종별","현장조사","착수일","완수일","용역기간","FMS 아이디/비번","드론/피난/1년","특기사항","보고서완료","납품방법","FMS등록"];
   const nCols = HEAD.length;
   const aoa = [HEAD];
@@ -481,13 +595,13 @@ function buildSheet(schools) {
       const first = bi===0;
       const area = (b.area!=null && b.area!=="") ? Number(b.area) : "";
       aoa.push([
-        first?(s.team||"미지정"):"", first?(s.no||""):"", first?(s.kind||""):"", first?(s.region||""):"", first?(s.school||""):"",
+        first?((s.assignees||[]).join(", ")):"", first?(s.no||""):"", first?(s.kind||""):"", first?(s.region||""):"", first?(s.school||""):"",
         b.b||"", b.floor||"", isNaN(area)?"":area, b.height||"", b.len||"", b.jong||"",
         first?mkDate(s.field):"", first?mkDate(s.start):"", first?mkDate(s.end):"", first?ddStr:"",
-        b.fms||"", b.flag||"", b.note||"", b.rep?"◎":"", b.delivery||"", b.fmsD?"◎":"",
+        b.fms||"", first?getFlags(s).join(","):"", b.note||"", b.rep?"◎":"", b.delivery||"", b.fmsD?"◎":"",
       ]);
     });
-    blocks.push({ startRow, rows:bs.length, team:s.team||"미지정", zebra:zeb%2 });
+    blocks.push({ startRow, rows:bs.length, zebra:zeb%2 });
     zeb++;
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
@@ -497,11 +611,10 @@ function buildSheet(schools) {
   ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:0,c:nCols-1} }) };
   ws["!freeze"] = { xSplit:0, ySplit:1, topLeftCell:"A2", activePane:"bottomLeft", state:"frozen" };
 
-  const SCHOOL_COLS = [0,1,2,3,4,11,12,13,14];        // 학교 단위(병합)
+  const SCHOOL_COLS = [0,1,2,3,4,11,12,13,14,16];     // 학교 단위(병합)
   const DATE_COLS = new Set([11,12,13]);
   const LEFT_COLS = new Set([4,5,15,17]);
   const CENTER_COLS = new Set([0,1,2,3,6,8,9,10,11,12,13,14,16,18,19,20]);
-  const teamColor = XL_TEAM_COLOR;
   const sty = (cell, s) => { if (ws[cell]) ws[cell].s = s; };
 
   /* 헤더 */
@@ -515,7 +628,7 @@ function buildSheet(schools) {
   }
   /* 데이터 */
   blocks.forEach(bk => {
-    const [tbg,tfg] = teamColor(bk.team);
+    const [tbg,tfg] = XL_BLOCK_COLOR();
     const zbg = bk.zebra ? "FFF4F8FD" : "FFFFFFFF";
     for (let ri=0; ri<bk.rows; ri++) {
       const r = bk.startRow + ri;
@@ -581,7 +694,6 @@ function buildAuxSheet(headers, rows, meta, opts={}) {
       if (totalRow) font = { ...font, bold:true, color:{ rgb:"FF1559C9" } };
       else {
         if (m.bold) font = { ...font, bold:true };
-        if (m.team) { const [tb,tf]=XL_TEAM_COLOR(String(ws[a].v||"")); fill=tb; font={ ...font, bold:true, color:{ rgb:tf } }; }
         if (m.num)  font = { ...font, bold:true, color:{ rgb:"FF0A9260" } };
       }
       ws[a].s = { font, fill:{ patternType:"solid", fgColor:{ rgb:fill } },
@@ -596,7 +708,7 @@ function buildAuxSheet(headers, rows, meta, opts={}) {
 
 /* 예산표 시트 — entries:[{yr,half,schools}] */
 function buildBudgetSheet(entries) {
-  const HEAD = ["연도","담당팀","지역","학교명","시설명","시설 예산(원)","학교 합계(원)"];
+  const HEAD = ["연도","담당자","지역","학교명","시설명","시설 예산(원)","학교 합계(원)"];
   const nC = HEAD.length;
   const aoa = [HEAD];
   const blocks = []; let zeb = 0; let grand = 0;
@@ -607,10 +719,10 @@ function buildBudgetSheet(entries) {
     bs.forEach((b,bi) => {
       const first = bi===0;
       const ba = (b.budget!=null && b.budget!=="") ? Number(b.budget) : "";
-      aoa.push([ first?xlHalfLabel(yr,half):"", first?(s.team||"미지정"):"", first?(s.region||""):"", first?(s.school||""):"",
+      aoa.push([ first?xlHalfLabel(yr,half):"", first?((s.assignees||[]).join(", ")):"", first?(s.region||""):"", first?(s.school||""):"",
         b.b||"", isNaN(ba)?"":ba, first?(total||""):"" ]);
     });
-    blocks.push({ startRow, rows:bs.length, team:s.team||"미지정", zebra:zeb%2 });
+    blocks.push({ startRow, rows:bs.length, zebra:zeb%2 });
     zeb++;
   }));
   aoa.push(["합계","","","","", "", grand]);
@@ -643,7 +755,7 @@ function buildBudgetSheet(entries) {
   }
   /* 데이터 블록 */
   blocks.forEach(bk => {
-    const [tbg,tfg] = XL_TEAM_COLOR(bk.team);
+    const [tbg,tfg] = XL_BLOCK_COLOR();
     const zbg = bk.zebra ? "FFF4F8FD" : "FFFFFFFF";
     for (let ri=0; ri<bk.rows; ri++) {
       const r = bk.startRow + ri;
@@ -674,11 +786,11 @@ function buildBudgetSheet(entries) {
 
 /* 특이사항 시트 — entries:[{yr,half,schools}] */
 function buildNotesSheet(entries) {
-  const headers = ["연도","담당팀","학교명","시설명","특기사항"];
+  const headers = ["연도","담당자","학교명","시설명","특기사항"];
   const meta = [{align:"center",w:11},{align:"center",team:true,w:8},{align:"left",bold:true,w:22},{align:"left",w:20},{align:"left",wrap:true,w:62}];
   const rows = [];
   entries.forEach(({yr,half,schools}) => (schools||[]).forEach(s =>
-    (s.buildings||[]).forEach(b => { if (b.note && String(b.note).trim()) rows.push([ xlHalfLabel(yr,half), s.team||"미지정", s.school||"", b.b||"", b.note ]); })
+    (s.buildings||[]).forEach(b => { if (b.note && String(b.note).trim()) rows.push([ xlHalfLabel(yr,half), (s.assignees||[]).join(", "), s.school||"", b.b||"", b.note ]); })
   ));
   if (!rows.length) rows.push(["","","","","특이사항이 입력된 현장이 없습니다."]);
   return buildAuxSheet(headers, rows, meta);
@@ -691,33 +803,36 @@ function buildScheduleSheet(entries) {
   const ddStr = end => { if (!end) return ""; const d=Math.floor((new Date(end)-today)/86400000); return d>=0?`D-${d}`:`D+${-d}`; };
   const sortKey = s => { const ds=[s.field,s.start,s.end].filter(Boolean).map(x=>new Date(x).getTime()).filter(t=>!isNaN(t)); return ds.length?Math.min(...ds):Infinity; };
   const headers = multi
-    ? ["구분","담당팀","지역","학교명","현장조사","착수일","완수일","잔여","담당자"]
-    : ["담당팀","지역","학교명","현장조사","착수일","완수일","잔여","담당자"];
+    ? ["구분","지역","학교명","표시","현장조사","착수일","완수일","잔여","담당자","연락처"]
+    : ["지역","학교명","표시","현장조사","착수일","완수일","잔여","담당자","연락처"];
   const meta = multi
-    ? [{align:"center",w:9},{align:"center",team:true,w:9},{align:"center",w:9},{align:"left",bold:true,w:26},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",w:8},{align:"left",w:28}]
-    : [{align:"center",team:true,w:9},{align:"center",w:9},{align:"left",bold:true,w:26},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",w:8},{align:"left",w:28}];
+    ? [{align:"center",w:9},{align:"center",team:true,w:9},{align:"center",w:9},{align:"left",bold:true,w:26},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",w:8},{align:"left",w:28},{align:"center",w:16}]
+    : [{align:"center",team:true,w:9},{align:"center",w:9},{align:"left",bold:true,w:26},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",date:true,w:12},{align:"center",w:8},{align:"left",w:28},{align:"center",w:16}];
   const all = [];
   entries.forEach(({yr,half,schools}) => (schools||[]).forEach(s => all.push({ s, label: xlHalfLabel(yr,half) })));
   all.sort((a,b) => sortKey(a.s) - sortKey(b.s));
   const rows = all.map(({s,label}) => {
-    const base = [ s.team||"미지정", s.region||"", s.school||"", xlDate(s.field), xlDate(s.start), xlDate(s.end), ddStr(s.end), (s.assignees||[]).join(", ") ];
+    const base = [ s.region||"", s.school||"", getFlags(s).join(","), xlDate(s.field), xlDate(s.start), xlDate(s.end), ddStr(s.end), (s.assignees||[]).join(", "), s.tel||"" ];
     return multi ? [label, ...base] : base;
   });
   if (!rows.length) rows.push(new Array(headers.length).fill(""));
   return buildAuxSheet(headers, rows, meta);
 }
 
-/* 현장일정 캘린더 시트 — 월별 달력. 왼쪽 팀 라벨 + 팀색, 각 날짜 칸에 학교명+담당자(누가 나가는지). entries:[{yr,half,schools}] */
+/* 현장일정 캘린더 시트 — 월별 달력. 각 날짜 칸에 일정(조사/착수/완수)·현장명·담당자. entries:[{yr,half,schools}] */
 function buildCalendarSheet(entries) {
   const today = new Date(); today.setHours(0,0,0,0);
   const tkey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
   const LABEL = { 현장조사:"조사", 착수:"착수", 완수:"완수" };
-  const byDay = {};   // dk -> { team -> ["조사·성남중\n(한상오,채승준)", ...] }
+  const byDay = {};   // dk -> ["조사·성남중 (한상오,채승준)", ...]
+  const seen = new Set();
   const addEv = (d,type,s) => {
     const k = String(d||"").slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
-    const team = s.team || "기타";
-    const who = (s.assignees||[]).join(",") || "미정";
-    (byDay[k]=byDay[k]||{}); (byDay[k][team]=byDay[k][team]||[]).push(`${LABEL[type]}·${s.school||""}\n(${who})`);
+    /* 같은 현장·같은 날·같은 종류는 한 번만 (이월본이 상·하반기 양쪽에 있어도 중복 표시 안 됨) */
+    const dedup = `${k}|${type}|${(s.school||"").trim()}`;
+    if (seen.has(dedup)) return; seen.add(dedup);
+    const who = (s.assignees||[]).join(",");
+    (byDay[k]=byDay[k]||[]).push(`${LABEL[type]}·${s.school||""}${who?` (${who})`:""}`);
   };
   entries.forEach(({schools})=> (schools||[]).forEach(s => { addEv(s.field,"현장조사",s); addEv(s.start,"착수",s); addEv(s.end,"완수",s); }));
   const keys = Object.keys(byDay).sort();
@@ -732,68 +847,50 @@ function buildCalendarSheet(entries) {
 
   const aoa=[], rowH=[], merges=[], styles={};
   const setS=(r,c,st)=>{ styles[`${r}_${c}`]=st; };
-  const present = new Set(); Object.values(byDay).forEach(tm=>Object.keys(tm).forEach(t=>present.add(t)));
-  const orderTeams = set => [...TEAM_LIST.filter(t=>set.has(t)), ...[...set].filter(t=>!TEAM_LIST.includes(t))];
-
-  /* 팀 편성(명단) 범례 */
-  const rosterTeams = orderTeams(present);
-  if (rosterTeams.length && rosterTeams.length<=7) {
-    const rR = aoa.length;
-    const cells = rosterTeams.map(t=>`${t}\n${(TEAM_MEMBERS[t]||[]).join("·")||"—"}`);
-    aoa.push(["👥 팀", ...cells, ...new Array(7-cells.length).fill("")]);
-    setS(rR,0,{ font:{name:FNT,sz:10,bold:true,color:{rgb:"FF1A2332"}}, fill:fill("FFEAF1FB"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") });
-    rosterTeams.forEach((t,i)=>{ const [,tfg]=XL_TEAM_COLOR(t); setS(rR,i+1,{ font:{name:FNT,sz:9,bold:true,color:{rgb:"FFFFFFFF"}}, fill:fill(tfg), alignment:{horizontal:"center",vertical:"center",wrapText:true}, border:bd(tfg) }); });
-    for (let c=rosterTeams.length+1;c<=7;c++) setS(rR,c,{ fill:fill("FFFFFFFF"), border:bd("FFF2F4F7") });
-    rowH[rR]={hpt:40}; aoa.push(new Array(8).fill("")); rowH[aoa.length-1]={hpt:6};
-  }
 
   const [fy,fm]=keys[0].split("-").map(Number); const [ly,lm]=keys[keys.length-1].split("-").map(Number);
   let y=fy,m=fm;
   while (y<ly || (y===ly && m<=lm)) {
     const monthKeys = keys.filter(k=>{const a=k.split("-");return +a[0]===y&&+a[1]===m;});
     if (monthKeys.length) {
-      const mSet=new Set(); monthKeys.forEach(k=>Object.keys(byDay[k]).forEach(t=>mSet.add(t)));
-      const monthTeams = orderTeams(mSet);
       /* 제목 */
-      const rT=aoa.length; aoa.push([`${y}년 ${m}월`,"","","","","","",""]);
-      merges.push({ s:{r:rT,c:0}, e:{r:rT,c:7} });
+      const rT=aoa.length; aoa.push([`${y}년 ${m}월`,"","","","","",""]);
+      merges.push({ s:{r:rT,c:0}, e:{r:rT,c:6} });
       setS(rT,0,{ font:{name:FNT,sz:13,bold:true,color:{rgb:"FFFFFFFF"}}, fill:fill("FF1D6FF2"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FF1559C9") });
       rowH[rT]={hpt:26};
       /* 요일 헤더 */
-      const rW=aoa.length; aoa.push(["", ...WD]);
-      setS(rW,0,{ font:{name:FNT,sz:9,bold:true,color:{rgb:"FF8A94A6"}}, fill:fill("FFF0F4FA"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") });
-      WD.forEach((w,c)=> setS(rW,c+1,{ font:{name:FNT,sz:10,bold:true,color:{rgb:wkC(c)}}, fill:fill("FFF0F4FA"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") }));
+      const rW=aoa.length; aoa.push(WD.slice());
+      WD.forEach((w,c)=> setS(rW,c,{ font:{name:FNT,sz:10,bold:true,color:{rgb:wkC(c)}}, fill:fill("FFF0F4FA"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFD5DEEA") }));
       rowH[rW]={hpt:20};
-      /* 주차별 */
+      /* 주차별 — 한 칸에 날짜 + 그날 일정 전부 */
       const firstDow=new Date(y,m-1,1).getDay(); const daysIn=new Date(y,m,0).getDate(); const weeks=Math.ceil((firstDow+daysIn)/7);
       for (let w=0; w<weeks; w++) {
-        const dayNums=[], dayMeta=[];
-        for (let c=0;c<7;c++){ const idx=w*7+c; const dnum=idx-firstDow+1;
-          if (idx<firstDow || dnum>daysIn){ dayNums.push(""); dayMeta.push({c,blank:true}); }
-          else { const dk=`${y}-${String(m).padStart(2,"0")}-${String(dnum).padStart(2,"0")}`; dayNums.push(String(dnum)); dayMeta.push({c,dnum,dk,dow:c,today:dk===tkey}); } }
-        /* 날짜 행 */
-        const rD=aoa.length; aoa.push(["", ...dayNums]);
-        setS(rD,0,{ font:{name:FNT,sz:9,color:{rgb:"FFB8C0CC"}}, fill:fill("FFFAFBFC"), alignment:{horizontal:"center",vertical:"center"}, border:bd("FFE0E6EE") });
-        dayMeta.forEach(dm=>{ const bg=dm.blank?"FFF7F8FA":dm.today?"FFFFF6D8":"FFFFFFFF"; setS(rD,dm.c+1,{ font:{name:FNT,sz:11,bold:true,color:{rgb:dm.blank?"FFCBD2DB":wkC(dm.dow)}}, fill:fill(bg), alignment:{horizontal:"left",vertical:"center"}, border:bd(dm.today?"FFF0B400":"FFE0E6EE") }); });
-        rowH[rD]={hpt:18};
-        /* 팀별 행 (그 주에 일정 있는 팀만) */
-        monthTeams.forEach(team=>{
-          const [tbg,tfg]=XL_TEAM_COLOR(team);
-          const cellVals=[]; let maxLines=1;
-          for (let c=0;c<7;c++){ const dm=dayMeta[c]; if(dm.blank){cellVals.push("");continue;} const es=(byDay[dm.dk]&&byDay[dm.dk][team])||[]; const txt=es.join("\n"); cellVals.push(txt); if(txt) maxLines=Math.max(maxLines,txt.split("\n").length); }
-          if (!cellVals.some(v=>v)) return;   // 그 주 해당 팀 일정 없으면 행 생략
-          const rTm=aoa.length; aoa.push([team, ...cellVals]);
-          setS(rTm,0,{ font:{name:FNT,sz:10.5,bold:true,color:{rgb:"FFFFFFFF"}}, fill:fill(tfg), alignment:{horizontal:"center",vertical:"center"}, border:{ top:thin(tfg), bottom:thin(tfg), left:{style:"medium",color:{rgb:tfg}}, right:thin("FFE0E6EE") } });
-          for (let c=0;c<7;c++){ const has=!!cellVals[c]; const dm=dayMeta[c]; setS(rTm,c+1,{ font:{name:FNT,sz:9,bold:has,color:{rgb: has?tfg:"FFB8C0CC"}}, fill:fill(has?tbg:(dm.blank?"FFF7F8FA":"FFFFFFFF")), alignment:{horizontal:"left",vertical:"top",wrapText:true}, border:{ top:thin("FFEEF1F5"), bottom:{ style: has?"medium":"thin", color:{ rgb: has?tfg:"FFEEF1F5" } }, left:thin("FFEEF1F5"), right:thin("FFEEF1F5") } }); }
-          rowH[rTm]={hpt:Math.max(20,maxLines*13+6)};
+        const vals=[], meta=[]; let maxLines=1;
+        for (let c=0;c<7;c++){
+          const idx=w*7+c; const dnum=idx-firstDow+1;
+          if (idx<firstDow || dnum>daysIn){ vals.push(""); meta.push({c,blank:true}); continue; }
+          const dk=`${y}-${String(m).padStart(2,"0")}-${String(dnum).padStart(2,"0")}`;
+          const es=byDay[dk]||[];
+          vals.push([String(dnum), ...es].join("\n"));
+          maxLines=Math.max(maxLines, 1+es.length);
+          meta.push({ c, dow:c, has:es.length>0, today:dk===tkey });
+        }
+        const rR=aoa.length; aoa.push(vals);
+        rowH[rR]={hpt:Math.max(40, maxLines*14+8)};
+        meta.forEach(dm=>{
+          let bg="FFFFFFFF";
+          if (dm.blank) bg="FFF7F8FA"; else if (dm.today) bg="FFFFF6D8"; else if (dm.has) bg="FFF4F8FF"; else if (dm.dow===0) bg="FFFDEEEE"; else if (dm.dow===6) bg="FFEDF3FC";
+          setS(rR,dm.c,{ font:{name:FNT,sz:9,color:{rgb:dm.blank?"FFB8C0CC":"FF1A2332"}}, fill:fill(bg),
+            alignment:{horizontal:"left",vertical:"top",wrapText:true},
+            border:bd(dm.today?"FFF0B400":dm.has?"FFBFD4F5":"FFE0E6EE") });
         });
       }
-      aoa.push(new Array(8).fill("")); rowH[aoa.length-1]={hpt:8};
+      aoa.push(new Array(7).fill("")); rowH[aoa.length-1]={hpt:8};
     }
     m++; if(m>12){m=1;y++;}
   }
   const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"]=[{wch:7}, ...new Array(7).fill(0).map(()=>({wch:18}))];
+  ws["!cols"]=new Array(7).fill(0).map(()=>({wch:22}));
   ws["!merges"]=merges;
   ws["!rows"]=aoa.map((_,i)=>rowH[i]||{hpt:16});
   Object.entries(styles).forEach(([rc,st])=>{const p=rc.split("_");const a=XLSX.utils.encode_cell({r:+p[0],c:+p[1]});if(!ws[a])ws[a]={t:"s",v:""};ws[a].s=st;});
@@ -886,13 +983,28 @@ function applyNotes(schools, notes) {
 /* ══════════════════════════════════════════════════════════════
    날짜 클릭 상세 패널 (현장조사 · 완수일)
 ══════════════════════════════════════════════════════════════ */
-function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile }) {
+function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
   const [pickerId, setPickerId] = useState(null);
   const [editId, setEditId] = useState(null);
 
-  const fieldSchools = allSchools.filter(s => s.field===dateStr && (teamF==="전체"||s.team===teamF));
-  const startSchools = allSchools.filter(s => s.start===dateStr && (teamF==="전체"||s.team===teamF));
-  const endSchools   = allSchools.filter(s => s.end===dateStr   && (teamF==="전체"||s.team===teamF));
+  /* 같은 현장이 상·하반기 양쪽에 있으면(1년 계약 이월) 한 번만 표시.
+     그 날짜가 속한 반기의 기록을 우선으로 남긴다. */
+  const dHalf = parseInt(String(dateStr).slice(5,7),10) <= 6 ? "상반기" : "하반기";
+  const dYear = String(dateStr).slice(0,4);
+  const dedup = arr => {
+    const m = new Map();
+    arr.forEach(s => {
+      const k = `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
+      const prev = m.get(k);
+      if (!prev) { m.set(k, s); return; }
+      const fits = x => String(x._year)===dYear && x._half===dHalf;
+      if (!fits(prev) && fits(s)) m.set(k, s);
+    });
+    return [...m.values()];
+  };
+  const fieldSchools = dedup(allSchools.filter(s => s.field===dateStr));
+  const startSchools = dedup(allSchools.filter(s => s.start===dateStr));
+  const endSchools   = dedup(allSchools.filter(s => s.end===dateStr));
   const total = fieldSchools.length + startSchools.length + endSchools.length;
   const editSc = editId ? allSchools.find(s=>s.id===editId) : null;
 
@@ -915,33 +1027,48 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
     logAction(had?"삭제":"추가", `인원 배정 · ${sc.school}`, had?name:null, had?null:name);
   };
 
+  /* 현장에서 바로 통화 — 번호가 있으면 탭 한 번으로 전화 앱 연결 */
+  const TelBtn = ({ tel }) => {
+    if (!tel) return null;
+    const dial = String(tel).replace(/[^0-9+]/g,"");
+    if (!dial) return null;
+    return (
+      <a href={`tel:${dial}`} onClick={e=>e.stopPropagation()} title={tel}
+        style={{ padding:"3px 9px",borderRadius:5,fontSize:9,fontWeight:800,textDecoration:"none",
+          border:`1px solid ${C.green}55`,background:C.greenL,color:C.green,whiteSpace:"nowrap" }}>📞 전화</a>
+    );
+  };
+
+  /* 카드 공통 머리줄 — 현장명 · 지역 · 표시 · 전화 · 수정 */
+  const CardHead = ({ s }) => (
+    <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:7,flexWrap:"wrap" }}>
+      <span style={{ fontSize:12,fontWeight:800,color:C.t1,flex:1,minWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
+      {getFlags(s).map(fv=>{ const o=FLAG_OPTS.find(x=>x.v===fv); return o? <span key={fv} style={{ fontSize:9,fontWeight:700,color:o.color }}>{o.label}</span> : null; })}
+      <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
+      <TelBtn tel={s.tel}/>
+      <button onClick={()=>setEditId(s.id)} style={{ padding:"3px 10px",borderRadius:5,fontSize:10,fontWeight:700,
+        border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
+    </div>
+  );
+
   const FieldCard = ({ s }) => {
-    const tc = TC[s.team]||{a:C.t3,b:C.surfaceL,c:C.t2};
     const assignees = s.assignees||[];
     const available = allMembers().filter(n=>!assignees.includes(n));
     const open = pickerId===s.id;
     return (
       <div style={{ padding:"10px 11px",background:C.surface,borderRadius:9,
-        border:`1px solid ${C.border}`,borderLeft:`3px solid ${tc.a}`,marginBottom:6 }}>
-        <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:8 }}>
-          <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
-          <span style={{ fontSize:11,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
-          <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
-          <button onClick={()=>setEditId(s.id)} style={{ padding:"2px 8px",borderRadius:5,fontSize:9,fontWeight:700,
-            border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
-        </div>
+        border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.blue}`,marginBottom:6 }}>
+        <CardHead s={s}/>
 
-        {/* 팀(이름) 배정 */}
-        <div style={{ padding:"8px 9px",background:tc.b,borderRadius:9,border:`1px solid ${tc.a}25` }}>
+        {/* 인원 배정 */}
+        <div style={{ padding:"8px 9px",background:C.surfaceL,borderRadius:9,border:BD }}>
           <div style={{ display:"flex",alignItems:"center",flexWrap:"wrap",gap:5 }}>
-            <span style={{ fontSize:11,fontWeight:800,color:tc.a,background:C.surface,
-              padding:"4px 9px",borderRadius:20,border:`1.5px solid ${tc.a}`,whiteSpace:"nowrap" }}>{s.team}</span>
             {assignees.map(name => {
-              const mt = memberTeam(name); const mc = (mt && TC[mt] && TC[mt].a) || tc.a;
+              const mc = memberColor(name);
               return (
                 <span key={name} style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,
                   color:"#fff",background:mc,padding:"4px 9px",borderRadius:20,whiteSpace:"nowrap",boxShadow:`0 2px 6px ${mc}40` }}>
-                  {name}{mt && mt!==s.team ? <span style={{ fontSize:8,opacity:.85 }}>({mt})</span> : null}
+                  {name}
                   <button onClick={()=>toggleAssignee(s.id,name)} style={{ width:14,height:14,borderRadius:"50%",border:"none",
                     background:"rgba(255,255,255,.3)",color:"#fff",fontSize:10,fontWeight:900,cursor:"pointer",
                     lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",padding:0 }}>×</button>
@@ -950,30 +1077,24 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
             })}
             {available.length>0 && (
               <button onClick={()=>setPickerId(open?null:s.id)} style={{ width:26,height:26,borderRadius:"50%",
-                border:`1.5px solid ${tc.a}`,background:open?tc.a:C.surface,color:open?"#fff":tc.a,
+                border:`1.5px solid ${C.blue}`,background:open?C.blue:C.surface,color:open?"#fff":C.blue,
                 fontSize:16,fontWeight:700,cursor:"pointer",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>+</button>
             )}
-            {assignees.length===0 && !open && <span style={{ fontSize:10,color:tc.c,opacity:.7 }}>+ 버튼으로 인원 추가</span>}
+            {assignees.length===0 && !open && <span style={{ fontSize:10,color:C.t4 }}>+ 버튼으로 인원 추가</span>}
           </div>
           {open && (
-            <div style={{ marginTop:8,padding:8,background:C.surface,borderRadius:8,border:`1px solid ${tc.a}30`,display:"flex",flexDirection:"column",gap:7 }}>
-              <div style={{ fontSize:9,color:C.t4,fontWeight:600 }}>전체 인원에서 선택 (타팀 합류 가능)</div>
-              {TEAM_LIST.filter(t=>(TEAM_MEMBERS[t]||[]).some(n=>!assignees.includes(n))).map(team=>{
-                const tcx = TC[team]||{a:C.t3,b:C.surfaceL,c:C.t2};
-                const avail = (TEAM_MEMBERS[team]||[]).filter(n=>!assignees.includes(n));
-                return (
-                  <div key={team}>
-                    <div style={{ fontSize:9,fontWeight:700,color:tcx.a,marginBottom:3 }}>{team}</div>
-                    <div style={{ display:"flex",flexWrap:"wrap",gap:5 }}>
-                      {avail.map(name => (
-                        <button key={team+name} onClick={()=>{ toggleAssignee(s.id,name); setPickerId(null); }}
-                          style={{ padding:"5px 12px",borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",
-                            background:tcx.b,color:tcx.c,border:`1.5px solid ${tcx.a}50` }}>{name}</button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+            <div style={{ marginTop:8,padding:8,background:C.surface,borderRadius:8,border:BD }}>
+              <div style={{ fontSize:9,color:C.t4,fontWeight:600,marginBottom:5 }}>인원 선택</div>
+              <div style={{ display:"flex",flexWrap:"wrap",gap:5 }}>
+                {available.map(name => {
+                  const mc = memberColor(name);
+                  return (
+                    <button key={name} onClick={()=>{ toggleAssignee(s.id,name); setPickerId(null); }}
+                      style={{ padding:"5px 12px",borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",
+                        background:mc+"14",color:mc,border:`1.5px solid ${mc}55` }}>{name}</button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -996,55 +1117,25 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
     );
   };
 
-  const StartCard = ({ s }) => {
-    const tc = TC[s.team]||{a:C.t3,b:C.surfaceL};
-    return (
-      <div style={{ padding:"10px 11px",background:C.surface,borderRadius:9,
-        border:`1px solid ${C.green}40`,borderLeft:`3px solid ${C.green}`,marginBottom:6 }}>
-        <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:5 }}>
-          <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
-          <span style={{ fontSize:11,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
-          <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
-          <button onClick={()=>setEditId(s.id)} style={{ padding:"2px 8px",borderRadius:5,fontSize:9,fontWeight:700,
-            border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
-        </div>
-        <div style={{ fontSize:10,color:C.t2 }}>
-          ▶ 용역 착수 · {s.buildings.length}동 · 완수 {fd(s.end)} ({ddL(calcDday(s.end))})
-        </div>
+  const StartCard = ({ s }) => (
+    <div style={{ padding:"10px 11px",background:C.surface,borderRadius:9,
+      border:`1px solid ${C.green}40`,borderLeft:`3px solid ${C.green}`,marginBottom:6 }}>
+      <CardHead s={s}/>
+      <div style={{ fontSize:10,color:C.t2 }}>
+        ▶ 용역 착수 · {s.buildings.length}동 · 완수 {fd(s.end)} ({ddL(calcDday(s.end))})
       </div>
-    );
-  };
+    </div>
+  );
 
-  const EndCard = ({ s }) => {
-    const tc = TC[s.team]||{a:C.t3,b:C.surfaceL};
-    const repAll = s.buildings.every(b=>b.rep);
-    const fmsAll = s.buildings.every(b=>b.fmsD);
-    const delAll = s.buildings.every(b=>b.delivery);
-    const ok = repAll && fmsAll && delAll;
-    return (
-      <div style={{ padding:"10px 11px",background:C.surface,borderRadius:9,
-        border:`1px solid ${ok?C.green+"40":C.orange+"40"}`,borderLeft:`3px solid ${ok?C.green:C.orange}`,marginBottom:6 }}>
-        <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:7 }}>
-          <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
-          <span style={{ fontSize:11,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
-          <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
-          <button onClick={()=>setEditId(s.id)} style={{ padding:"2px 8px",borderRadius:5,fontSize:9,fontWeight:700,
-            border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
-        </div>
-        <div style={{ display:"flex",gap:4 }}>
-          {[{k:"보고서",v:repAll,ac:C.purple},{k:"FMS",v:fmsAll,ac:C.blue},
-            {k:s.buildings.find(b=>b.delivery)?.delivery||"납품",v:delAll,ac:C.green}].map(x=>(
-            <div key={x.k} style={{ flex:1,padding:"4px 0",borderRadius:6,textAlign:"center",
-              background:x.v?x.ac+"12":C.surfaceD,border:`1px solid ${x.v?x.ac+"35":C.border}` }}>
-              <div style={{ fontSize:12,color:x.v?x.ac:C.t4 }}>{x.v?"✓":"○"}</div>
-              <div style={{ fontSize:8,color:x.v?x.ac:C.t4,fontWeight:600,marginTop:1 }}>{x.k}</div>
-            </div>
-          ))}
-        </div>
-        {!repAll && <div style={{ marginTop:5,fontSize:9,color:C.red,fontWeight:600 }}>⚠ 보고서 미완 {s.buildings.filter(b=>!b.rep).length}동</div>}
+  const EndCard = ({ s }) => (
+    <div style={{ padding:"10px 11px",background:C.surface,borderRadius:9,
+      border:`1px solid ${C.orange}40`,borderLeft:`3px solid ${C.orange}`,marginBottom:6 }}>
+      <CardHead s={s}/>
+      <div style={{ fontSize:10,color:C.t2 }}>
+        🏁 완수 예정 · {s.buildings.length}동{(s.assignees||[]).length?` · ${s.assignees.join("·")}`:""}
       </div>
-    );
-  };
+    </div>
+  );
 
   return (
     <>
@@ -1100,18 +1191,14 @@ function DayPanel({ dateStr, label, allSchools, teamF, setDb, onClose, isMobile 
 /* ══════════════════════════════════════════════════════════════
    현장 일정 — 영구 캘린더 (드래그로 일정 변경)
 ══════════════════════════════════════════════════════════════ */
-function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
+function Calendar({ allSchools, setDb, isMobile }) {
   const today = new Date();
   const [yr, setYr] = useState(today.getFullYear());
   const [mo, setMo] = useState(today.getMonth()+1);
-  const [teamF, setTeamF] = useState(globalTeam);
   const [dragging, setDragging] = useState(null);
   const [overDay, setOverDay] = useState(null);
   const [selDay, setSelDay] = useState(null);
   const [toast, setToast] = useState(null);
-
-  const prevGT = useRef(globalTeam);
-  if (prevGT.current !== globalTeam) { prevGT.current = globalTeam; if (teamF!==globalTeam) setTeamF(globalTeam); }
 
   const showToast = m => { setToast(m); setTimeout(()=>setToast(null), 2200); };
   const pad = n => String(n).padStart(2,"0");
@@ -1131,13 +1218,16 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
 
   const eventsByDay = useMemo(() => {
     const map = {};
+    const seen = new Set();   // 같은 현장·같은 날·같은 종류 중복 제거 (1년 계약 이월본이 양쪽 반기에 있어도 1번만)
     allSchools.forEach(s => {
       [["field","현장"],["start","착수"],["end","완수"]].forEach(([f,lbl]) => {
         const ds = s[f]; if (!ds) return;
         const [y,m,d] = ds.split("-").map(Number);
         if (y!==yr || m!==mo) return;
+        const k = `${ds}|${f}|${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
+        if (seen.has(k)) return; seen.add(k);
         (map[d] = map[d]||[]).push({ schoolId:s.id, school:s.school, field:f, label:lbl,
-          team:s.team, headcount:s.headcount||2, assignees:s.assignees||[] });
+          headcount:s.headcount||2, assignees:s.assignees||[] });
       });
     });
     // 같은 날 정렬: 현장 → 착수 → 완수
@@ -1166,8 +1256,8 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
     setDragging(null); setOverDay(null);
   }, [dragging, allSchools, yr, mo, setDb]);
 
-  /* 현장=팀색, 착수=초록, 완수=노랑 */
-  const evColor = (f,team) => f==="field" ? (TC[team]?.a||C.blue) : f==="start" ? C.green : C.yellow;
+  /* 현장=파랑, 착수=초록, 완수=노랑 */
+  const evColor = (f) => f==="field" ? C.blue : f==="start" ? C.green : C.yellow;
   const evMark  = f => f==="start" ? " ▶" : f==="end" ? " 📦" : "";
   const DOW = ["일","월","화","수","목","금","토"];
   const selLabel = selDay ? `${mo}월 ${selDay}일 (${DOW[new Date(yr,mo-1,selDay).getDay()]})` : "";
@@ -1178,11 +1268,6 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
         <div>
           <div style={{ fontSize:11,color:C.t3,letterSpacing:2,fontWeight:600,marginBottom:3 }}>SCHEDULE</div>
           <h1 style={{ margin:0,fontSize:22,fontWeight:900,color:C.t1 }}>현장 일정</h1>
-        </div>
-        <div style={{ display:"flex",gap:6 }}>
-          {["전체",...FIELD_TEAMS()].map(t => (
-            <Pill key={t} active={teamF===t} ac={t==="전체"?C.t2:TC[t]?.a} onClick={()=>setTeamF(t)}>{t}</Pill>
-          ))}
         </div>
       </div>
 
@@ -1227,7 +1312,7 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
                 {weeks.map((week,wi)=>(
                   <tr key={wi} style={{ borderBottom:wi<weeks.length-1?BD:"none" }}>
                     {week.map((day,di)=>{
-                      const evs = (day?eventsByDay[day]||[]:[]).filter(e=>teamF==="전체"||e.team===teamF);
+                      const evs = day?eventsByDay[day]||[]:[];
                       const over = overDay===day && !!day;
                       const sel  = selDay===day && !!day;
                       return (
@@ -1255,8 +1340,8 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
                                   onDragStart={()=>setDragging({schoolId:e.schoolId,field:e.field,fromDay:day})}
                                   onDragEnd={()=>{setDragging(null);setOverDay(null);}}
                                   title={`${e.school} · ${e.label} · ${e.assignees.length>0?e.assignees.join(","):e.headcount+"명"}`}
-                                  style={{ padding:isMobile?"2px 5px":"3px 7px",borderRadius:4,background:`${evColor(e.field,e.team)}15`,
-                                    borderLeft:`3px solid ${evColor(e.field,e.team)}`,fontSize:isMobile?9:12,color:evColor(e.field,e.team),
+                                  style={{ padding:isMobile?"2px 5px":"3px 7px",borderRadius:4,background:`${evColor(e.field)}15`,
+                                    borderLeft:`3px solid ${evColor(e.field)}`,fontSize:isMobile?9:12,color:evColor(e.field),
                                     fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"grab",
                                     boxShadow:"0 1px 3px rgba(0,0,0,.07)",
                                     opacity:dragging?.schoolId===e.schoolId&&dragging?.field===e.field?0.4:1 }}>
@@ -1279,20 +1364,16 @@ function Calendar({ allSchools, setDb, globalTeam="전체", isMobile }) {
           </div>
 
           <div style={{ display:"flex",gap:14,marginTop:10,padding:"9px 14px",background:C.surface,border:BD,borderRadius:8,alignItems:"center",flexWrap:"wrap" }}>
-            {[["팀색 = 현장조사",C.blue],["초록 ▶ 착수일",C.green],["노랑 📦 완수일",C.yellow]].map(([k,v])=>(
+            {[["파랑 = 현장조사",C.blue],["초록 ▶ 착수일",C.green],["노랑 📦 완수일",C.yellow]].map(([k,v])=>(
               <div key={k} style={{ display:"flex",alignItems:"center",gap:5 }}>
                 <div style={{ width:10,height:10,borderRadius:2,background:v }}/><span style={{ fontSize:10,color:C.t3 }}>{k}</span>
               </div>
             ))}
-            {FIELD_TEAMS().map(t=>{ const v=TC[t]||{a:C.t3}; return (
-              <div key={t} style={{ display:"flex",alignItems:"center",gap:5 }}>
-                <div style={{ width:9,height:9,borderRadius:"50%",background:v.a }}/><span style={{ fontSize:10,color:C.t3 }}>{t}</span>
-              </div>
-            ); })}
+            <span style={{ fontSize:10,color:C.t4 }}>날짜를 누르면 그날 현장이 열립니다</span>
           </div>
         </div>
 
-        {selDay && <DayPanel dateStr={toStr(selDay)} label={selLabel} allSchools={allSchools} teamF={teamF} setDb={setDb} onClose={()=>setSelDay(null)} isMobile={isMobile}/>}
+        {selDay && <DayPanel dateStr={toStr(selDay)} label={selLabel} allSchools={allSchools} setDb={setDb} onClose={()=>setSelDay(null)} isMobile={isMobile}/>}
       </div>
       <Toast msg={toast}/>
     </div>
@@ -1315,14 +1396,15 @@ function LI({ label, val, on, type="text", col }) {
 ══════════════════════════════════════════════════════════════ */
 function EditPanel({ sc, yr, half, setDb, onClose }) {
   const isMobile = useIsMobile();
-  const tc = TC[sc.team]||{a:C.t3,b:C.surfaceL,c:C.t2};
+  const tc = {a:C.blue,b:C.blueL,c:C.t2};
   const [f, setF] = useState({
-    school:sc.school||"", no:sc.no||"", team:sc.team||"", region:sc.region||"", kind:sc.kind||"정기점검",
-    field:sc.field||"", start:sc.start||"", end:sc.end||"", assignees:sc.assignees||[],
+    school:sc.school||"", no:sc.no||"", region:sc.region||"", kind:sc.kind||"정기점검",
+    field:sc.field||"", start:sc.start||"", end:sc.end||"", assignees:sc.assignees||[], tel:sc.tel||"",
+    flags:getFlags(sc),
   });
   const [bf, setBf] = useState(sc.buildings.map(b=>({
     b:b.b||"", floor:b.floor||"", area:b.area?String(b.area):"",
-    fms:b.fms||"", flag:b.flag||"", note:b.note||"",
+    fms:b.fms||"", note:b.note||"",
     rep:!!b.rep, fmsD:!!b.fmsD, delivery:b.delivery||"",
     height:b.height??null, len:b.len??null, jong:b.jong??null, budget:b.budget??null,
   })));
@@ -1334,17 +1416,18 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
   const toggleStep = (k) => setProg(p => ({ ...p, [k]: !p[k] }));
 
   const save = () => {
-    const beforeStr = `${sc.team}/${(sc.assignees||[]).join(",")||"-"} · 진행 ${STEPS.filter(k=>sc.progress&&sc.progress[k]).length}/${STEPS.length}`;
-    const afterStr  = `${f.team}/${f.assignees.join(",")||"-"} · 진행 ${STEPS.filter(k=>prog[k]).length}/${STEPS.length}`;
+    const beforeStr = `${(sc.assignees||[]).join(",")||"-"} · 진행 ${STEPS.filter(k=>sc.progress&&sc.progress[k]).length}/${STEPS.length}`;
+    const afterStr  = `${f.assignees.join(",")||"-"} · 진행 ${STEPS.filter(k=>prog[k]).length}/${STEPS.length}`;
     setDb(prev => {
       const next = {...prev};
       next[yr] = {...prev[yr]};
       next[yr][half] = prev[yr][half].map(s => {
         if (s.id!==sc.id) return s;
-        return { ...s, school:f.school||s.school, no:f.no, team:f.team, region:f.region, kind:f.kind, field:f.field, start:f.start, end:f.end,
+        return { ...s, school:f.school||s.school, no:f.no, region:f.region, kind:f.kind, field:f.field, start:f.start, end:f.end, tel:(f.tel||"").trim(),
+          flags:[...(f.flags||[])],
           assignees:f.assignees, headcount:f.assignees.length||s.headcount, progress:{...prog},
           buildings: bf.map((b)=>({ b:b.b||"동", floor:b.floor||null,
-            area:b.area?parseFloat(b.area):null, fms:b.fms||null, flag:b.flag||null, note:b.note||null,
+            area:b.area?parseFloat(b.area):null, fms:b.fms||null, note:b.note||null,
             rep:b.rep, fmsD:b.fmsD, delivery:b.delivery||null,
             height:b.height??null, len:b.len??null, jong:b.jong??null, budget:b.budget??null })) };
       });
@@ -1387,15 +1470,22 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
               <div style={{ gridColumn:"span 2" }}><LI label="🏫 학교명 / 현장명" val={f.school} on={v=>setF(p=>({...p,school:v}))}/></div>
               <div style={{ gridColumn:"span 2" }}><LI label="No (관리번호 · 선택)" val={f.no} on={v=>setF(p=>({...p,no:v}))}/></div>
               <div style={{ gridColumn:"span 2",display:"flex",flexDirection:"column",gap:4 }}>
-                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>담당팀</label>
+                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>현장 표시 <span style={{ color:C.t4,fontWeight:500 }}>· 여러 개 선택 가능</span></label>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                  {FIELD_TEAMS().map(t=>(
-                    <button key={t} onClick={()=>setF(p=>({...p,team:t}))} style={{ flex:"1 0 auto",minWidth:60,padding:"7px 10px",borderRadius:7,fontSize:12,fontWeight:700,
-                      border:`1.5px solid ${f.team===t?(TC[t]&&TC[t].a):C.border}`,background:f.team===t?(TC[t]&&TC[t].b):"transparent",color:f.team===t?(TC[t]&&TC[t].a):C.t3,cursor:"pointer" }}>{t}</button>
-                  ))}
+                  {FLAG_OPTS.map(o=>{
+                    const on = (f.flags||[]).includes(o.v);
+                    return (
+                      <button key={o.v} onClick={()=>setF(p=>({...p,flags:on?(p.flags||[]).filter(x=>x!==o.v):[...(p.flags||[]),o.v]}))}
+                        style={{ flex:"1 0 auto",minWidth:74,padding:"8px 10px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",
+                          border:`1.5px solid ${on?o.color:C.border}`,background:on?o.color+"18":"transparent",color:on?o.color:C.t3 }}>
+                        {on&&"✓ "}{o.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <LI label="지역" val={f.region} on={v=>setF(p=>({...p,region:v}))}/>
+              <div style={{ gridColumn:"span 2" }}><LI label="학교 연락처 (현장에서 바로 통화)" val={f.tel} on={v=>setF(p=>({...p,tel:v}))}/></div>
               <div style={{ display:"flex",flexDirection:"column",gap:3 }}>
                 <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>점검종류</label>
                 <select value={f.kind} onChange={e=>setF(p=>({...p,kind:e.target.value}))}
@@ -1407,24 +1497,13 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
               <LI label="착수일" val={f.start} on={v=>setF(p=>({...p,start:v}))} type="date"/>
               <LI label="완수일" val={f.end} on={v=>setF(p=>({...p,end:v}))} type="date" col={C.orange}/>
               <div style={{ gridColumn:"span 2",display:"flex",flexDirection:"column",gap:5 }}>
-                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>투입 인원 <span style={{ marginLeft:6,color:tc.a }}>{f.assignees.length>0?`${f.assignees.length}명`:"미선택"}</span>
-                  <span style={{ marginLeft:6,color:C.t4,fontWeight:500 }}>· 전체 인원에서 선택 (타팀 합류 가능)</span></label>
-                <div style={{ padding:10,background:C.surfaceL,borderRadius:8,border:BD,display:"flex",flexDirection:"column",gap:8 }}>
-                  {TEAM_LIST.filter(t=>(TEAM_MEMBERS[t]||[]).length).map(team=>{
-                    const tcx = TC[team]||{a:C.t3,b:C.surfaceL,c:C.t2};
-                    return (
-                      <div key={team}>
-                        <div style={{ fontSize:9,fontWeight:700,color:tcx.a,marginBottom:4 }}>{team}</div>
-                        <div style={{ display:"flex",flexWrap:"wrap",gap:5 }}>
-                          {(TEAM_MEMBERS[team]||[]).map(name=>{
-                            const on=f.assignees.includes(name);
-                            return <button key={team+name} onClick={()=>setF(p=>({...p,assignees:on?p.assignees.filter(n=>n!==name):[...p.assignees,name]}))}
-                              style={{ padding:"6px 12px",borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",
-                                background:on?tcx.a:C.surface,color:on?"#fff":tcx.c,border:`1.5px solid ${on?tcx.a:tcx.a+"40"}` }}>{on&&"✓ "}{name}</button>;
-                          })}
-                        </div>
-                      </div>
-                    );
+                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>투입 인원 <span style={{ marginLeft:6,color:C.blue }}>{f.assignees.length>0?`${f.assignees.length}명`:"미선택"}</span></label>
+                <div style={{ padding:10,background:C.surfaceL,borderRadius:8,border:BD,display:"flex",flexWrap:"wrap",gap:5 }}>
+                  {allMembers().map(name=>{
+                    const on=f.assignees.includes(name); const mc=memberColor(name);
+                    return <button key={name} onClick={()=>setF(p=>({...p,assignees:on?p.assignees.filter(n=>n!==name):[...p.assignees,name]}))}
+                      style={{ padding:"6px 12px",borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",
+                        background:on?mc:C.surface,color:on?"#fff":mc,border:`1.5px solid ${on?mc:mc+"40"}` }}>{on&&"✓ "}{name}</button>;
                   })}
                 </div>
               </div>
@@ -1503,14 +1582,6 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
                 <input value={b.fms} onChange={e=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,fms:e.target.value}))} placeholder="아이디 // 비밀번호"
                   style={{ width:"100%",padding:"7px 9px",background:C.surfaceL,border:BD,borderRadius:6,color:C.blue,fontSize:11,outline:"none",fontFamily:"monospace" }}/>
               </div>
-              <div style={{ display:"flex",gap:5,marginBottom:8,alignItems:"center",flexWrap:"wrap" }}>
-                <label style={{ fontSize:9,color:C.t3,fontWeight:700 }}>플래그</label>
-                {[["","없음"],["●","🚁 드론"],["1년","📅 1년"],["피난","🚪 피난"]].map(([val,lb])=>(
-                  <button key={val} onClick={()=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,flag:val}))}
-                    style={{ padding:"3px 9px",borderRadius:5,fontSize:9,fontWeight:600,cursor:"pointer",
-                      border:`1px solid ${b.flag===val?C.orange+"60":C.border}`,background:b.flag===val?C.orangeL:C.surfaceL,color:b.flag===val?C.orange:C.t3 }}>{lb}</button>
-                ))}
-              </div>
               <div>
                 <label style={{ fontSize:9,color:C.t3,fontWeight:700,display:"block",marginBottom:3 }}>특이사항 / 메모</label>
                 <textarea value={b.note} onChange={e=>setBf(p=>p.map((x,i)=>i!==bi?x:{...x,note:e.target.value}))} placeholder="담당자 연락처, 주의사항..." rows={2}
@@ -1518,7 +1589,7 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
               </div>
             </div>
           ))}
-          <button onClick={()=>setBf(p=>[...p,{b:"",floor:"",area:"",fms:"",flag:"",note:"",rep:false,fmsD:false,delivery:""}])}
+          <button onClick={()=>setBf(p=>[...p,{b:"",floor:"",area:"",fms:"",note:"",rep:false,fmsD:false,delivery:""}])}
             style={{ width:"100%",padding:9,borderRadius:8,border:`1.5px dashed ${C.border}`,background:"transparent",color:C.t3,fontSize:12,cursor:"pointer",marginBottom:8 }}>+ 동 추가</button>
         </div>
 
@@ -1543,7 +1614,7 @@ function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
   const [keepOrig, setKeepOrig] = useState(false);   // 원본 날짜·진행 그대로 이월
 
   const buckets = [];
-  Object.keys(db||{}).sort((a,b)=>b-a).forEach(y => ["상반기","하반기"].forEach(h => {
+  Object.keys(db||{}).filter(y=>!isLH(y)).sort((a,b)=>b-a).forEach(y => ["상반기","하반기"].forEach(h => {
     if (y===toYr && h===toHalf) return;
     const arr = db[y]?.[h] || [];
     if (arr.length) buckets.push({ y, h, arr });
@@ -1642,14 +1713,12 @@ function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
                 </div>
                 {rows.map(s => {
                   const k = keyOf(bk,s); const on = sel.has(k);
-                  const tc = TC[s.team]||{a:C.t3,b:C.surfaceL};
                   const dup = destKeys.has(`${(s.school||"").trim()}|${(s.no||"").toString().trim()}`);
                   return (
                     <div key={k} onClick={()=>toggle(k)} style={{ display:"flex",alignItems:"center",gap:10,padding:"9px 11px",borderRadius:8,cursor:"pointer",
                       border:`1.5px solid ${on?C.blue:C.border}`,background:on?C.blueL:C.surface,marginBottom:6 }}>
                       <div style={{ width:20,height:20,borderRadius:5,border:`2px solid ${on?C.blue:C.borderD}`,background:on?C.blue:"transparent",
                         display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:"#fff",fontSize:13,fontWeight:900 }}>{on?"✓":""}</div>
-                      <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
                       <span style={{ fontSize:13,fontWeight:700,color:C.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
                       <span style={{ fontSize:11,color:C.t4 }}>{s.region} · {(s.buildings||[]).length}동</span>
                       {dup && <span style={{ fontSize:9,color:C.orange,fontWeight:700,background:C.orangeL,padding:"2px 6px",borderRadius:4,whiteSpace:"nowrap" }}>이미 있음</span>}
@@ -1677,7 +1746,7 @@ function CopyHalfModal({ db, setDb, toYr, toHalf, onClose, onDone, isMobile }) {
 /* ══════════════════════════════════════════════════════════════
    현장 관리 — 연도/반기 탭 + 테이블
 ══════════════════════════════════════════════════════════════ */
-function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
+function SitesManager({ db, setDb, isMobile }) {
   const [yr, setYr] = useState(String(new Date().getFullYear()));
   const [half, setHalf] = useState((new Date().getMonth()+1) <= 6 ? "상반기" : "하반기");
   /* 데이터가 들어왔는데 현재 탭이 비어 있으면, 데이터 있는 연/반기로 자동 이동 (최초 1회) */
@@ -1688,11 +1757,10 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
     if (!anyData) return;                              // 아직 데이터 없음 → 대기
     if ((db[yr]?.[half]||[]).length) { didInit.current = true; return; }   // 현재 탭에 데이터 있음
     const years = Object.keys(db).sort((a,b)=>b-a);
-    for (const y of years) for (const h of ["상반기","하반기"]) {
+    for (const y of years) for (const h of Object.keys(db[y]||{})) {
       if ((db[y]?.[h]||[]).length) { setYr(y); setHalf(h); didInit.current = true; return; }
     }
   }, [db]);
-  const [teamF, setTeamF] = useState(globalTeam);
   const [stF, setStF] = useState("전체");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(new Set());
@@ -1701,8 +1769,6 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
   const [copyOpen, setCopyOpen] = useState(false);
   const [toast, setToast] = useState(null);
 
-  const prevGT = useRef(globalTeam);
-  if (prevGT.current !== globalTeam) { prevGT.current = globalTeam; if (teamF!==globalTeam) setTeamF(globalTeam); }
 
   const showToast = m => { setToast(m); setTimeout(()=>setToast(null), 2000); };
   const copy = (t,id) => { navigator.clipboard?.writeText(t).catch(()=>{}); setCopied(id); setTimeout(()=>setCopied(null),1500); };
@@ -1710,7 +1776,7 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
   /* 새 현장 추가 → 현재 연/반기에 빈 학교 생성 후 편집창 열기 */
   const addNewSite = () => {
     const id = `new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
-    const newSc = { id, school:"새 현장", no:"", team:(globalTeam!=="전체"?globalTeam:"미지정"),
+    const newSc = { id, school:"새 현장", no:"",
       region:"", kind:"정기점검", field:"", start:"", end:"", headcount:1, assignees:[], progress:{},
       buildings:[{ b:"본관", floor:null, area:null, fms:null, flag:null, note:null, rep:false, fmsD:false, delivery:null }] };
     setDb(prev => { const n={...prev}; n[yr]={...(prev[yr]||{})}; n[yr][half]=[...(prev[yr]?.[half]||[]), newSc]; return n; });
@@ -1743,7 +1809,6 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
   };
 
   const filtered = useMemo(()=>schools.filter(s=>{
-    if (teamF!=="전체" && s.team!==teamF) return false;
     if (search && !s.school.includes(search) && !(s.region||"").includes(search)) return false;
     if (stF==="보고서 미완") return s.buildings.some(b=>!b.rep);
     if (stF==="FMS 미완")   return s.buildings.some(b=>!b.fmsD);
@@ -1754,7 +1819,7 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
     const da=calcDday(a.end)??9999, dbb=calcDday(b.end)??9999;
     if(da<0&&dbb>=0)return -1; if(da>=0&&dbb<0)return 1;
     if(da<0&&dbb<0)return dbb-da; return da-dbb;
-  }), [schools,teamF,stF,search]);
+  }), [schools,stF,search]);
 
   const allB = filtered.flatMap(s=>s.buildings);
   const st = { total:allB.length, rep:allB.filter(b=>b.rep).length, fms:allB.filter(b=>b.fmsD).length, noD:allB.filter(b=>b.rep&&!b.delivery).length };
@@ -1777,23 +1842,23 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
             <button key={y} onClick={()=>{ setYr(y); setHalf(Object.keys(db[y]||{})[0]||"상반기"); }}
               style={{ padding:isMobile?"11px 14px":"12px 20px",border:"none",borderBottom:`3px solid ${yr===y?C.blue:"transparent"}`,
                 background:yr===y?C.blueL:"transparent",color:yr===y?C.blue:C.t3,fontSize:14,fontWeight:yr===y?800:500,cursor:"pointer",whiteSpace:"nowrap" }}>
-              {y}년 {yr===y && <span style={{ fontSize:10,marginLeft:5,color:C.t4 }}>{(db[y]?.상반기||[]).length+(db[y]?.하반기||[]).length}건</span>}
+              {isLH(y)?"🏢 LH":`${y}년`} {yr===y && <span style={{ fontSize:10,marginLeft:5,color:C.t4 }}>{Object.values(db[y]||{}).reduce((a,arr)=>a+(arr||[]).length,0)}건</span>}
             </button>
           ))}
         </div>
         <div style={{ display:"flex",padding:"0 8px",flexShrink:0 }}>
-          {["상반기","하반기"].map(h=>{
-            const cnt=(db[yr]?.[h]||[]).length, on=half===h, hc=h==="상반기"?C.blue:C.orange;
+          {(isLH(yr)?["정밀"]:["상반기","하반기"]).map(h=>{
+            const cnt=(db[yr]?.[h]||[]).length, on=half===h, hc=h==="상반기"?C.blue:h==="정밀"?C.purple:C.orange;
             return <button key={h} onClick={()=>setHalf(h)} style={{ padding:isMobile?"11px 12px":"12px 18px",border:"none",borderBottom:`3px solid ${on?hc:"transparent"}`,
               background:on?hc+"12":"transparent",color:on?hc:C.t3,fontSize:13,fontWeight:on?700:500,cursor:"pointer",display:"flex",alignItems:"center",gap:7,whiteSpace:"nowrap" }}>
-              <span style={{ fontSize:15 }}>{h==="상반기"?"🌱":"🍂"}</span>{h}
+              <span style={{ fontSize:15 }}>{h==="상반기"?"🌱":h==="정밀"?"🏢":"🍂"}</span>{h}
               <span style={{ fontSize:10,padding:"1px 6px",borderRadius:10,background:on?hc+"20":C.surfaceL,color:on?hc:C.t4,fontWeight:700 }}>{cnt}</span>
             </button>;
           })}
         </div>
         {!isMobile && (
           <div style={{ marginLeft:"auto",padding:"0 16px",fontSize:11,color:C.t3,fontWeight:600,whiteSpace:"nowrap" }}>
-            {yr}년 {half} · {filtered.length}개 / {filtered.flatMap(s=>s.buildings).length}동
+            {isLH(yr)?"LH 정밀":`${yr}년 ${half}`} · {filtered.length}개 / {filtered.flatMap(s=>s.buildings).length}동
           </div>
         )}
       </div>
@@ -1820,7 +1885,6 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
             style={{ background:"transparent",border:"none",color:C.t1,fontSize:13,outline:"none",flex:1 }}/>
           {search && <button onClick={()=>setSearch("")} style={{ background:"transparent",border:"none",color:C.t4,fontSize:15,padding:0,cursor:"pointer" }}>×</button>}
         </div>
-        {["전체",...FIELD_TEAMS()].map(t=><Pill key={t} active={teamF===t} ac={t==="전체"?C.t2:TC[t]?.a} onClick={()=>setTeamF(t)}>{t}</Pill>)}
         <div style={{ width:1,height:18,background:C.border }}/>
         {["전체","보고서 미완","FMS 미완","납품 미정","완료"].map(ff=>(
           <Pill key={ff} active={stF===ff} ac={C.purple} onClick={()=>setStF(ff)} style={{ fontSize:11 }}>{ff}</Pill>
@@ -1843,7 +1907,6 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
         </div>
 
         {filtered.map((s,si)=>{
-          const tc=TC[s.team]||{a:C.t3,b:C.surfaceL};
           const isOpen=open.has(s.id);
           const repAll=s.buildings.every(b=>b.rep), fmsAll=s.buildings.every(b=>b.fmsD);
           const allDone=repAll&&fmsAll&&s.buildings.every(b=>b.delivery);
@@ -1858,13 +1921,14 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
                   <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
                     <span style={{ color:C.t4,fontSize:11,display:"inline-block",transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s" }}>›</span>
                     <span style={{ fontWeight:800,fontSize:14,color:C.t1 }}>{s.school}</span>
-                    <Tag bg={tc.b} color={tc.a}>{s.team}</Tag>
                     {s.carried && <Tag bg={C.orange+"18"} color={C.orange} border={`1px solid ${C.orange}40`}>🍂 이월</Tag>}
                     <span style={{ fontSize:10,color:C.t3 }}>{s.region}</span>
+                    {s.tel && <a href={`tel:${String(s.tel).replace(/[^0-9+]/g,"")}`} onClick={e=>e.stopPropagation()} title={s.tel}
+                      style={{ padding:"2px 8px",borderRadius:5,fontSize:9,fontWeight:800,textDecoration:"none",
+                        border:`1px solid ${C.green}55`,background:C.greenL,color:C.green,whiteSpace:"nowrap" }}>📞 전화</a>}
                     {urgent && <Tag bg={C.redL} color={C.red} border={`1px solid ${C.red}30`}>⚡긴급</Tag>}
-                    {s.buildings.some(b=>b.flag==="●") && <span style={{ fontSize:10,color:C.orange }}>🚁</span>}
-                    {s.buildings.some(b=>b.flag==="1년") && <Tag bg={C.blueL} color={C.blue}>1년</Tag>}
-                    {(s.assignees||[]).length>0 && <span style={{ fontSize:9,color:tc.c }}>👤 {s.assignees.join("·")}</span>}
+                    {getFlags(s).map(fv=>{ const o=FLAG_OPTS.find(x=>x.v===fv); return o? <span key={fv} style={{ fontSize:10,fontWeight:700,color:o.color }}>{o.label}</span> : null; })}
+                    {(s.assignees||[]).length>0 && <span style={{ fontSize:9,color:C.t2 }}>👤 {s.assignees.join("·")}</span>}
                     <span style={{ fontSize:10,color:C.t4 }}>{s.buildings.length}동</span>
                   </div>
                   {/* 8단계 진행바 + 강조 */}
@@ -1890,7 +1954,7 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
                 </div>
                 <div onClick={e=>e.stopPropagation()} style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
                   <input type="date" value={s.field||""} onChange={e=>updDate(s.id,"field",e.target.value)}
-                    style={{ background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,color:tc.a,fontSize:11,padding:"3px 5px",outline:"none",width:"100%",textAlign:"center",fontWeight:600 }}/>
+                    style={{ background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,color:C.blue,fontSize:11,padding:"3px 5px",outline:"none",width:"100%",textAlign:"center",fontWeight:600 }}/>
                 </div>
                 <div onClick={e=>e.stopPropagation()} style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
                   <input type="date" value={s.end||""} onChange={e=>updDate(s.id,"end",e.target.value)}
@@ -1918,9 +1982,6 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
                         <span style={{ fontSize:13,color:C.t1,fontWeight:600 }}>{b.b}</span>
                         {b.floor && <span style={{ fontSize:10,color:C.t4 }}>{b.floor}층</span>}
                         {b.area && <span style={{ fontSize:10,color:C.t4 }}>{b.area.toLocaleString()}㎡</span>}
-                        {b.flag==="●" && <span style={{ fontSize:10,color:C.orange,fontWeight:600 }}>🚁 드론</span>}
-                        {b.flag==="1년" && <span style={{ fontSize:10,color:C.blue,fontWeight:600 }}>📅 1년</span>}
-                        {b.flag==="피난" && <span style={{ fontSize:10,color:C.purple,fontWeight:600 }}>🚪 피난</span>}
                       </div>
                       {b.note && <div style={{ fontSize:10,color:C.t2,marginTop:3,padding:"3px 9px",background:C.yellowL,borderRadius:4,borderLeft:`2px solid ${C.yellow}`,maxWidth:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }} title={b.note}>{b.note}</div>}
                     </div>
@@ -1950,9 +2011,9 @@ function SitesManager({ db, setDb, globalTeam="전체", isMobile }) {
         })}
         {filtered.length===0 && (()=>{
           const totalDb = Object.values(db).reduce((a,hs)=>a+Object.values(hs||{}).reduce((b,arr)=>b+(arr||[]).length,0),0);
-          const filterOn = teamF!=="전체" || stF!=="전체" || !!search;
+          const filterOn = stF!=="전체" || !!search;
           const bucketEmpty = schools.length===0;
-          const firstFull = (()=>{ for(const y of Object.keys(db).sort((a,b)=>b-a)) for(const h of ["상반기","하반기"]) if((db[y]?.[h]||[]).length) return {y,h}; return null; })();
+          const firstFull = (()=>{ for(const y of Object.keys(db).sort((a,b)=>b-a)) for(const h of Object.keys(db[y]||{})) if((db[y]?.[h]||[]).length) return {y,h}; return null; })();
           return (
             <div style={{ textAlign:"center",padding:"40px 20px",color:C.t4 }}>
               <div style={{ fontSize:13,fontWeight:600,color:C.t3,marginBottom:6 }}>
@@ -2047,7 +2108,16 @@ function ExportImportPage({ db, setDb, saveNow }) {
           sheets.push({ name, year:info.year, half:info.half, schools, count:schools.length,
             bCount:schools.reduce((a,s)=>a+s.buildings.length,0), budHit, noteHit });
         });
-        if (!sheets.length) { setErr('인식된 반기 시트가 없어요. 시트 이름이 "26년(상)", "26년(하)", "2026년(하)", "26년 하반기" 같은 형식인지 확인해주세요.'); return; }
+        /* 4) LH 정밀 시트 → LH 전용 구분으로 (학교와 따로 관리) */
+        wb.SheetNames.forEach(name => {
+          if (!/lh/i.test(name)) return;
+          if (/예산|특이|메모/.test(name)) return;
+          const lhs = parseLHSheet(wb.Sheets[name]);
+          if (!lhs.length) return;
+          sheets.push({ name, year:CAT_LH, half:"정밀", schools:lhs, count:lhs.length,
+            bCount:lhs.reduce((a,s)=>a+s.buildings.length,0), budHit:0, noteHit:0, isLH:true });
+        });
+        if (!sheets.length) { setErr('인식된 시트가 없어요. 시트 이름이 "26년(상)", "26년(하)", "26년 하반기" 같은 형식이거나, LH 시트에 "단지명" 열이 있는지 확인해주세요.'); return; }
         setParsed({ sheets, fileName:file.name, budYears:Object.keys(budgetByYear) });
       } catch(e) { setErr("파일 읽기 오류: "+e.message); }
     };
@@ -2220,8 +2290,7 @@ function ExportImportPage({ db, setDb, saveNow }) {
                 </div>
               </div>
               {parsed.sheets.map((sh,i)=>{
-                const hc=sh.half==="상반기"?C.blue:C.orange, teams={};
-                sh.schools.forEach(s=>{teams[s.team]=(teams[s.team]||0)+1;});
+                const hc=sh.half==="상반기"?C.blue:C.orange;
                 return (
                   <div key={i} style={{ padding:"14px 16px",background:C.surfaceL,borderRadius:10,border:`1px solid ${hc}30`,borderLeft:`3px solid ${hc}`,marginBottom:8 }}>
                     <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:8 }}>
@@ -2230,11 +2299,6 @@ function ExportImportPage({ db, setDb, saveNow }) {
                       <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:hc+"18",color:hc,fontWeight:700 }}>{sh.count}개 학교 · {sh.bCount}개 동</span>
                       {sh.budHit>0 && <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:C.green+"18",color:C.green,fontWeight:700 }}>💰 예산 {sh.budHit}건</span>}
                       {sh.noteHit>0 && <span style={{ fontSize:10,padding:"2px 8px",borderRadius:10,background:C.yellow+"22",color:"#9A7B0A",fontWeight:700 }}>📝 특이사항 {sh.noteHit}건</span>}
-                    </div>
-                    <div style={{ display:"flex",gap:5,flexWrap:"wrap",marginBottom:6 }}>
-                      {Object.entries(teams).map(([t,n])=>(
-                        <span key={t} style={{ fontSize:10,padding:"2px 8px",borderRadius:5,background:TC[t]?.b||C.surfaceD,color:TC[t]?.a||C.t3,fontWeight:600,border:`1px solid ${(TC[t]?.a||C.border)}30` }}>{t} {n}건</span>
-                      ))}
                     </div>
                     <div style={{ display:"flex",flexWrap:"wrap",gap:3 }}>
                       {sh.schools.slice(0,10).map(s=><span key={s.id} style={{ fontSize:9,color:C.t2,padding:"1px 6px",borderRadius:3,background:C.surface,border:BD }}>{s.school}</span>)}
@@ -2320,15 +2384,12 @@ function ExportImportPage({ db, setDb, saveNow }) {
         </div>
         <div style={{ padding:"16px 20px",display:"flex",flexDirection:"column",gap:8 }}>
           {Object.entries(db).sort((a,b)=>b[0]-a[0]).flatMap(([yr,hs])=>Object.entries(hs).map(([half,schools])=>{
-            const hc=half==="상반기"?C.blue:C.orange, bC=schools.flatMap(s=>s.buildings).length, rep=schools.flatMap(s=>s.buildings).filter(b=>b.rep).length;
+            const hc=isLH(yr)?C.purple:half==="상반기"?C.blue:C.orange, bC=schools.flatMap(s=>s.buildings).length, rep=schools.flatMap(s=>s.buildings).filter(b=>b.rep).length;
             return (
               <div key={`${yr}-${half}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:C.surfaceL,borderRadius:10,border:`1px solid ${hc}25`,borderLeft:`3px solid ${hc}` }}>
-                <span style={{ fontSize:18 }}>{half==="상반기"?"🌱":"🍂"}</span>
-                <div style={{ flex:1 }}><div style={{ fontSize:13,fontWeight:800,color:C.t1 }}>{yr}년 {half}</div>
-                  <div style={{ fontSize:11,color:C.t3,marginTop:2 }}>{schools.length}개 학교 · {bC}개 동 · <span style={{ color:C.purple }}>보고서 {rep}/{bC}</span></div></div>
-                <div style={{ display:"flex",gap:5 }}>
-                  {FIELD_TEAMS().map(t=>{ const c=schools.filter(s=>s.team===t).length; return c?<span key={t} style={{ fontSize:9,padding:"2px 7px",borderRadius:5,background:TC[t].b,color:TC[t].a,fontWeight:700,border:`1px solid ${TC[t].a}30` }}>{t} {c}</span>:null; })}
-                </div>
+                <span style={{ fontSize:18 }}>{isLH(yr)?"🏢":half==="상반기"?"🌱":"🍂"}</span>
+                <div style={{ flex:1 }}><div style={{ fontSize:13,fontWeight:800,color:C.t1 }}>{isLH(yr)?"🏢 LH 정밀":`${yr}년 ${half}`}</div>
+                  <div style={{ fontSize:11,color:C.t3,marginTop:2 }}>{schools.length}개 {isLH(yr)?"단지":"학교"} · {bC}개 동 · <span style={{ color:C.purple }}>보고서 {rep}/{bC}</span></div></div>
                 <button onClick={()=>doExport(yr,half)} style={{ padding:"8px 16px",borderRadius:8,background:hc+"15",border:`1.5px solid ${hc}40`,color:hc,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}>↗ 다운로드</button>
               </div>
             );
@@ -2405,33 +2466,18 @@ function logAction(action, target, before, after) {
 }
 
 /* 새 팀 색상 팔레트 */
-const TEAM_PALETTE = ["#1D6FF2","#0A9260","#D93B2B","#7C3AED","#E07A20","#0E7490","#BE185D","#4338CA"];
 
 /* 항상 존재해야 하는 기본 5개 팀 */
-const BASE_TEAMS = [["1팀","#1D6FF2"],["2팀","#0A9260"],["3팀","#D93B2B"],["4팀","#7C3AED"],["관리팀","#475569"]];
 
-/* Firebase config → 모듈 객체(TC/TEAM_LIST/TEAM_MEMBERS) 갱신 */
+/* Firebase config → 인원 명단(MEMBERS) 갱신 */
 function applyConfig(cfg) {
-  if (cfg && Array.isArray(cfg.teams) && cfg.teams.length) {
-    TEAM_LIST.length = 0;
-    cfg.teams.forEach((t, i) => {
-      const name = typeof t === "string" ? t : t.name;
-      if (!name) return;
-      TEAM_LIST.push(name);
-      const color = (typeof t === "object" && t.color) || (TC[name] && TC[name].a) || TEAM_PALETTE[i % TEAM_PALETTE.length];
-      TC[name] = { a: color, b: color + "1f", c: color };
-    });
-  }
-  if (cfg && cfg.members && typeof cfg.members === "object") {
-    Object.keys(TEAM_MEMBERS).forEach(k => { delete TEAM_MEMBERS[k]; });
-    Object.entries(cfg.members).forEach(([k, v]) => { TEAM_MEMBERS[k] = toArr(v).filter(Boolean); });
-  }
-  /* 기본 5개 팀 보장 — 저장된 설정에 없어도 항상 표시 */
-  BASE_TEAMS.forEach(([name, col]) => {
-    if (!TEAM_LIST.includes(name)) TEAM_LIST.push(name);
-    if (!TC[name]) TC[name] = { a: col, b: col + "1f", c: col };
-    if (!TEAM_MEMBERS[name]) TEAM_MEMBERS[name] = [];
-  });
+  if (!cfg || !cfg.members) return;
+  /* members 는 배열이거나, 예전 형식({팀:[이름]})일 수 있음 — 모두 평탄화 */
+  const flat = [];
+  const push = n => { const nm = String(n||"").trim(); if (nm && !flat.includes(nm)) flat.push(nm); };
+  if (Array.isArray(cfg.members)) cfg.members.forEach(push);
+  else if (typeof cfg.members === "object") Object.values(cfg.members).forEach(v => toArr(v).forEach(push));
+  if (flat.length) { MEMBERS.length = 0; flat.forEach(n => MEMBERS.push(n)); }
 }
 
 /* 객체-키 ↔ 배열 변환 */
@@ -2570,8 +2616,7 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
   const [admin, setAdmin] = useState(false);
   const [pw, setPw] = useState("");
   const [pwErr, setPwErr] = useState("");
-  const [newName, setNewName] = useState({});      // team → 입력중 이름
-  const [newTeam, setNewTeam] = useState("");
+  const [newName, setNewName] = useState("");      // 새 인원 이름
   const [revEdit, setRevEdit] = useState(null);    // 매출 편집중 학교 id
   const [revVal, setRevVal] = useState("");
   const [diag, setDiag] = useState(null);          // Firebase 직접 확인 결과
@@ -2606,42 +2651,20 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
     else setPwErr("관리자 비밀번호가 올바르지 않습니다.");
   };
 
-  const writeCfg = (teams, members) => {
-    try { firebase.database().ref(FB_CONFIG).set({ teams, members }).catch(()=>{}); } catch {}
+  const writeCfg = (members) => {
+    try { firebase.database().ref(FB_CONFIG).set({ members }).catch(()=>{}); } catch {}
   };
-  const curTeams = () => TEAM_LIST.map(n => ({ name:n, color:(TC[n]&&TC[n].a)||C.t3 }));
 
-  const addMember = (team) => {
-    const nm = (newName[team]||"").trim(); if (!nm) return;
-    if ((TEAM_MEMBERS[team]||[]).includes(nm)) { setNewName(p=>({...p,[team]:""})); return; }
-    const members = { ...TEAM_MEMBERS, [team]: [...(TEAM_MEMBERS[team]||[]), nm] };
-    writeCfg(curTeams(), members);
-    logAction("추가", `인원 · ${team}`, null, nm);
-    setNewName(p=>({...p,[team]:""}));
+  const addMember = () => {
+    const nm = (newName||"").trim(); if (!nm) return;
+    if (MEMBERS.includes(nm)) { setNewName(""); return; }
+    writeCfg([...MEMBERS, nm]);
+    logAction("추가", "인원", null, nm);
+    setNewName("");
   };
-  const delMember = (team, nm) => {
-    const members = { ...TEAM_MEMBERS, [team]: (TEAM_MEMBERS[team]||[]).filter(x=>x!==nm) };
-    writeCfg(curTeams(), members);
-    logAction("삭제", `인원 · ${team}`, nm, null);
-  };
-  const addTeam = () => {
-    const nm = newTeam.trim(); if (!nm || TEAM_LIST.includes(nm)) { setNewTeam(""); return; }
-    const teams = [...curTeams(), { name:nm, color:TEAM_PALETTE[TEAM_LIST.length % TEAM_PALETTE.length] }];
-    const members = { ...TEAM_MEMBERS, [nm]: [] };
-    writeCfg(teams, members);
-    logAction("추가", "팀", null, nm);
-    setNewTeam("");
-  };
-  const delTeam = (nm) => {
-    const teams = curTeams().filter(t=>t.name!==nm);
-    const members = { ...TEAM_MEMBERS }; delete members[nm];
-    writeCfg(teams, members);
-    logAction("삭제", "팀", nm, null);
-  };
-  const setTeamColor = (nm, color) => {
-    const teams = curTeams().map(t=>t.name===nm?{...t,color}:t);
-    writeCfg(teams, { ...TEAM_MEMBERS });
-    logAction("수정", `팀 색상 · ${nm}`, null, color);
+  const delMember = (nm) => {
+    writeCfg(MEMBERS.filter(x=>x!==nm));
+    logAction("삭제", "인원", nm, null);
   };
 
   const fmtTs = (ts) => {
@@ -2772,52 +2795,31 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
             </div>
           </div>
 
-          {/* 팀 · 인원 관리 */}
+          {/* 인원 관리 */}
           <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px",marginBottom:14 }}>
-            <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:12 }}>👥 팀 · 인원 관리</div>
-            {TEAM_LIST.map(team => {
-              const tc = TC[team]||{a:C.t3,b:C.surfaceL};
-              return (
-                <div key={team} style={{ marginBottom:12,padding:"12px",background:C.surfaceL,borderRadius:10,border:`1px solid ${tc.a}25`,borderLeft:`3px solid ${tc.a}` }}>
-                  <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
-                    <div style={{ width:12,height:12,borderRadius:"50%",background:tc.a }}/>
-                    <span style={{ fontSize:13,fontWeight:800,color:tc.a }}>{team}</span>
-                    <span style={{ fontSize:10,color:C.t4 }}>{(TEAM_MEMBERS[team]||[]).length}명</span>
-                    {/* 색상 변경 */}
-                    <div style={{ display:"flex",gap:3,marginLeft:8 }}>
-                      {TEAM_PALETTE.slice(0,6).map(col=>(
-                        <button key={col} onClick={()=>setTeamColor(team,col)} title="색상 변경"
-                          style={{ width:14,height:14,borderRadius:"50%",background:col,border:tc.a===col?`2px solid ${C.t1}`:"1px solid #0001",cursor:"pointer",padding:0 }}/>
-                      ))}
-                    </div>
-                    <button onClick={()=>{ if(confirm(`'${team}' 팀을 삭제할까요?`)) delTeam(team); }}
-                      style={{ marginLeft:"auto",padding:"3px 8px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${C.red}30`,background:C.redL,color:C.red,cursor:"pointer" }}>팀 삭제</button>
-                  </div>
-                  <div style={{ display:"flex",flexWrap:"wrap",gap:5,marginBottom:8 }}>
-                    {(TEAM_MEMBERS[team]||[]).map(nm=>(
-                      <span key={nm} style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:700,
-                        color:tc.a,background:tc.b,padding:"5px 10px",borderRadius:20,border:`1px solid ${tc.a}30` }}>
-                        {nm}
-                        <button onClick={()=>delMember(team,nm)} style={{ width:15,height:15,borderRadius:"50%",border:"none",
-                          background:tc.a,color:"#fff",fontSize:10,fontWeight:900,cursor:"pointer",lineHeight:1,padding:0 }}>×</button>
-                      </span>
-                    ))}
-                    {(TEAM_MEMBERS[team]||[]).length===0 && <span style={{ fontSize:11,color:C.t4 }}>인원 없음</span>}
-                  </div>
-                  <div style={{ display:"flex",gap:6 }}>
-                    <input value={newName[team]||""} onChange={e=>setNewName(p=>({...p,[team]:e.target.value}))}
-                      onKeyDown={e=>e.key==="Enter"&&addMember(team)} placeholder="새 인원 이름"
-                      style={{ flex:1,padding:"7px 10px",background:C.surface,border:BD,borderRadius:7,color:C.t1,fontSize:12,outline:"none" }}/>
-                    <button onClick={()=>addMember(team)} style={{ padding:"7px 14px",borderRadius:7,background:tc.a,border:"none",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer" }}>+ 추가</button>
-                  </div>
-                </div>
-              );
-            })}
-            {/* 팀 추가 */}
-            <div style={{ display:"flex",gap:6,marginTop:8 }}>
-              <input value={newTeam} onChange={e=>setNewTeam(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTeam()}
-                placeholder="새 팀 이름 (예: 5팀)" style={{ flex:1,padding:"9px 11px",background:C.surfaceL,border:`1.5px dashed ${C.border}`,borderRadius:8,color:C.t1,fontSize:13,outline:"none" }}/>
-              <button onClick={addTeam} style={{ padding:"9px 18px",borderRadius:8,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer" }}>+ 팀 추가</button>
+            <div style={{ display:"flex",alignItems:"center",marginBottom:12 }}>
+              <div style={{ fontSize:13,fontWeight:800,color:C.t1 }}>👥 인원 관리</div>
+              <span style={{ marginLeft:8,fontSize:10,color:C.t4 }}>{MEMBERS.length}명</span>
+            </div>
+            <div style={{ display:"flex",flexWrap:"wrap",gap:6,marginBottom:10 }}>
+              {MEMBERS.map(nm=>{
+                const mc = memberColor(nm);
+                return (
+                  <span key={nm} style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:700,
+                    color:mc,background:mc+"14",padding:"6px 11px",borderRadius:20,border:`1px solid ${mc}35` }}>
+                    {nm}
+                    <button onClick={()=>{ if(confirm(`'${nm}' 님을 명단에서 뺄까요?`)) delMember(nm); }}
+                      style={{ width:15,height:15,borderRadius:"50%",border:"none",background:mc,color:"#fff",
+                        fontSize:10,fontWeight:900,cursor:"pointer",lineHeight:1,padding:0 }}>×</button>
+                  </span>
+                );
+              })}
+              {MEMBERS.length===0 && <span style={{ fontSize:11,color:C.t4 }}>등록된 인원이 없습니다.</span>}
+            </div>
+            <div style={{ display:"flex",gap:6 }}>
+              <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addMember()}
+                placeholder="새 인원 이름" style={{ flex:1,padding:"9px 11px",background:C.surfaceL,border:`1.5px dashed ${C.border}`,borderRadius:8,color:C.t1,fontSize:13,outline:"none" }}/>
+              <button onClick={addMember} style={{ padding:"9px 18px",borderRadius:8,background:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer" }}>+ 추가</button>
             </div>
           </div>
 
@@ -2865,10 +2867,8 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
             </div>
             <div style={{ maxHeight:340,overflowY:"auto",display:"flex",flexDirection:"column",gap:5 }}>
               {allSchools.map(s=>{
-                const tc=TC[s.team]||{a:C.t3,b:C.surfaceL};
-                return (
+                      return (
                   <div key={s.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 11px",background:C.surfaceL,borderRadius:8,border:BD }}>
-                    <span style={{ fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:tc.b,color:tc.a,flexShrink:0 }}>{s.team}</span>
                     <span style={{ fontSize:12,fontWeight:700,color:C.t1,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
                     <span style={{ fontSize:9,color:C.t4 }}>{s._year} {s._half}</span>
                     {revEdit===s.id ? (
@@ -2906,8 +2906,9 @@ function OverviewPage({ allSchools, db, isMobile, onGo }) {
   const overdue = allSchools.filter(s=>{ const d=calcDday(s.end); return d!==null&&d<-7; });
   const doneCnt = allSchools.filter(s=>getProgress(s).done===STEPS.length).length;
   const repDone = buildings.filter(b=>b.rep).length;
-  const teamCount = {};
-  TEAM_LIST.forEach(t=>{ teamCount[t]=allSchools.filter(s=>s.team===t).length; });
+  const memberCount = {};
+  allSchools.forEach(s => (s.assignees||[]).forEach(n => { memberCount[n]=(memberCount[n]||0)+1; }));
+  const memberRank = Object.entries(memberCount).sort((a,b)=>b[1]-a[1]);
   const stepAgg = STEPS.map(k => ({ k, n: allSchools.filter(s=>s.progress&&s.progress[k]).length }));
 
   const Card = ({ label, val, sub, color, go }) => (
@@ -2933,17 +2934,18 @@ function OverviewPage({ allSchools, db, isMobile, onGo }) {
         <Card label="⏰ 기한 초과" val={overdue.length} sub="완수일 지남" color={C.orange}/>
       </div>
 
-      {/* 팀별 현장 수 */}
+      {/* 인원별 배정 현장 */}
       <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px",marginBottom:14 }}>
-        <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:12 }}>팀별 현장</div>
+        <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:12 }}>인원별 배정 현장</div>
         <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-          {FIELD_TEAMS().map(t=>{
-            const tc=TC[t]||{a:C.t3}; const n=teamCount[t]||0; const pct=total?Math.round(n/total*100):0;
+          {memberRank.length===0 && <div style={{ fontSize:12,color:C.t4 }}>아직 배정된 인원이 없습니다.</div>}
+          {memberRank.map(([nm,n])=>{
+            const mc=memberColor(nm); const top=memberRank[0][1]||1; const pct=Math.round(n/top*100);
             return (
-              <div key={t} style={{ display:"flex",alignItems:"center",gap:10 }}>
-                <span style={{ width:46,fontSize:12,fontWeight:700,color:tc.a }}>{t}</span>
+              <div key={nm} style={{ display:"flex",alignItems:"center",gap:10 }}>
+                <span style={{ width:58,fontSize:12,fontWeight:700,color:mc }}>{nm}</span>
                 <div style={{ flex:1,height:10,background:C.surfaceD,borderRadius:5,overflow:"hidden" }}>
-                  <div style={{ width:`${pct}%`,height:"100%",background:tc.a,borderRadius:5 }}/>
+                  <div style={{ width:`${pct}%`,height:"100%",background:mc,borderRadius:5 }}/>
                 </div>
                 <span style={{ width:40,textAlign:"right",fontSize:12,fontWeight:700,color:C.t2 }}>{n}개</span>
               </div>
@@ -2979,15 +2981,14 @@ function OverviewPage({ allSchools, db, isMobile, onGo }) {
    팀 채팅 (방별 · 이미지 첨부 · 새 메시지 푸시)
 ══════════════════════════════════════════════════════════════ */
 /* 채팅 방: 전체 · 공지 + 팀별(설정의 팀 목록 자동 반영) */
-const chatRoomColor = (r) => r==="전체" ? C.blue : r==="공지사항" ? C.red : (TC[r] && TC[r].a) || C.t2;
+const chatRoomColor = (r) => r==="전체" ? C.blue : r==="공지사항" ? C.red : C.t2;
 const chatRoomIcon  = (r) => r==="전체" ? "💬 " : r==="공지사항" ? "📢 " : "👥 ";
 
 function ChatPage({ editor, isMobile }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
-  const myTeam = TEAM_LIST.find(t => (TEAM_MEMBERS[t]||[]).includes(editor));
-  const rooms = myTeam ? ["전체", myTeam] : ["전체"];   // 전체 + 본인 팀만
-  const [room, setRoom] = useState(myTeam || "전체");
+  const rooms = ["전체", "공지사항"];
+  const [room, setRoom] = useState("전체");
   const [uploading, setUploading] = useState(false);
   const imgRef = useRef();
   const bottomRef = useRef();
@@ -3046,11 +3047,6 @@ function ChatPage({ editor, isMobile }) {
           );
         })}
       </div>
-      {!myTeam && (
-        <div style={{ fontSize:11,color:C.orange,background:C.orangeL,padding:"8px 11px",borderRadius:8,marginBottom:10,border:`1px solid ${C.orange}30` }}>
-          사이드바에서 <b>내 이름</b>을 선택하면 우리 팀 채팅방이 나타나요.
-        </div>
-      )}
       {/* 메시지 영역 */}
       <div style={{ flex:1,overflowY:"auto",background:C.surface,border:BD,borderRadius:12,padding:"14px",display:"flex",flexDirection:"column",gap:8 }}>
         {msgs.length===0 && <div style={{ textAlign:"center",color:C.t4,fontSize:12,margin:"auto" }}>아직 메시지가 없어요. 첫 메시지를 보내보세요!</div>}
@@ -3163,7 +3159,6 @@ function App() {
   });
   const [sideOpen, setSideOpen] = useState(typeof window!=="undefined" ? window.innerWidth>=820 : true);
   const [menu, setMenuRaw] = useState("schedule");
-  const [globalTeam, setGlobalTeam] = useState("전체");
   // 모바일에서 메뉴 선택 시 사이드바 자동 닫힘
   const setMenu = (m) => { setMenuRaw(m); if (window.innerWidth < 820) setSideOpen(false); };
 
@@ -3270,7 +3265,7 @@ function App() {
     const onCfg = (s) => {
       const cfg = s.val();
       if (cfg) { applyConfig(cfg); setCfgVer(v=>v+1); }
-      else { cRef.set({ teams: TEAM_LIST.map(n=>({name:n,color:(TC[n]&&TC[n].a)||C.t3})), members: TEAM_MEMBERS }).catch(()=>{}); }
+      else { cRef.set({ members: MEMBERS }).catch(()=>{}); }
     };
     cRef.on("value", onCfg);
 
@@ -3396,8 +3391,8 @@ function App() {
 
   const pages = {
     overview: <OverviewPage allSchools={allSchools} db={db} isMobile={isMobile} onGo={setMenu}/>,
-    schedule: <Calendar allSchools={allSchools} setDb={setDb} globalTeam={globalTeam} isMobile={isMobile}/>,
-    sites:    <SitesManager db={db} setDb={setDb} globalTeam={globalTeam} isMobile={isMobile}/>,
+    schedule: <Calendar allSchools={allSchools} setDb={setDb} isMobile={isMobile}/>,
+    sites:    <SitesManager db={db} setDb={setDb} isMobile={isMobile}/>,
     chat:     <ChatPage editor={editor} isMobile={isMobile}/>,
     urgent: (
       <div>
@@ -3408,8 +3403,7 @@ function App() {
           <div key={s.id} style={{ background:C.redL,border:`1.5px solid ${C.red}30`,borderLeft:`4px solid ${C.red}`,borderRadius:"0 12px 12px 0",padding:"14px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:12 }}>
             <div style={{ fontSize:20,fontWeight:900,color:C.red,minWidth:50 }}>{ddL(calcDday(s.end))}</div>
             <div style={{ flex:1 }}><div style={{ fontWeight:700,color:C.t1,fontSize:14 }}>{s.school}</div>
-              <div style={{ fontSize:11,color:C.t2 }}>{s.region} · {s.team} · {s._year} {s._half} · {s.buildings.length}동</div></div>
-            <Tag bg={TC[s.team]?.b} color={TC[s.team]?.a}>{s.team}</Tag>
+              <div style={{ fontSize:11,color:C.t2 }}>{s.region} · {s._year} {s._half} · {s.buildings.length}동</div></div>
           </div>
         ))}
       </div>
@@ -3422,8 +3416,7 @@ function App() {
           <div key={s.id} style={{ background:C.greenL,border:`1.5px solid ${C.green}30`,borderLeft:`4px solid ${C.green}`,borderRadius:"0 10px 10px 0",padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12 }}>
             <div style={{ fontSize:16,color:C.green }}>✓</div>
             <div style={{ flex:1 }}><div style={{ fontWeight:700,color:C.t1 }}>{s.school}</div>
-              <div style={{ fontSize:11,color:C.t2 }}>{s.region} · {s.team} · {s._year} {s._half} · 완수 {fd(s.end)}</div></div>
-            <Tag bg={TC[s.team]?.b} color={TC[s.team]?.a}>{s.team}</Tag>
+              <div style={{ fontSize:11,color:C.t2 }}>{s.region} · {s._year} {s._half} · 완수 {fd(s.end)}</div></div>
           </div>
         ))}
       </div>
@@ -3506,39 +3499,12 @@ function App() {
               style={{ width:"100%",padding:"6px 8px",background:C.surface,border:BD,borderRadius:6,
                 color:editor?C.t1:C.t4,fontSize:11,outline:"none",fontWeight:600 }}>
               <option value="">내 이름 선택 (수정 기록용)</option>
-              {Object.entries(TEAM_MEMBERS).map(([t,arr])=>(
-                <optgroup key={t} label={t}>
-                  {arr.map(n=><option key={n} value={n}>{n}</option>)}
-                </optgroup>
-              ))}
+              {allMembers().map(n=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <button onClick={enablePush} style={{ width:"100%",marginTop:7,padding:"7px 8px",borderRadius:7,
             border:`1.5px solid ${C.blue}40`,background:C.blueL,color:C.blue,fontSize:11,fontWeight:700,cursor:"pointer",
             display:"flex",alignItems:"center",justifyContent:"center",gap:5 }}>🔔 알림 켜기</button>
-        </div>
-
-        <div style={{ padding:"10px 16px 8px",borderBottom:BD }}>
-          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7 }}>
-            <span style={{ fontSize:9,color:C.t4,letterSpacing:1,fontWeight:700 }}>팀 구분 (클릭 필터)</span>
-            {globalTeam!=="전체" && <button onClick={()=>setGlobalTeam("전체")} style={{ fontSize:9,color:C.t3,background:"transparent",border:"none",cursor:"pointer",textDecoration:"underline",padding:0 }}>전체</button>}
-          </div>
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6 }}>
-            {FIELD_TEAMS().map(t=>{
-              const v=TC[t]||{a:C.t3,b:C.surfaceL,c:C.t2};
-              const active=globalTeam===t;
-              return (
-                <button key={t} onClick={()=>setGlobalTeam(active?"전체":t)} style={{ padding:"7px 0",borderRadius:7,textAlign:"center",cursor:"pointer",
-                  background:active?v.a:v.b,border:`1.5px solid ${active?v.a:v.a+"40"}`,boxShadow:active?`0 2px 8px ${v.a}50`:"none",transition:"all .15s" }}>
-                  <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:5 }}>
-                    <div style={{ width:7,height:7,borderRadius:"50%",background:active?"#fff":v.a }}/>
-                    <span style={{ fontSize:11,fontWeight:700,color:active?"#fff":v.a }}>{t}</span>
-                    <span style={{ fontSize:9,color:active?"rgba(255,255,255,.7)":v.c }}>{allSchools.filter(s=>s.team===t).length}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
         </div>
 
         <nav style={{ flex:1,padding:"8px 0",overflowY:"auto" }}>
