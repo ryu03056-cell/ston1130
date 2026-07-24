@@ -236,10 +236,20 @@ function loadKakao(key) {
   if (typeof window !== "undefined" && window.kakao && window.kakao.maps && window.kakao.maps.services) return Promise.resolve(window.kakao);
   if (kakaoLoading) return kakaoLoading;
   kakaoLoading = new Promise((res, rej) => {
+    let done = false;
+    const fail = (msg) => { if (done) return; done = true; kakaoLoading = null; rej(new Error(msg)); };
+    /* 키·도메인이 잘못되면 응답 자체가 안 오는 경우가 있어 시간 제한을 둔다 */
+    const timer = setTimeout(() => fail(
+      "지도를 불러오지 못했습니다(응답 없음).\n① 카카오맵 사용 설정이 ON인지 ② JavaScript 키에 이 사이트 주소가 'JavaScript SDK 도메인'으로 등록됐는지 확인해 주세요."), 12000);
     const sc = document.createElement("script");
     sc.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&libraries=services,clusterer&autoload=false`;
-    sc.onload = () => { try { window.kakao.maps.load(() => res(window.kakao)); } catch(e){ rej(e); } };
-    sc.onerror = () => { kakaoLoading = null; rej(new Error("카카오맵을 불러오지 못했습니다. 키와 도메인 등록을 확인해 주세요.")); };
+    sc.onload = () => {
+      try {
+        window.kakao.maps.load(() => { if (done) return; done = true; clearTimeout(timer); res(window.kakao); });
+      } catch(e){ clearTimeout(timer); fail((e&&e.message)||String(e)); }
+    };
+    sc.onerror = () => { clearTimeout(timer); fail(
+      "카카오맵 파일을 불러오지 못했습니다.\n키가 'JavaScript 키'가 맞는지(REST API 키 아님), 카카오맵 사용 설정이 ON인지 확인해 주세요."); };
     document.head.appendChild(sc);
   });
   return kakaoLoading;
@@ -2967,11 +2977,15 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
                 {kakaoKey ? "연결됨" : "미설정"}
               </span>
             </div>
-            <div style={{ fontSize:11,color:C.t3,lineHeight:1.8,marginBottom:10 }}>
-              무료입니다. 한 번만 넣으면 모든 기기에서 지도가 켜져요.<br/>
+            <div style={{ fontSize:11,color:C.t3,lineHeight:1.9,marginBottom:10 }}>
+              무료입니다. 한 번만 넣으면 모든 기기에서 지도가 켜져요.
+              <span style={{ color:C.orange,fontWeight:700 }}> (2026년 7월 21일부터 절차가 바뀌었습니다)</span><br/>
               ① <b>developers.kakao.com</b> 로그인 → 내 애플리케이션 → 애플리케이션 추가하기<br/>
-              ② 앱 설정 → <b>플랫폼</b> → Web → 사이트 도메인에 <b>{typeof window!=="undefined" ? window.location.origin : "이 사이트 주소"}</b> 등록<br/>
-              ③ 앱 키 → <b>JavaScript 키</b>를 복사해 아래에 붙여넣기
+              ② 만든 앱에서 <b>[카카오맵] → [사용 설정] → 상태를 ON</b>
+              <span style={{ color:C.red,fontWeight:700 }}> ← 이걸 안 하면 지도가 안 나와요</span><br/>
+              ③ <b>앱 키 → JavaScript 키 → [JavaScript SDK 도메인]</b>에 아래 주소를 등록<br/>
+              　 <b style={{ color:C.blue }}>{typeof window!=="undefined" ? window.location.origin : "이 사이트 주소"}</b><br/>
+              ④ 그 화면의 <b>JavaScript 키</b>를 복사해 아래에 붙여넣기 (REST API 키 아님)
             </div>
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
               <input value={mapKey} onChange={e=>setMapKey(e.target.value)} placeholder="JavaScript 키 붙여넣기"
@@ -3112,6 +3126,8 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
   const [err, setErr] = useState(null);
   const [picked, setPicked] = useState(null);    // 마커 클릭한 현장
   const [onlySoon, setOnlySoon] = useState(false);
+  const [ready, setReady] = useState(false);     // 지도 생성 완료 여부
+  const [diag, setDiag] = useState({ step:"대기 중", markers:0 });
   const mapRef = useRef(null), boxRef = useRef(null), clRef = useRef(null), kkRef = useRef(null);
 
   const sites = useMemo(() => {
@@ -3132,18 +3148,33 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
 
   /* 지도 띄우기 */
   useEffect(() => {
-    if (!kakaoKey) return;
+    if (!kakaoKey) { setDiag({ step:"키 없음", markers:0 }); return; }
     let dead = false;
+    setDiag(d => ({ ...d, step:"지도 파일 불러오는 중…" }));
     loadKakao(kakaoKey).then(kakao => {
-      if (dead || !boxRef.current) return;
+      if (dead) return;
       kkRef.current = kakao;
-      if (!mapRef.current) {
-        mapRef.current = new kakao.maps.Map(boxRef.current, {
-          center: new kakao.maps.LatLng(37.4138, 127.0180), level: 10,
-        });
-      }
-      setErr(null);
-    }).catch(e => setErr(e.message || String(e)));
+      setDiag(d => ({ ...d, step:"지도 만드는 중…" }));
+      /* 지도 넣을 자리가 아직 안 그려졌을 수 있어 준비될 때까지 기다린다 */
+      const make = () => {
+        if (dead) return;
+        if (!boxRef.current) { setTimeout(make, 60); return; }
+        try {
+          if (!mapRef.current) {
+            mapRef.current = new kakao.maps.Map(boxRef.current, {
+              center: new kakao.maps.LatLng(37.4138, 127.0180), level: 10,
+            });
+          }
+          setTimeout(() => { try { mapRef.current.relayout(); } catch {} }, 120);   // 크기 잡히면 다시 그리기
+          setReady(true); setErr(null);
+          setDiag(d => ({ ...d, step:"지도 준비 완료" }));
+        } catch(e) {
+          setErr((e&&e.message)||String(e));
+          setDiag(d => ({ ...d, step:"지도 생성 실패" }));
+        }
+      };
+      make();
+    }).catch(e => { setErr((e&&e.message)||String(e)); setDiag(d => ({ ...d, step:"불러오기 실패" })); });
     return () => { dead = true; };
   }, [kakaoKey]);
 
@@ -3159,7 +3190,7 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
   /* 마커 그리기 */
   useEffect(() => {
     const kakao = kkRef.current, map = mapRef.current;
-    if (!kakao || !map) return;
+    if (!ready || !kakao || !map) return;
     if (clRef.current) { clRef.current.clear(); }
     const markers = [];
     const bounds = new kakao.maps.LatLngBounds();
@@ -3177,8 +3208,9 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
       clRef.current = new kakao.maps.MarkerClusterer({ map, averageCenter:true, minLevel:7, gridSize:70 });
     }
     clRef.current.addMarkers(markers);
+    setDiag(d => ({ ...d, markers: markers.length }));
     if (any) { try { map.setBounds(bounds); } catch {} }
-  }, [sites, posOf]);
+  }, [sites, posOf, ready]);
 
   /* 정확한 위치 찾기 (한 번 찾으면 서버에 저장 → 다음부터 바로 표시) */
   const runGeocode = async () => {
@@ -3266,9 +3298,10 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
           <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:6 }}>🗺 지도를 켜려면 카카오맵 키가 한 번 필요해요</div>
           <div style={{ fontSize:12,color:C.t2,lineHeight:1.8,marginBottom:10 }}>
             무료입니다. <b>설정 → 지도(카카오맵) 설정</b>에서 키를 넣으면 바로 켜져요.<br/>
-            ① developers.kakao.com 로그인 → ② 내 애플리케이션 → 애플리케이션 추가하기<br/>
-            ③ 앱 설정 → 플랫폼 → Web → 사이트 도메인에 <b>이 사이트 주소</b> 등록<br/>
-            ④ 앱 키 → <b>JavaScript 키</b> 복사 → 설정에 붙여넣기
+            ① developers.kakao.com 로그인 → 내 애플리케이션 → 애플리케이션 추가하기<br/>
+            ② 만든 앱 → <b>[카카오맵] → [사용 설정] → 상태 ON</b> <span style={{color:C.orange,fontWeight:700}}>(꼭 필요)</span><br/>
+            ③ <b>앱 키 → JavaScript 키 → JavaScript SDK 도메인</b>에 이 사이트 주소 등록<br/>
+            ④ <b>JavaScript 키</b> 복사 → 설정에 붙여넣기
           </div>
           <div style={{ fontSize:12,fontWeight:700,color:C.t1,marginBottom:8 }}>지금은 지역별 분포로 볼 수 있어요</div>
           <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
@@ -3300,8 +3333,23 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
               {noPos>0 && <span style={{ color:C.orange,marginLeft:6 }}>· 지역 정보 없어 미표시 {noPos}개</span>}
             </span>
           </div>
+          {/* 진단 — 어디까지 됐는지 바로 보이게 */}
+          <div style={{ fontSize:11,color:C.t2,background:C.surfaceL,border:BD,borderRadius:8,padding:"8px 11px",marginBottom:10,display:"flex",gap:12,flexWrap:"wrap" }}>
+            <span>상태 <b style={{ color: err ? C.red : ready ? C.green : C.orange }}>{diag.step}</b></span>
+            <span>현장 <b>{sites.length}</b></span>
+            <span>지도에 찍힌 핀 <b style={{ color: diag.markers>0 ? C.green : C.orange }}>{diag.markers}</b></span>
+          </div>
           {status && <div style={{ fontSize:11,color:C.t2,background:C.surfaceL,border:BD,borderRadius:8,padding:"8px 11px",marginBottom:10 }}>{status}</div>}
-          {err && <div style={{ fontSize:11,color:C.red,background:C.redL,border:`1px solid ${C.red}35`,borderRadius:8,padding:"8px 11px",marginBottom:10 }}>⚠ {err}</div>}
+          {err && (
+            <div style={{ fontSize:11,color:C.red,background:C.redL,border:`1px solid ${C.red}35`,borderRadius:8,padding:"10px 12px",marginBottom:10,whiteSpace:"pre-wrap",lineHeight:1.7 }}>
+              ⚠ {err}
+              {"\n\n"}<b>확인할 것 (2026년 7월 21일부터 절차가 바뀌었어요)</b>
+              {"\n"}① 카카오디벨로퍼스 → 내 앱 → <b>[카카오맵] → [사용 설정] → 상태 ON</b>
+              {"\n"}② <b>앱 키 → JavaScript 키 → 'JavaScript SDK 도메인'</b>에 아래 주소 등록
+              {"\n"}　 {typeof window!=="undefined" ? window.location.origin : ""}
+              {"\n"}③ 넣은 키가 <b>JavaScript 키</b>가 맞는지 (REST API 키 아님)
+            </div>
+          )}
           <div ref={boxRef} style={{ width:"100%",height:isMobile?380:560,borderRadius:12,border:BD,overflow:"hidden",background:C.surfaceL }}/>
         </>
       )}
