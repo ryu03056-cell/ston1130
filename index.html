@@ -1299,14 +1299,28 @@ function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
   return (
     <>
       <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(30,35,50,.35)",backdropFilter:"blur(2px)",zIndex:290 }}/>
-      <div style={{ position:"fixed",top:0,right:0,height:"100vh",width:isMobile?"100vw":460,maxWidth:"96vw",
-        background:C.surface,borderLeft:`4px solid ${C.blue}`,boxShadow:"-10px 0 40px rgba(0,0,0,.20)",zIndex:291,
-        display:"flex",flexDirection:"column",animation:"daySlide .22s cubic-bezier(.2,.8,.2,1)" }}>
-        <style>{`@keyframes daySlide{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
-        <div style={{ padding:"18px 20px",borderBottom:BD,background:C.blueL,display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0 }}>
+      {/* 휴대폰에서는 아래에서 올라오는 시트, PC에서는 오른쪽 서랍 */}
+      <div style={ isMobile
+        ? { position:"fixed",left:0,right:0,bottom:0,height:"86vh",width:"100%",
+            background:C.surface,borderTop:`4px solid ${C.blue}`,borderTopLeftRadius:18,borderTopRightRadius:18,
+            boxShadow:"0 -10px 40px rgba(0,0,0,.22)",zIndex:291,
+            display:"flex",flexDirection:"column",animation:"daySheet .24s cubic-bezier(.2,.8,.2,1)" }
+        : { position:"fixed",top:0,right:0,height:"100vh",width:460,maxWidth:"96vw",
+            background:C.surface,borderLeft:`4px solid ${C.blue}`,boxShadow:"-10px 0 40px rgba(0,0,0,.20)",zIndex:291,
+            display:"flex",flexDirection:"column",animation:"daySlide .22s cubic-bezier(.2,.8,.2,1)" }}>
+        <style>{`@keyframes daySlide{from{transform:translateX(100%)}to{transform:translateX(0)}}
+                 @keyframes daySheet{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
+        {isMobile && (
+          <div onClick={onClose} style={{ padding:"9px 0 3px",display:"flex",justifyContent:"center",flexShrink:0,cursor:"pointer" }}>
+            <div style={{ width:42,height:5,borderRadius:3,background:C.border }}/>
+          </div>
+        )}
+        <div style={{ padding:isMobile?"10px 16px 14px":"18px 20px",borderBottom:BD,background:C.blueL,
+          display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,
+          borderTopLeftRadius:isMobile?0:0,borderTopRightRadius:isMobile?0:0 }}>
           <div>
-            <div style={{ fontSize:22,fontWeight:900,color:C.blue,lineHeight:1.1 }}>{label}</div>
-            <div style={{ fontSize:12,color:C.blue+"bb",marginTop:5 }}>현장 {fieldSchools.length} · 착수 {startSchools.length} · 완수 {endSchools.length} · 총 {total}건</div>
+            <div style={{ fontSize:isMobile?19:22,fontWeight:900,color:C.blue,lineHeight:1.1 }}>{label}</div>
+            <div style={{ fontSize:isMobile?11:12,color:C.blue+"bb",marginTop:4 }}>현장 {fieldSchools.length} · 착수 {startSchools.length} · 완수 {endSchools.length} · 총 {total}건</div>
           </div>
           <button onClick={onClose} style={{ width:32,height:32,borderRadius:"50%",background:`${C.blue}20`,
             border:`1px solid ${C.blue}40`,color:C.blue,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,flexShrink:0 }}>×</button>
@@ -1994,12 +2008,38 @@ function SitesManager({ db, setDb, isMobile }) {
         </div>
       </div>
 
-      {/* 연도/반기 탭 */}
-      <div style={{ display:"flex",alignItems:"center",background:C.surface,border:BD,borderRadius:12,overflow:isMobile?"auto":"hidden",overflowX:isMobile?"auto":"hidden",boxShadow:"0 1px 6px rgba(0,0,0,.05)" }}>
+      {/* 연도/반기 탭 — 휴대폰에서는 두 줄로 나눠 잘리지 않게 */}
+      {isMobile ? (
+        <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"9px 10px",boxShadow:"0 1px 6px rgba(0,0,0,.05)" }}>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:7 }}>
+            {years.map(y=>(
+              <button key={y} onClick={()=>{ setYr(y); setHalf(Object.keys(db[y]||{})[0]||"상반기"); }}
+                style={{ flex:"1 1 auto",padding:"9px 6px",borderRadius:8,border:`1.5px solid ${yr===y?C.blue:C.border}`,
+                  background:yr===y?C.blueL:"transparent",color:yr===y?C.blue:C.t3,
+                  fontSize:13,fontWeight:yr===y?800:600,cursor:"pointer",whiteSpace:"nowrap" }}>
+                {isLH(y)?"🏢 LH":`${String(y).slice(2)}년`}
+              </button>
+            ))}
+          </div>
+          <div style={{ display:"flex",gap:6 }}>
+            {(isLH(yr)?["정밀"]:["상반기","하반기"]).map(h=>{
+              const cnt=(db[yr]?.[h]||[]).length, on=half===h, hc=h==="상반기"?C.blue:h==="정밀"?C.purple:C.orange;
+              return <button key={h} onClick={()=>setHalf(h)}
+                style={{ flex:1,padding:"10px 6px",borderRadius:8,border:`1.5px solid ${on?hc:C.border}`,
+                  background:on?hc+"12":"transparent",color:on?hc:C.t3,fontSize:13,fontWeight:on?800:600,cursor:"pointer",
+                  display:"flex",alignItems:"center",justifyContent:"center",gap:6,whiteSpace:"nowrap" }}>
+                <span style={{ fontSize:14 }}>{h==="상반기"?"🌱":h==="정밀"?"🏢":"🍂"}</span>{h}
+                <span style={{ fontSize:10,padding:"1px 6px",borderRadius:10,background:on?hc+"20":C.surfaceL,color:on?hc:C.t4,fontWeight:700 }}>{cnt}</span>
+              </button>;
+            })}
+          </div>
+        </div>
+      ) : (
+      <div style={{ display:"flex",alignItems:"center",background:C.surface,border:BD,borderRadius:12,overflow:"hidden",boxShadow:"0 1px 6px rgba(0,0,0,.05)" }}>
         <div style={{ display:"flex",borderRight:`2px solid ${C.border}`,flexShrink:0 }}>
           {years.map(y=>(
             <button key={y} onClick={()=>{ setYr(y); setHalf(Object.keys(db[y]||{})[0]||"상반기"); }}
-              style={{ padding:isMobile?"11px 14px":"12px 20px",border:"none",borderBottom:`3px solid ${yr===y?C.blue:"transparent"}`,
+              style={{ padding:"12px 20px",border:"none",borderBottom:`3px solid ${yr===y?C.blue:"transparent"}`,
                 background:yr===y?C.blueL:"transparent",color:yr===y?C.blue:C.t3,fontSize:14,fontWeight:yr===y?800:500,cursor:"pointer",whiteSpace:"nowrap" }}>
               {isLH(y)?"🏢 LH":`${y}년`} {yr===y && <span style={{ fontSize:10,marginLeft:5,color:C.t4 }}>{Object.values(db[y]||{}).reduce((a,arr)=>a+(arr||[]).length,0)}건</span>}
             </button>
@@ -2008,107 +2048,192 @@ function SitesManager({ db, setDb, isMobile }) {
         <div style={{ display:"flex",padding:"0 8px",flexShrink:0 }}>
           {(isLH(yr)?["정밀"]:["상반기","하반기"]).map(h=>{
             const cnt=(db[yr]?.[h]||[]).length, on=half===h, hc=h==="상반기"?C.blue:h==="정밀"?C.purple:C.orange;
-            return <button key={h} onClick={()=>setHalf(h)} style={{ padding:isMobile?"11px 12px":"12px 18px",border:"none",borderBottom:`3px solid ${on?hc:"transparent"}`,
+            return <button key={h} onClick={()=>setHalf(h)} style={{ padding:"12px 18px",border:"none",borderBottom:`3px solid ${on?hc:"transparent"}`,
               background:on?hc+"12":"transparent",color:on?hc:C.t3,fontSize:13,fontWeight:on?700:500,cursor:"pointer",display:"flex",alignItems:"center",gap:7,whiteSpace:"nowrap" }}>
               <span style={{ fontSize:15 }}>{h==="상반기"?"🌱":h==="정밀"?"🏢":"🍂"}</span>{h}
               <span style={{ fontSize:10,padding:"1px 6px",borderRadius:10,background:on?hc+"20":C.surfaceL,color:on?hc:C.t4,fontWeight:700 }}>{cnt}</span>
             </button>;
           })}
         </div>
-        {!isMobile && (
-          <div style={{ marginLeft:"auto",padding:"0 16px",fontSize:11,color:C.t3,fontWeight:600,whiteSpace:"nowrap" }}>
-            {isLH(yr)?"LH 정밀":`${yr}년 ${half}`} · {filtered.length}개 / {filtered.flatMap(s=>s.buildings).length}동
-          </div>
-        )}
+        <div style={{ marginLeft:"auto",padding:"0 16px",fontSize:11,color:C.t3,fontWeight:600,whiteSpace:"nowrap" }}>
+          {isLH(yr)?"LH 정밀":`${yr}년 ${half}`} · {filtered.length}개 / {filtered.flatMap(s=>s.buildings).length}동
+        </div>
       </div>
+      )}
 
       {/* 통계 카드 */}
-      <div style={{ display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:10 }}>
-        {[{label:"전체 동",val:st.total,c:C.t2,f:"전체"},
-          {label:"📄 보고서 완료",val:`${st.rep}/${st.total}`,c:C.purple,f:"보고서 미완"},
-          {label:"🖥 FMS 완료",val:`${st.fms}/${st.total}`,c:C.blue,f:"FMS 미완"},
-          {label:"📦 납품 미정",val:st.noD,c:C.orange,f:"납품 미정"}].map(x=>(
-          <button key={x.label} onClick={()=>setStF(x.f)} style={{ padding:"12px 14px",background:stF===x.f?x.c+"08":C.surface,
-            border:`1.5px solid ${stF===x.f?x.c+"60":C.border}`,borderTop:`3px solid ${x.c}`,borderRadius:10,textAlign:"left",cursor:"pointer",boxShadow:"0 1px 6px rgba(0,0,0,.04)" }}>
-            <div style={{ fontSize:21,fontWeight:900,color:x.c,lineHeight:1 }}>{x.val}</div>
-            <div style={{ fontSize:10,color:C.t3,marginTop:5,fontWeight:600 }}>{x.label}</div>
+      <div style={{ display:"grid",gridTemplateColumns:isMobile?"repeat(4,1fr)":"repeat(4,1fr)",gap:isMobile?6:10 }}>
+        {[{label:isMobile?"전체":"전체 동",val:st.total,c:C.t2,f:"전체"},
+          {label:isMobile?"보고서":"📄 보고서 완료",val:isMobile?`${st.rep}`:`${st.rep}/${st.total}`,c:C.purple,f:"보고서 미완"},
+          {label:isMobile?"FMS":"🖥 FMS 완료",val:isMobile?`${st.fms}`:`${st.fms}/${st.total}`,c:C.blue,f:"FMS 미완"},
+          {label:isMobile?"납품미정":"📦 납품 미정",val:st.noD,c:C.orange,f:"납품 미정"}].map(x=>(
+          <button key={x.label} onClick={()=>setStF(x.f)} style={{ padding:isMobile?"9px 4px":"12px 14px",background:stF===x.f?x.c+"08":C.surface,
+            border:`1.5px solid ${stF===x.f?x.c+"60":C.border}`,borderTop:`3px solid ${x.c}`,borderRadius:10,
+            textAlign:isMobile?"center":"left",cursor:"pointer",boxShadow:"0 1px 6px rgba(0,0,0,.04)" }}>
+            <div style={{ fontSize:isMobile?17:21,fontWeight:900,color:x.c,lineHeight:1 }}>{x.val}</div>
+            <div style={{ fontSize:isMobile?9:10,color:C.t3,marginTop:4,fontWeight:600,whiteSpace:"nowrap" }}>{x.label}</div>
           </button>
         ))}
       </div>
 
       {/* 필터 */}
-      <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",padding:"10px 14px",background:C.surface,border:BD,borderRadius:10 }}>
-        <div style={{ display:"flex",background:C.surfaceL,border:BD,borderRadius:7,padding:"6px 11px",gap:7,alignItems:"center",width:190 }}>
+      <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",padding:isMobile?"10px 11px":"10px 14px",background:C.surface,border:BD,borderRadius:10 }}>
+        <div style={{ display:"flex",background:C.surfaceL,border:BD,borderRadius:7,padding:"8px 11px",gap:7,alignItems:"center",width:isMobile?"100%":190 }}>
           <span style={{ color:C.t4 }}>⌕</span>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="학교명·지역"
             style={{ background:"transparent",border:"none",color:C.t1,fontSize:13,outline:"none",flex:1 }}/>
           {search && <button onClick={()=>setSearch("")} style={{ background:"transparent",border:"none",color:C.t4,fontSize:15,padding:0,cursor:"pointer" }}>×</button>}
         </div>
-        <div style={{ width:1,height:18,background:C.border }}/>
+        {!isMobile && <div style={{ width:1,height:18,background:C.border }}/>}
         {["전체","보고서 미완","FMS 미완","납품 미정","완료"].map(ff=>(
           <Pill key={ff} active={stF===ff} ac={C.purple} onClick={()=>setStF(ff)} style={{ fontSize:11 }}>{ff}</Pill>
         ))}
-        <div style={{ marginLeft:"auto",display:"flex",gap:8 }}>
-          <button onClick={()=>setCopyOpen(true)} style={{ padding:"8px 14px",borderRadius:8,border:`1.5px solid ${C.blue}40`,
-            background:C.blueL,color:C.blue,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}>📋 다른 반기에서 복사</button>
-          <button onClick={addNewSite} style={{ padding:"8px 16px",borderRadius:8,border:"none",
+        <div style={{ marginLeft:isMobile?0:"auto",display:"flex",gap:8,width:isMobile?"100%":"auto" }}>
+          <button onClick={()=>setCopyOpen(true)} style={{ flex:isMobile?1:"none",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${C.blue}40`,
+            background:C.blueL,color:C.blue,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}>📋 반기 복사</button>
+          <button onClick={addNewSite} style={{ flex:isMobile?1:"none",padding:"10px 16px",borderRadius:8,border:"none",
             background:C.blue,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",boxShadow:`0 3px 10px ${C.blue}33` }}>+ 현장 추가</button>
         </div>
       </div>
 
       {/* 테이블 */}
-      <div style={{ background:C.surface,border:BD,borderRadius:12,overflowX:isMobile?"auto":"hidden",overflowY:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,.05)",WebkitOverflowScrolling:"touch" }}>
-        <div style={{ minWidth:isMobile?660:"auto" }}>
-        <div style={{ display:"grid",gridTemplateColumns:"2fr 110px 110px 70px 116px 50px",background:C.surfaceL,borderBottom:`1.5px solid ${C.borderD}`,padding:"10px 16px",gap:8 }}>
-          {["학교 · 시설명","현장조사일","완수일","D-day","보고서·FMS·납품","수정"].map((h,i)=>(
-            <div key={i} style={{ fontSize:10,color:C.t3,fontWeight:700,letterSpacing:.5,textAlign:i>=1?"center":"left" }}>{h}</div>
-          ))}
-        </div>
+      <div style={{ background:C.surface,border:BD,borderRadius:12,overflowX:isMobile?"visible":"hidden",overflowY:"hidden",boxShadow:"0 2px 10px rgba(0,0,0,.05)" }}>
+        <div style={{ minWidth:isMobile?"auto":"auto" }}>
+        {!isMobile && (
+          <div style={{ display:"grid",gridTemplateColumns:"2fr 110px 110px 70px 116px 50px",background:C.surfaceL,borderBottom:`1.5px solid ${C.borderD}`,padding:"10px 16px",gap:8 }}>
+            {["학교 · 시설명","현장조사일","완수일","D-day","보고서·FMS·납품","수정"].map((h,i)=>(
+              <div key={i} style={{ fontSize:10,color:C.t3,fontWeight:700,letterSpacing:.5,textAlign:i>=1?"center":"left" }}>{h}</div>
+            ))}
+          </div>
+        )}
 
         {filtered.map((s,si)=>{
           const isOpen=open.has(s.id);
           const repAll=s.buildings.every(b=>b.rep), fmsAll=s.buildings.every(b=>b.fmsD);
-          const allDone=repAll&&fmsAll&&s.buildings.every(b=>b.delivery);
+          const delAll=s.buildings.every(b=>b.delivery);
+          const allDone=repAll&&fmsAll&&delAll;
           const dd=calcDday(s.end), urgent=dd!==null&&dd<0&&dd>=-7;
+          const tel=siteTel(s);
+          const toggleOpen=()=>setOpen(p=>{const n=new Set(p);n.has(s.id)?n.delete(s.id):n.add(s.id);return n;});
+          const rowBg = urgent?C.redL+"80":allDone?C.greenL+"50":si%2===0?C.surface:C.surfaceL;
+          const rowAccent = urgent?C.red:allDone?C.green:"transparent";
+
+          /* ── 휴대폰: 칸을 나누지 않고 위아래로 쌓아서 표시 ── */
+          if (isMobile) return (
+            <div key={s.id} style={{ borderBottom:BD }}>
+              <div style={{ padding:"12px 13px",background:rowBg,borderLeft:`3px solid ${rowAccent}` }}>
+                <div onClick={toggleOpen} style={{ display:"flex",alignItems:"center",gap:7,cursor:"pointer",userSelect:"none" }}>
+                  <span style={{ color:C.t4,fontSize:12,transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s",flexShrink:0 }}>›</span>
+                  <span style={{ fontWeight:800,fontSize:15,color:C.t1,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
+                  {urgent && <Tag bg={C.redL} color={C.red} border={`1px solid ${C.red}30`}>⚡</Tag>}
+                  {s.carried && <Tag bg={C.orange+"18"} color={C.orange} border={`1px solid ${C.orange}40`}>🍂</Tag>}
+                  <button onClick={e=>{e.stopPropagation();setEditId(s.id);}}
+                    style={{ padding:"5px 11px",borderRadius:6,fontSize:11,fontWeight:700,background:C.blueL,
+                      border:`1px solid ${C.blue}40`,color:C.blue,cursor:"pointer",flexShrink:0 }}>✏ 수정</button>
+                </div>
+
+                <div style={{ display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginTop:6,paddingLeft:19 }}>
+                  <span style={{ fontSize:11,color:C.t3 }}>{s.region}</span>
+                  <span style={{ fontSize:11,color:C.t4 }}>{s.buildings.length}동</span>
+                  {getFlags(s).map(fv=>{ const o=FLAG_OPTS.find(x=>x.v===fv); return o? <span key={fv} style={{ fontSize:11,fontWeight:700,color:o.color }}>{o.label}</span> : null; })}
+                  {tel && <a href={`tel:${tel.replace(/[^0-9+]/g,"")}`} onClick={e=>e.stopPropagation()}
+                    style={{ padding:"3px 9px",borderRadius:5,fontSize:11,fontWeight:800,textDecoration:"none",
+                      border:`1px solid ${C.green}55`,background:C.greenL,color:C.green,whiteSpace:"nowrap" }}>📞 {tel}</a>}
+                </div>
+                {(s.assignees||[]).length>0 && (
+                  <div style={{ fontSize:11,color:C.t2,marginTop:5,paddingLeft:19 }}>👤 {s.assignees.join(" · ")}</div>
+                )}
+
+                {/* 날짜 — 넓게 두 칸 */}
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:9,paddingLeft:19 }} onClick={e=>e.stopPropagation()}>
+                  <label style={{ display:"flex",flexDirection:"column",gap:3 }}>
+                    <span style={{ fontSize:9,color:C.t4,fontWeight:700 }}>현장조사일</span>
+                    <input type="date" value={s.field||""} onChange={e=>updDate(s.id,"field",e.target.value)}
+                      style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:7,color:C.blue,
+                        fontSize:13,padding:"8px 6px",outline:"none",width:"100%",fontWeight:700 }}/>
+                  </label>
+                  <label style={{ display:"flex",flexDirection:"column",gap:3 }}>
+                    <span style={{ fontSize:9,color:C.t4,fontWeight:700 }}>완수일 <b style={{ color:ddC(dd) }}>{ddL(dd)}</b></span>
+                    <input type="date" value={s.end||""} onChange={e=>updDate(s.id,"end",e.target.value)}
+                      style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:7,color:C.orange,
+                        fontSize:13,padding:"8px 6px",outline:"none",width:"100%",fontWeight:700 }}/>
+                  </label>
+                </div>
+
+                {/* 진행 + 상태 */}
+                <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginTop:9,paddingLeft:19 }} onClick={e=>e.stopPropagation()}>
+                  <StepBar progress={s.progress} compact/>
+                  {[{k:"보고서",v:repAll,c:C.purple},{k:"FMS",v:fmsAll,c:C.blue},{k:"납품",v:delAll,c:C.green}].map(x=>(
+                    <span key={x.k} style={{ fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:5,
+                      background:x.v?x.c+"18":C.surfaceL,color:x.v?x.c:C.t4,border:`1px solid ${x.v?x.c+"50":C.border}` }}>
+                      {x.v?"✓ ":""}{x.k}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {isOpen && s.buildings.map((b,bi)=>{
+                const iid=`${s.id}-${bi}`;
+                return (
+                  <div key={bi} style={{ padding:"10px 13px 10px 32px",background:C.surfaceL,borderTop:`1px solid ${C.border}`,
+                    borderLeft:`3px solid ${b.rep&&b.fmsD&&b.delivery?C.green+"40":"transparent"}` }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:7,flexWrap:"wrap" }}>
+                      <span style={{ fontSize:13,color:C.t1,fontWeight:700,flex:1,minWidth:0 }}>{b.b}</span>
+                      {b.floor && <span style={{ fontSize:10,color:C.t4 }}>{b.floor}층</span>}
+                      {b.area && <span style={{ fontSize:10,color:C.t4 }}>{b.area.toLocaleString()}㎡</span>}
+                      {b.fms && <button onClick={()=>copy(b.fms,`f-${iid}`)} style={{ padding:"4px 9px",borderRadius:5,fontSize:10,fontWeight:700,
+                        border:`1px solid ${copied===`f-${iid}`?C.green:C.border}`,background:copied===`f-${iid}`?C.greenL:C.surface,
+                        color:copied===`f-${iid}`?C.green:C.blue,cursor:"pointer" }}>{copied===`f-${iid}`?"✓ 복사":"🔐 FMS"}</button>}
+                    </div>
+                    <div style={{ display:"flex",gap:5,alignItems:"center",flexWrap:"wrap",marginTop:7 }}>
+                      {[{v:b.rep,f:"rep",l:"보고서",ac:C.purple,bc:C.purpleL},{v:b.fmsD,f:"fmsD",l:"FMS",ac:C.blue,bc:C.blueL}].map(x=>(
+                        <button key={x.f} onClick={()=>toggleB(s.id,bi,x.f)} style={{ padding:"6px 11px",borderRadius:6,fontSize:11,fontWeight:700,
+                          border:`1px solid ${x.v?x.ac+"60":C.border}`,background:x.v?x.bc:C.surface,color:x.v?x.ac:C.t4,cursor:"pointer" }}>{x.v?"✓ ":""}{x.l}</button>
+                      ))}
+                      {["직납","우편"].map(dv=>(
+                        <button key={dv} onClick={()=>setDel(s.id,bi,dv)} style={{ padding:"6px 11px",borderRadius:6,fontSize:11,fontWeight:700,
+                          border:`1px solid ${b.delivery===dv?C.green+"60":C.border}`,background:b.delivery===dv?C.greenL:C.surface,
+                          color:b.delivery===dv?C.green:C.t4,cursor:"pointer" }}>{dv}</button>
+                      ))}
+                    </div>
+                    {b.note && <div style={{ fontSize:11,color:C.t2,marginTop:7,padding:"6px 9px",background:C.yellowL,borderRadius:5,
+                      borderLeft:`2px solid ${C.yellow}`,lineHeight:1.6 }}>⚠ {b.note}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          );
+
+          /* ── PC: 기존 표 형태 ── */
           return (
             <div key={s.id} style={{ borderBottom:BD }}>
-              <div onClick={()=>setOpen(p=>{const n=new Set(p);n.has(s.id)?n.delete(s.id):n.add(s.id);return n;})}
+              <div onClick={toggleOpen}
                 style={{ display:"grid",gridTemplateColumns:"2fr 110px 110px 70px 116px 50px",gap:8,padding:"12px 16px",cursor:"pointer",userSelect:"none",
-                  background:urgent?C.redL+"80":allDone?C.greenL+"50":si%2===0?C.surface:C.surfaceL,
-                  borderLeft:`3px solid ${urgent?C.red:allDone?C.green:"transparent"}` }}>
+                  background:rowBg,borderLeft:`3px solid ${rowAccent}` }}>
                 <div style={{ display:"flex",flexDirection:"column",gap:5,minWidth:0 }}>
                   <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
                     <span style={{ color:C.t4,fontSize:11,display:"inline-block",transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s" }}>›</span>
                     <span style={{ fontWeight:800,fontSize:14,color:C.t1 }}>{s.school}</span>
                     {s.carried && <Tag bg={C.orange+"18"} color={C.orange} border={`1px solid ${C.orange}40`}>🍂 이월</Tag>}
                     <span style={{ fontSize:10,color:C.t3 }}>{s.region}</span>
-                    {(()=>{ const tel=siteTel(s); return tel ? (
-                      <a href={`tel:${tel.replace(/[^0-9+]/g,"")}`} onClick={e=>e.stopPropagation()} title={`${tel} 로 전화`}
-                        style={{ padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:800,textDecoration:"none",
-                          border:`1px solid ${C.green}55`,background:C.greenL,color:C.green,whiteSpace:"nowrap" }}>📞 {tel}</a>) : null; })()}
+                    {tel && <a href={`tel:${tel.replace(/[^0-9+]/g,"")}`} onClick={e=>e.stopPropagation()} title={`${tel} 로 전화`}
+                      style={{ padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:800,textDecoration:"none",
+                        border:`1px solid ${C.green}55`,background:C.greenL,color:C.green,whiteSpace:"nowrap" }}>📞 {tel}</a>}
                     {urgent && <Tag bg={C.redL} color={C.red} border={`1px solid ${C.red}30`}>⚡긴급</Tag>}
                     {getFlags(s).map(fv=>{ const o=FLAG_OPTS.find(x=>x.v===fv); return o? <span key={fv} style={{ fontSize:10,fontWeight:700,color:o.color }}>{o.label}</span> : null; })}
                     {(s.assignees||[]).length>0 && <span style={{ fontSize:9,color:C.t2 }}>👤 {s.assignees.join("·")}</span>}
                     <span style={{ fontSize:10,color:C.t4 }}>{s.buildings.length}동</span>
                   </div>
-                  {/* 8단계 진행바 + 강조 */}
                   <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",paddingLeft:19 }} onClick={e=>e.stopPropagation()}>
                     <StepBar progress={s.progress} compact/>
                     {(() => {
-                      const p = (s.progress)||{};
+                      const pg = (s.progress)||{};
                       const chip = (label, on, col) => (
                         <span style={{ fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,
                           background:on?col+"18":C.surfaceL, color:on?col:C.t4,
-                          border:`1px solid ${on?col+"50":C.border}` }}>
-                          {on?"✓ ":""}{label}
-                        </span>
+                          border:`1px solid ${on?col+"50":C.border}` }}>{on?"✓ ":""}{label}</span>
                       );
-                      return <>
-                        {chip("착수계", !!p["착수계"], C.blue)}
-                        {chip("검토", !!p["검토"], C.purple)}
-                        {chip("제본", !!p["제본"], C.purple)}
-                        {chip("완수", !!p["완수"], C.green)}
-                      </>;
+                      return <>{chip("착수계",!!pg["착수계"],C.blue)}{chip("검토",!!pg["검토"],C.purple)}{chip("제본",!!pg["제본"],C.purple)}{chip("완수",!!pg["완수"],C.green)}</>;
                     })()}
                   </div>
                 </div>
@@ -2122,7 +2247,7 @@ function SitesManager({ db, setDb, isMobile }) {
                 </div>
                 <div style={{ fontSize:13,fontWeight:800,color:ddC(dd),textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center" }}>{ddL(dd)}</div>
                 <div style={{ display:"flex",gap:4,alignItems:"center",justifyContent:"center" }}>
-                  {[{k:"보",v:repAll,c:C.purple},{k:"F",v:fmsAll,c:C.blue},{k:"납",v:s.buildings.every(b=>b.delivery),c:C.green}].map(x=>(
+                  {[{k:"보",v:repAll,c:C.purple},{k:"F",v:fmsAll,c:C.blue},{k:"납",v:delAll,c:C.green}].map(x=>(
                     <div key={x.k} style={{ width:26,height:20,borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center",
                       background:x.v?x.c+"18":C.surfaceL,border:`1px solid ${x.v?x.c+"50":C.border}`,fontSize:9,fontWeight:700,color:x.v?x.c:C.t4 }}>{x.v?"✓":x.k}</div>
                   ))}
