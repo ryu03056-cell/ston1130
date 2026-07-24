@@ -1144,6 +1144,8 @@ function applyNotes(schools, notes) {
 function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
   const [pickerId, setPickerId] = useState(null);
   const [editId, setEditId] = useState(null);
+  const [dragY, setDragY] = useState(0);        // 아래로 쓸어내려 닫기
+  const dragStart = useRef(null);
 
   /* 같은 현장이 상·하반기 양쪽에 있으면(1년 계약 이월) 한 번만 표시.
      그 날짜가 속한 반기의 기록을 우선으로 남긴다. */
@@ -1304,20 +1306,42 @@ function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
         ? { position:"fixed",left:0,right:0,bottom:0,height:"86vh",width:"100%",
             background:C.surface,borderTop:`4px solid ${C.blue}`,borderTopLeftRadius:18,borderTopRightRadius:18,
             boxShadow:"0 -10px 40px rgba(0,0,0,.22)",zIndex:291,
-            display:"flex",flexDirection:"column",animation:"daySheet .24s cubic-bezier(.2,.8,.2,1)" }
+            display:"flex",flexDirection:"column",
+            transform:dragY?`translateY(${dragY}px)`:undefined,
+            transition:dragStart.current?"none":"transform .22s cubic-bezier(.2,.8,.2,1)",
+            animation:dragY?undefined:"daySheet .24s cubic-bezier(.2,.8,.2,1)" }
         : { position:"fixed",top:0,right:0,height:"100vh",width:460,maxWidth:"96vw",
             background:C.surface,borderLeft:`4px solid ${C.blue}`,boxShadow:"-10px 0 40px rgba(0,0,0,.20)",zIndex:291,
             display:"flex",flexDirection:"column",animation:"daySlide .22s cubic-bezier(.2,.8,.2,1)" }}>
         <style>{`@keyframes daySlide{from{transform:translateX(100%)}to{transform:translateX(0)}}
                  @keyframes daySheet{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
-        {isMobile && (
-          <div onClick={onClose} style={{ padding:"9px 0 3px",display:"flex",justifyContent:"center",flexShrink:0,cursor:"pointer" }}>
-            <div style={{ width:42,height:5,borderRadius:3,background:C.border }}/>
-          </div>
-        )}
-        <div style={{ padding:isMobile?"10px 16px 14px":"18px 20px",borderBottom:BD,background:C.blueL,
-          display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,
-          borderTopLeftRadius:isMobile?0:0,borderTopRightRadius:isMobile?0:0 }}>
+        {isMobile && (() => {
+          /* 손잡이나 제목줄을 아래로 쓸어내리면 닫힘 */
+          const onStart = e => { dragStart.current = e.touches[0].clientY; };
+          const onMove  = e => {
+            if (dragStart.current == null) return;
+            const dy = e.touches[0].clientY - dragStart.current;
+            if (dy > 0) setDragY(dy);
+          };
+          const onEnd = () => {
+            const dy = dragY; dragStart.current = null;
+            if (dy > 90) { setDragY(0); onClose(); } else setDragY(0);
+          };
+          return (
+            <div onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} onClick={onClose}
+              style={{ padding:"11px 0 5px",display:"flex",flexDirection:"column",alignItems:"center",gap:4,
+                flexShrink:0,cursor:"pointer",touchAction:"none" }}>
+              <div style={{ width:46,height:5,borderRadius:3,background:C.borderD }}/>
+              <span style={{ fontSize:9,color:C.t4 }}>아래로 쓸어내리면 닫혀요</span>
+            </div>
+          );
+        })()}
+        <div
+          onTouchStart={isMobile ? (e=>{ dragStart.current = e.touches[0].clientY; }) : undefined}
+          onTouchMove={isMobile ? (e=>{ if(dragStart.current==null) return; const dy=e.touches[0].clientY-dragStart.current; if(dy>0) setDragY(dy); }) : undefined}
+          onTouchEnd={isMobile ? (()=>{ const dy=dragY; dragStart.current=null; if(dy>90){ setDragY(0); onClose(); } else setDragY(0); }) : undefined}
+          style={{ padding:isMobile?"6px 16px 13px":"18px 20px",borderBottom:BD,background:C.blueL,
+          display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,touchAction:isMobile?"none":undefined }}>
           <div>
             <div style={{ fontSize:isMobile?19:22,fontWeight:900,color:C.blue,lineHeight:1.1 }}>{label}</div>
             <div style={{ fontSize:isMobile?11:12,color:C.blue+"bb",marginTop:4 }}>현장 {fieldSchools.length} · 착수 {startSchools.length} · 완수 {endSchools.length} · 총 {total}건</div>
@@ -2145,18 +2169,21 @@ function SitesManager({ db, setDb, isMobile }) {
                 )}
 
                 {/* 날짜 — 넓게 두 칸 */}
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:9,paddingLeft:19 }} onClick={e=>e.stopPropagation()}>
-                  <label style={{ display:"flex",flexDirection:"column",gap:3 }}>
+                {/* 날짜 — 아이폰 날짜칸이 칸 밖으로 넘치지 않게 minWidth:0 + box-sizing 지정 */}
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:9,paddingLeft:19,paddingRight:2 }} onClick={e=>e.stopPropagation()}>
+                  <label style={{ display:"flex",flexDirection:"column",gap:3,minWidth:0 }}>
                     <span style={{ fontSize:9,color:C.t4,fontWeight:700 }}>현장조사일</span>
                     <input type="date" value={s.field||""} onChange={e=>updDate(s.id,"field",e.target.value)}
                       style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:7,color:C.blue,
-                        fontSize:13,padding:"8px 6px",outline:"none",width:"100%",fontWeight:700 }}/>
+                        fontSize:13,padding:"9px 4px",outline:"none",width:"100%",minWidth:0,maxWidth:"100%",
+                        boxSizing:"border-box",WebkitAppearance:"none",appearance:"none",textAlign:"center",fontWeight:700 }}/>
                   </label>
-                  <label style={{ display:"flex",flexDirection:"column",gap:3 }}>
+                  <label style={{ display:"flex",flexDirection:"column",gap:3,minWidth:0 }}>
                     <span style={{ fontSize:9,color:C.t4,fontWeight:700 }}>완수일 <b style={{ color:ddC(dd) }}>{ddL(dd)}</b></span>
                     <input type="date" value={s.end||""} onChange={e=>updDate(s.id,"end",e.target.value)}
                       style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:7,color:C.orange,
-                        fontSize:13,padding:"8px 6px",outline:"none",width:"100%",fontWeight:700 }}/>
+                        fontSize:13,padding:"9px 4px",outline:"none",width:"100%",minWidth:0,maxWidth:"100%",
+                        boxSizing:"border-box",WebkitAppearance:"none",appearance:"none",textAlign:"center",fontWeight:700 }}/>
                   </label>
                 </div>
 
@@ -3285,6 +3312,8 @@ function MapPage({ db, setDb, allSchools, kakaoKey, isMobile }) {
   const [placeHits, setPlaceHits] = useState(null);     // 장소 검색 결과
   const [pickMode, setPickMode] = useState(false);      // 지도 눌러서 위치 찍기
   const [dragMode, setDragMode] = useState(false);      // 핀 끌어서 옮기기 (평소엔 꺼둬야 탭이 잘 먹음)
+  const [cardY, setCardY] = useState(0);                // 현장 카드 쓸어내려 닫기
+  const cardStart = useRef(null);
   const [ready, setReady] = useState(false);     // 지도 생성 완료 여부
   const [q, setQ] = useState("");                // 현장 검색어
   const [focusId, setFocusId] = useState(null);  // 검색으로 이동할 현장
@@ -3725,20 +3754,29 @@ function MapPage({ db, setDb, allSchools, kakaoKey, isMobile }) {
         const wrapStyle = isMobile
           ? { position:"fixed",left:0,right:0,bottom:0,zIndex:260,background:C.surface,
               borderTop:`3px solid ${C.blue}`,borderTopLeftRadius:16,borderTopRightRadius:16,
-              boxShadow:"0 -8px 30px rgba(0,0,0,.20)",padding:"12px 14px 18px",
-              maxHeight:"62vh",overflowY:"auto",animation:"pickUp .2s ease-out" }
+              boxShadow:"0 -8px 30px rgba(0,0,0,.20)",padding:"10px 14px 18px",
+              maxHeight:"62vh",overflowY:"auto",
+              transform:cardY?`translateY(${cardY}px)`:undefined,
+              transition:cardStart.current?"none":"transform .2s ease-out",
+              animation:cardY?undefined:"pickUp .2s ease-out" }
           : { marginTop:12,background:C.surface,border:BD,borderRadius:12,padding:"14px 16px" };
+        const closeCard = () => { setPicked(null); setCardY(0); };
         return (
           <div style={wrapStyle}>
             <style>{`@keyframes pickUp{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
             {isMobile && (
-              <div onClick={()=>setPicked(null)} style={{ display:"flex",justifyContent:"center",paddingBottom:8,cursor:"pointer" }}>
-                <div style={{ width:40,height:5,borderRadius:3,background:C.border }}/>
+              <div onClick={closeCard}
+                onTouchStart={e=>{ cardStart.current = e.touches[0].clientY; }}
+                onTouchMove={e=>{ if(cardStart.current==null) return; const dy=e.touches[0].clientY-cardStart.current; if(dy>0) setCardY(dy); }}
+                onTouchEnd={()=>{ const dy=cardY; cardStart.current=null; if(dy>70) closeCard(); else setCardY(0); }}
+                style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,paddingBottom:8,cursor:"pointer",touchAction:"none" }}>
+                <div style={{ width:44,height:5,borderRadius:3,background:C.borderD }}/>
+                <span style={{ fontSize:9,color:C.t4 }}>아래로 쓸어내리면 닫혀요</span>
               </div>
             )}
             <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8 }}>
               <span style={{ fontSize:15,fontWeight:800,color:C.t1,flex:1,minWidth:100 }}>{picked.school}</span>
-              {isMobile && <button onClick={()=>setPicked(null)} style={{ width:28,height:28,borderRadius:"50%",
+              {isMobile && <button onClick={closeCard} style={{ width:28,height:28,borderRadius:"50%",
                 border:`1px solid ${C.border}`,background:C.surfaceL,color:C.t3,fontSize:16,cursor:"pointer",lineHeight:1,flexShrink:0 }}>×</button>}
               {tel
                 ? <a href={`tel:${dial}`} style={{ padding:"6px 13px",borderRadius:7,fontSize:13,fontWeight:800,textDecoration:"none",
