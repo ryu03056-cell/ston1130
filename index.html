@@ -1673,6 +1673,7 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
   const [saved, setSaved] = useState(false);
   const progDone = STEPS.filter(k=>prog[k]).length;
   const toggleStep = (k) => setProg(p => ({ ...p, [k]: !p[k] }));
+  const [confirmDel, setConfirmDel] = useState(false);   // 삭제 확인 창
 
   const save = () => {
     const beforeStr = `${(sc.assignees||[]).join(",")||"-"} · 진행 ${STEPS.filter(k=>sc.progress&&sc.progress[k]).length}/${STEPS.length}`;
@@ -1697,14 +1698,15 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
     setTimeout(()=>{ setSaved(false); onClose(); }, 1100);
   };
 
-  const del = () => {
-    if (!window.confirm(`'${sc.school}' 현장을 삭제할까요?\n이 학교의 모든 동·진행 정보가 사라집니다.`)) return;
+  /* 삭제는 두 단계 — 버튼을 눌러도 바로 지워지지 않고 확인 창을 한 번 더 거친다 */
+  const doDelete = () => {
     setDb(prev => {
       const next = {...prev}; next[yr] = {...prev[yr]};
       next[yr][half] = (prev[yr]?.[half] || []).filter(s => s.id !== sc.id);
       return next;
     });
     logAction("삭제", `현장 · ${sc.school}`, sc.school, null);
+    setConfirmDel(false);
     onClose();
   };
 
@@ -1853,13 +1855,40 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
         </div>
 
         <div style={{ padding:"14px 22px",borderTop:BD,flexShrink:0,display:"flex",gap:8 }}>
-          <button onClick={del} title="현장 삭제" style={{ flexShrink:0,padding:"11px 14px",borderRadius:9,border:`1.5px solid ${C.red}40`,background:C.redL,color:C.red,fontSize:13,fontWeight:700,cursor:"pointer" }}>🗑 삭제</button>
+          <button onClick={()=>setConfirmDel(true)} title="현장 삭제" style={{ flexShrink:0,padding:"11px 14px",borderRadius:9,border:`1.5px solid ${C.red}40`,background:C.redL,color:C.red,fontSize:13,fontWeight:700,cursor:"pointer" }}>🗑 삭제</button>
           <button onClick={onClose} style={{ flex:1,padding:11,borderRadius:9,border:BD,background:"transparent",color:C.t3,fontSize:13,cursor:"pointer" }}>취소</button>
           <button onClick={save} style={{ flex:2,padding:11,borderRadius:9,background:saved?C.green:C.blue,border:"none",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",transition:"background .3s",boxShadow:`0 4px 14px ${(saved?C.green:C.blue)}40` }}>
             {saved?"✓ 저장됨!":"✓ 저장 · 캘린더 자동 반영"}
           </button>
         </div>
       </div>
+
+      {/* 삭제 확인 — 여기서 '네'를 눌러야 실제로 지워집니다 */}
+      {confirmDel && (
+        <>
+          <div onClick={()=>setConfirmDel(false)}
+            style={{ position:"fixed",inset:0,background:"rgba(20,25,40,.5)",backdropFilter:"blur(2px)",zIndex:400 }}/>
+          <div style={{ position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:401,
+            width:340,maxWidth:"90vw",background:C.surface,borderRadius:16,padding:"22px 20px 18px",
+            boxShadow:"0 20px 60px rgba(20,30,50,.35)",textAlign:"center" }}>
+            <div style={{ fontSize:34,marginBottom:10 }}>🗑</div>
+            <div style={{ fontSize:17,fontWeight:900,color:C.t1,marginBottom:8 }}>진짜로 삭제하시겠습니까?</div>
+            <div style={{ fontSize:13,fontWeight:800,color:C.red,marginBottom:6,wordBreak:"break-all" }}>{sc.school}</div>
+            <div style={{ fontSize:12,color:C.t3,lineHeight:1.7,marginBottom:18 }}>
+              이 현장의 <b>{(sc.buildings||[]).length}개 동</b>과 일정·진행상황이 모두 사라집니다.<br/>
+              <b style={{ color:C.red }}>되돌릴 수 없습니다.</b>
+            </div>
+            <div style={{ display:"flex",gap:8 }}>
+              <button onClick={()=>setConfirmDel(false)}
+                style={{ flex:1,padding:"13px 0",borderRadius:10,border:`1.5px solid ${C.border}`,background:C.surface,
+                  color:C.t2,fontSize:14,fontWeight:700,cursor:"pointer" }}>아니요</button>
+              <button onClick={doDelete}
+                style={{ flex:1,padding:"13px 0",borderRadius:10,border:"none",background:C.red,color:"#fff",
+                  fontSize:14,fontWeight:800,cursor:"pointer",boxShadow:`0 4px 14px ${C.red}45` }}>네, 삭제합니다</button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
