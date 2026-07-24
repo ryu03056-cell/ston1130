@@ -98,6 +98,108 @@ const getFlags = (s) => {
   });
   return [...set];
 };
+/* ══════════════════════════════════════════════════════════════
+   중복 방지 — 같은 현장이 두 번 올라가지 않게 자동 정리
+   · 학교명 표기 차이(여주고 / 여주고등학교 / 공백·괄호)를 같은 이름으로 인식
+   · 단, 옹벽과 건물처럼 관리번호도 동도 다른 '별개 건'은 그대로 둔다
+   ══════════════════════════════════════════════════════════════ */
+const normSchool = v => String(v==null?"":v)
+  .replace(/\s+/g,"")
+  .replace(/[（]/g,"(").replace(/[）]/g,")")
+  .replace(/[·・‧∙\-_.]/g,"")
+  .replace(/여자고등학교/g,"여고").replace(/여자중학교/g,"여중")
+  .replace(/초등학교/g,"초").replace(/중학교/g,"중").replace(/고등학교/g,"고")
+  .toLowerCase();
+const bldKey = b => String((b&&b.b)||"").replace(/\s+/g,"").toLowerCase();
+
+/* 같은 학교명 안에서 '같은 건'인지 판정 */
+function isSameSite(a, b) {
+  if (a.carried || b.carried) return true;              // 이월본은 실제 데이터와 같은 건
+  const na = String(a.no||"").trim(), nb = String(b.no||"").trim();
+  if (na && nb && na === nb) return true;               // 관리번호가 같음
+  const sa = new Set((a.buildings||[]).map(bldKey).filter(Boolean));
+  const sb = new Set((b.buildings||[]).map(bldKey).filter(Boolean));
+  /* 동 구성이 완전히 같으면 같은 건 (번호만 다르게 두 번 적힌 경우) */
+  if (sa.size && sa.size===sb.size && [...sa].every(x=>sb.has(x))) return true;
+  if (!na || !nb) {                                     // 한쪽에 번호가 없는 '껍데기 행'
+    if ([...sb].some(x=>sa.has(x))) return true;        // 동이 하나라도 겹치면 같은 건
+    const shell = (x,set) => set.size<=1 && (set.size===0 || normSchool([...set][0])===normSchool(x.school));
+    if (shell(a,sa) || shell(b,sb)) return true;        // 동명이 학교명뿐인 행
+  }
+  return false;                                          // 번호도 동도 다르면 별개 건(옹벽/건물 등)
+}
+
+/* 동 목록 합치기 — 이름 기준 합집합, 값이 있는 쪽을 채택 */
+function mergeBuildings(A, B) {
+  const out = [], idx = new Map();
+  [...(A||[]), ...(B||[])].forEach(b => {
+    if (!b) return;
+    const k = bldKey(b);
+    if (!k) { out.push(b); return; }
+    const i = idx.get(k);
+    if (i === undefined) { idx.set(k, out.length); out.push({ ...b }); return; }
+    const cur = out[i];
+    Object.entries(b).forEach(([f,v]) => { if (v!=null && v!=="" && (cur[f]==null || cur[f]==="")) cur[f]=v; });
+    cur.rep = cur.rep || b.rep; cur.fmsD = cur.fmsD || b.fmsD; cur.delivery = cur.delivery || b.delivery;
+  });
+  return out;
+}
+
+/* 중복 두 건을 하나로 — 실제 데이터/정보 많은 쪽을 기준으로 삼고 빈 값만 채운다 */
+function mergeSites(a, b) {
+  const base = (a.carried && !b.carried) ? b
+             : (!a.carried && b.carried) ? a
+             : ((b.buildings||[]).length > (a.buildings||[]).length ? b : a);
+  const other = base === a ? b : a;
+  const pick = (f) => { const v = base[f]; return (v==null || v==="") ? (other[f] ?? null) : v; };
+  return {
+    ...base,
+    id: a.id,                                            // 먼저 있던 id 유지
+    no: String(base.no||"").trim() || other.no || "",
+    school: (base.school||"").length >= (other.school||"").length ? base.school : other.school,
+    region: pick("region") || "", tel: pick("tel") || "",
+    kind: pick("kind") || "정기점검",
+    field: pick("field"), start: pick("start"), end: pick("end"),
+    contract: (base.contract!=null && base.contract>0) ? base.contract : (other.contract ?? null),
+    assignees: (base.assignees&&base.assignees.length) ? base.assignees : (other.assignees||[]),
+    headcount: base.headcount || other.headcount || 2,
+    progress: (base.progress && Object.keys(base.progress).length) ? base.progress : (other.progress||{}),
+    flags: [...new Set([...(getFlags(base)||[]), ...(getFlags(other)||[])])],
+    carried: !!(base.carried && other.carried),          // 한쪽이라도 실제 데이터면 실제로
+    buildings: mergeBuildings(base.buildings, other.buildings),
+  };
+}
+
+/* 한 반기(또는 LH) 안에서 중복 제거 — 순서 유지 */
+function dedupeBucket(arr) {
+  const list = (arr||[]).filter(Boolean);
+  const kept = [], slots = new Map();                    // 학교명 → kept 인덱스 목록
+  list.forEach(s => {
+    const nm = normSchool(s.school);
+    if (!nm) { kept.push(s); return; }
+    const idxs = slots.get(nm) || [];
+    const hit = idxs.find(i => isSameSite(kept[i], s));
+    if (hit === undefined) { kept.push(s); idxs.push(kept.length-1); slots.set(nm, idxs); }
+    else kept[hit] = mergeSites(kept[hit], s);
+  });
+  return kept;
+}
+
+/* db 전체 중복 정리 — 바뀐 게 없으면 원본을 그대로 돌려준다(불필요한 저장 방지) */
+function dedupeDb(db) {
+  let changed = false;
+  const next = {};
+  Object.entries(db||{}).forEach(([y,hs]) => {
+    next[y] = {};
+    Object.entries(hs||{}).forEach(([h,arr]) => {
+      const d = dedupeBucket(arr);
+      if (d.length !== (arr||[]).length) changed = true;
+      next[y][h] = d;
+    });
+  });
+  return changed ? next : db;
+}
+
 const STEPS = ["착수계","현장조사","기타자료","보고서","검토","제본","납품","완수"];
 const STEP_ICON = { 착수계:"📝", 현장조사:"📍", 기타자료:"📎", 보고서:"📄", 검토:"🔍", 제본:"📚", 납품:"📦", 완수:"🏁" };
 const STEP_SPECIAL = { 검토:true, 제본:true };   // 별도 강조
@@ -2107,26 +2209,38 @@ function ExportImportPage({ db, setDb, saveNow }) {
      매칭 안 되는 기존 학교는 그대로 유지 → 중복/꼬임 없이 '바뀐 부분만' 반영. */
   const mergeHalf = (existing, incoming) => {
     const ex = existing || [];
-    const keyOf = s => `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
-    const exMap = new Map(); ex.forEach(s => exMap.set(keyOf(s), s));
-    const usedKeys = new Set();
+    const keyOf  = s => `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
+    const nameOf = s => (s.school||"").replace(/\s+/g,"").trim();
+    const exMap = new Map(); ex.forEach(s => { if(!exMap.has(keyOf(s))) exMap.set(keyOf(s), s); });
+    const usedIds = new Set();
+    /* 기존 기록 찾기 — No는 반기마다 새로 매겨지므로 1순위 실패 시 학교명으로 재시도.
+       (이월본이 하반기 엑셀 데이터와 중복되던 원인) */
+    const takeOld = ins => {
+      const exact = exMap.get(keyOf(ins));
+      if (exact && !usedIds.has(exact.id)) return exact;
+      const cands = ex.filter(s => nameOf(s)===nameOf(ins) && !usedIds.has(s.id));
+      if (!cands.length) return null;
+      return cands.find(s => s.carried) || cands[0];      // 이월본을 먼저 소진 → 실제 데이터로 대체
+    };
     const merged = incoming.map(ins => {
-      const k = keyOf(ins); const old = exMap.get(k);
+      const old = takeOld(ins);
       if (old) {
-        usedKeys.add(k);
+        usedIds.add(old.id);
         return {
           ...ins,
           id: old.id,                                   // 안정적 ID 유지
           progress: old.progress || {},                 // 진행단계(웹 전용) 보존
-          assignees: old.assignees || [],               // 투입인원(웹 전용) 보존
+          assignees: (ins.assignees && ins.assignees.length) ? ins.assignees : (old.assignees || []),
           headcount: old.headcount || ins.headcount || 2,
-          contract: (ins.contract!=null && ins.contract>0) ? ins.contract : (old.contract ?? null),  // 예산 갱신/보존 (undefined 금지)
+          contract: (ins.contract!=null && ins.contract>0) ? ins.contract : (old.contract ?? null),  // 예산 갱신/보존
+          tel: (ins.tel||"").trim() || old.tel || "",    // 연락처(웹에서 입력) 보존
+          flags: (ins.flags && ins.flags.length) ? ins.flags : (old.flags || []),
         };
       }
       return ins;                                       // 신규 학교
     });
-    const leftovers = ex.filter(s => !usedKeys.has(keyOf(s)));   // 엑셀에 없던 기존 학교 → 유지
-    return { merged: merged.concat(leftovers), matched: usedKeys.size, added: incoming.length - usedKeys.size, kept: leftovers.length };
+    const leftovers = ex.filter(s => !usedIds.has(s.id));   // 엑셀에 없던 기존 학교 → 유지
+    return { merged: merged.concat(leftovers), matched: usedIds.size, added: incoming.length - usedIds.size, kept: leftovers.length };
   };
 
   const doImport = () => {
@@ -2152,28 +2266,44 @@ function ExportImportPage({ db, setDb, saveNow }) {
             return ey===String(yr) && mo>=7 && mo<=12;
           });
           if (!carry.length) return;
-          const keyOf = s => `${(s.school||"").trim()}|${(s.no||"").toString().trim()}`;
-          const destByKey = new Map((next[yr]["하반기"]||[]).map(d => [keyOf(d), d]));
+          /* No는 반기마다 새로 매겨지므로 학교명(표기 차이 무시)으로 대조해야 이월본과 실제 데이터가 안 겹친다 */
+          const nameOf = normSchool;
+          let dest = dedupeBucket(next[yr]["하반기"] || []);
+          const realNames    = new Set(dest.filter(d=>!d.carried).map(nameOf));
+          const carriedByName = new Map(dest.filter(d=>d.carried).map(d=>[nameOf(d), d]));
           let n = 0, ci = 0;
           carry.forEach(s => {
-            const k = keyOf(s);
-            const existing = destByKey.get(k);
+            const nm = nameOf(s);
+            if (realNames.has(nm)) return;                    // 하반기에 실제 데이터가 있으면 이월하지 않음
             const fresh = {
               ...s,
               carried: true,
               progress: {},                                                                   // 진행단계 초기화
               buildings: (s.buildings||[]).map(b=>({ ...b, rep:false, fmsD:false, delivery:null })),  // 보고서·FMS·납품 미완으로
             };
-            if (existing) {
-              if (existing.carried) { destByKey.set(k, { ...fresh, id: existing.id }); n++; }   // 기존 이월본 → 초기화 갱신(id 유지)
-              /* 실제 하반기 데이터(이월 아님)는 건드리지 않음 */
-            } else {
-              destByKey.set(k, { ...fresh, id: `carry-${Date.now().toString(36)}-${(ci++).toString(36)}-${Math.random().toString(36).slice(2,6)}` }); n++;
+            const prev = carriedByName.get(nm);
+            if (prev) { carriedByName.set(nm, { ...fresh, id: prev.id, assignees: prev.assignees || fresh.assignees }); n++; }   // 기존 이월본 갱신(id·인원 유지)
+            else {
+              const add = { ...fresh, id: `carry-${Date.now().toString(36)}-${(ci++).toString(36)}-${Math.random().toString(36).slice(2,6)}` };
+              carriedByName.set(nm, add); n++;
             }
           });
-          if (n) { next[yr]["하반기"] = Array.from(destByKey.values()); carryReport.push({ yr, n }); }
+          if (n) {
+            next[yr]["하반기"] = dest.filter(d=>!d.carried).concat(Array.from(carriedByName.values()));
+            carryReport.push({ yr, n });
+          } else if (dest.length !== (next[yr]["하반기"]||[]).length) {
+            next[yr]["하반기"] = dest;                        // 중복 이월본만 정리된 경우
+          }
         });
       }
+
+      /* 가져온 결과 전체를 자동 중복 정리 (같은 현장이 두 번 올라가지 않게) */
+      const beforeCnt = countSchools(next);
+      Object.keys(next).forEach(yr => {
+        next[yr] = { ...next[yr] };
+        Object.keys(next[yr]||{}).forEach(hf => { next[yr][hf] = dedupeBucket(next[yr][hf] || []); });
+      });
+      const dedupRemoved = beforeCnt - countSchools(next);
 
       setDb(next);                                  // 화면 반영
       parsed.sheets.forEach(sh => logAction("수정", `엑셀 병합 · ${sh.year} ${sh.half}`, null, `${sh.count}개 학교 / ${sh.bCount}개 동${sh.budHit?` / 예산 ${sh.budHit}건`:""}${sh.noteHit?` / 특이사항 ${sh.noteHit}건`:""}`));
@@ -2181,7 +2311,7 @@ function ExportImportPage({ db, setDb, saveNow }) {
       setCarryInfo(carryReport.length ? carryReport : null);
 
       /* 자동 effect에 의존하지 않고, 여기서 직접 서버에 저장하고 결과 확인 */
-      const finish = (ok, err) => { setImporting(false); setDone(true); setParsed(null); setSaveResult({ ok, err, total:countSchools(next) }); };
+      const finish = (ok, err) => { setImporting(false); setDone(true); setParsed(null); setSaveResult({ ok, err, total:countSchools(next), dedup:dedupRemoved }); };
       if (saveNow) {
         Promise.resolve(saveNow(next)).then(()=>finish(true)).catch(e=>finish(false,(e&&e.message)||String(e)));
       } else { finish(true); }
@@ -2323,6 +2453,11 @@ function ExportImportPage({ db, setDb, saveNow }) {
               {saveResult&&!saveResult.ok && (
                 <div style={{ display:"inline-block",fontSize:11,color:C.red,background:C.surface,border:`1px solid ${C.red}40`,borderRadius:8,padding:"8px 12px",marginBottom:14,maxWidth:"90%",wordBreak:"break-all" }}>
                   ❌ {saveResult.err}
+                </div>
+              )}
+              {saveResult && saveResult.dedup>0 && (
+                <div style={{ display:"block",fontSize:11,color:C.blue,background:C.blueL,border:`1px solid ${C.blue}40`,borderRadius:8,padding:"8px 12px",marginBottom:10,maxWidth:"90%",marginLeft:"auto",marginRight:"auto" }}>
+                  🧹 중복 현장 {saveResult.dedup}건 자동 정리 (같은 학교가 두 번 올라가지 않게 합쳤어요)
                 </div>
               )}
               {carryInfo && (
@@ -2590,7 +2725,7 @@ function diffDb(prev, next) {
 /* ══════════════════════════════════════════════════════════════
    설정 / 관리자 모드 (팀·인원 관리 + 수정 로그)
 ══════════════════════════════════════════════════════════════ */
-function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db, setDb, online, fbStatus, lastSync, meta, users }) {
+function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db, setDb, saveNow, online, fbStatus, lastSync, meta, users }) {
   const [admin, setAdmin] = useState(false);
   const [pw, setPw] = useState("");
   const [pwErr, setPwErr] = useState("");
@@ -3217,7 +3352,8 @@ function App() {
         /* Firebase value 이벤트는 항상 전체 상태 → 그대로 반영(추가·수정·삭제 모두 정확).
            lastSynced를 원격값으로 갱신 → 저장 effect의 diff가 비어 에코 재저장이 안 됨(플래그 불필요). */
         lastSynced.current = val;
-        setDb(val);
+        /* 서버에 이미 쌓여 있던 중복도 불러오는 즉시 정리 → 저장 effect가 서버에서도 지움 */
+        setDb(dedupeDb(val));
       }
       else {
         /* Firebase가 비었을 때: 최초 1회만 시드. 로컬에 데이터가 있으면 올리고,
@@ -3400,7 +3536,7 @@ function App() {
       </div>
     ),
     export: <ExportImportPage db={db} setDb={setDb} saveNow={saveNow}/>,
-    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb} online={online} fbStatus={fbStatus} lastSync={lastSync} meta={meta} users={users}/>,
+    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb} saveNow={saveNow} online={online} fbStatus={fbStatus} lastSync={lastSync} meta={meta} users={users}/>,
   };
 
   /* 인증 게이트 */
