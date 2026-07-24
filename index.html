@@ -295,6 +295,39 @@ const routeLinks = (site, pos) => {
 };
 const openRoute = (url) => { try { window.open(url, "_blank"); } catch { window.location.href = url; } };
 
+/* 현장별 마지막 수정 기록 — 여러 명이 같이 쓸 때 누가 언제 뭘 바꿨는지 바로 알 수 있게
+   (관리자 로그와 별개로, 현장 데이터에 같이 저장해 목록에서 작게 보여준다) */
+const stampEdit = (s, what) => ({
+  ...s,
+  lastEdit: { by: (typeof CURRENT_USER!=="undefined" && (CURRENT_USER.name || CURRENT_USER.email)) || "알수없음",
+              at: Date.now(), what: String(what||"수정").slice(0,40) },
+});
+/* 방금 / 12분 전 / 3시간 전 / 어제 / 7월 24일 */
+const agoText = (ts) => {
+  if (!ts) return "";
+  const d = Date.now() - ts;
+  if (d < 60*1000) return "방금";
+  if (d < 60*60*1000) return `${Math.floor(d/60000)}분 전`;
+  if (d < 24*60*60*1000) return `${Math.floor(d/3600000)}시간 전`;
+  if (d < 48*60*60*1000) return "어제";
+  const t = new Date(ts);
+  return `${t.getMonth()+1}월 ${t.getDate()}일`;
+};
+
+/* 마지막 수정 표시 — 작고 흐리게, 필요할 때만 눈에 들어오게 */
+function LastEdit({ s, size = 9 }) {
+  const le = s && s.lastEdit;
+  if (!le || !le.at) return null;
+  const fresh = Date.now() - le.at < 6*60*60*1000;   // 6시간 이내면 살짝 강조
+  const t = new Date(le.at);
+  const full = `${t.getFullYear()}. ${t.getMonth()+1}. ${t.getDate()}. ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")} · ${le.by} · ${le.what||"수정"}`;
+  return (
+    <span title={full} style={{ fontSize:size, color:fresh?C.blue:C.t4, fontWeight:fresh?600:500, whiteSpace:"nowrap" }}>
+      🕘 {le.by} · {agoText(le.at)}{le.what?` · ${le.what}`:""}
+    </span>
+  );
+}
+
 const STEPS = ["착수계","현장조사","기타자료","보고서","검토","제본","납품","완수"];
 const STEP_ICON = { 착수계:"📝", 현장조사:"📍", 기타자료:"📎", 보고서:"📄", 검토:"🔍", 제본:"📚", 납품:"📦", 완수:"🏁" };
 const STEP_SPECIAL = { 검토:true, 제본:true };   // 별도 강조
@@ -1197,7 +1230,7 @@ function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
         if (s.id!==sid) return s;
         const cur = s.assignees||[];
         const upd = cur.includes(name) ? cur.filter(n=>n!==name) : [...cur,name];
-        return {...s, assignees:upd, headcount:upd.length||s.headcount||1};
+        return stampEdit({...s, assignees:upd, headcount:upd.length||s.headcount||1}, had?`${name} 제외`:`${name} 배정`);
       });
       return next;
     });
@@ -1231,6 +1264,10 @@ function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
         border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
     </div>
   );
+
+  const EditLine = ({ s }) => s && s.lastEdit ? (
+    <div style={{ marginTop:5,marginBottom:2 }}><LastEdit s={s} size={9}/></div>
+  ) : null;
 
   const FieldCard = ({ s }) => {
     const assignees = s.assignees||[];
@@ -1280,6 +1317,8 @@ function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
           )}
         </div>
 
+        <EditLine s={s}/>
+
         {/* 동 목록 */}
         <div style={{ display:"flex",flexWrap:"wrap",gap:3,marginTop:7 }}>
           {s.buildings.map((b,i)=>(
@@ -1305,6 +1344,7 @@ function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
       <div style={{ fontSize:10,color:C.t2 }}>
         ▶ 용역 착수 · {s.buildings.length}동 · 완수 {fd(s.end)} ({ddL(calcDday(s.end))})
       </div>
+      <EditLine s={s}/>
     </div>
   );
 
@@ -1315,6 +1355,7 @@ function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
       <div style={{ fontSize:10,color:C.t2 }}>
         🏁 완수 예정 · {s.buildings.length}동{(s.assignees||[]).length?` · ${s.assignees.join("·")}`:""}
       </div>
+      <EditLine s={s}/>
     </div>
   );
 
@@ -1463,7 +1504,8 @@ function Calendar({ allSchools, setDb, isMobile }) {
       setDb(prev => {
         const next = {...prev};
         next[sc._year] = {...prev[sc._year]};
-        next[sc._year][sc._half] = prev[sc._year][sc._half].map(s => s.id!==schoolId ? s : {...s,[field]:nd});
+        const lb = field==="field"?"현장조사일":field==="start"?"착수일":"완수일";
+        next[sc._year][sc._half] = prev[sc._year][sc._half].map(s => s.id!==schoolId ? s : stampEdit({...s,[field]:nd}, `${lb} 변경`));
         return next;
       });
     }
@@ -1640,13 +1682,13 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
       next[yr] = {...prev[yr]};
       next[yr][half] = prev[yr][half].map(s => {
         if (s.id!==sc.id) return s;
-        return { ...s, school:f.school||s.school, no:f.no, region:f.region, kind:f.kind, field:f.field, start:f.start, end:f.end, tel:(f.tel||"").trim(),
+        return stampEdit({ ...s, school:f.school||s.school, no:f.no, region:f.region, kind:f.kind, field:f.field, start:f.start, end:f.end, tel:(f.tel||"").trim(),
           flags:[...(f.flags||[])],
           assignees:f.assignees, headcount:f.assignees.length||s.headcount, progress:{...prog},
           buildings: bf.map((b)=>({ b:b.b||"동", floor:b.floor||null,
             area:b.area?parseFloat(b.area):null, fms:b.fms||null, note:b.note||null,
             rep:b.rep, fmsD:b.fmsD, delivery:b.delivery||null,
-            height:b.height??null, len:b.len??null, jong:b.jong??null, budget:b.budget??null })) };
+            height:b.height??null, len:b.len??null, jong:b.jong??null, budget:b.budget??null })) }, "현장 정보 수정");
       });
       return next;
     });
@@ -2007,7 +2049,7 @@ function SitesManager({ db, setDb, isMobile }) {
     const sc = schools.find(s=>s.id===sid);
     const lbl = field==="field"?"현장조사일":field==="start"?"착수일":"완수일";
     setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
-      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,[field]:v}); return n; });
+      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:stampEdit({...s,[field]:v}, `${lbl} 변경`)); return n; });
     logAction("수정", `${sc?.school} · ${lbl}`, sc?.[field]||"-", v||"-");
     showToast("날짜 변경됨 · 캘린더 자동 반영");
   };
@@ -2015,13 +2057,13 @@ function SitesManager({ db, setDb, isMobile }) {
     const sc = schools.find(s=>s.id===sid); const b = sc?.buildings[bi];
     const fl = field==="rep"?"보고서":field==="fmsD"?"FMS등록":field;
     setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
-      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,buildings:s.buildings.map((x,j)=>j!==bi?x:{...x,[field]:!x[field]})}); return n; });
+      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:stampEdit({...s,buildings:s.buildings.map((x,j)=>j!==bi?x:{...x,[field]:!x[field]})}, `${b?.b||""} ${fl}`)); return n; });
     logAction("수정", `${sc?.school} · ${b?.b||""} ${fl}`, b?.[field]?"완료":"미완료", b?.[field]?"미완료":"완료");
   };
   const setDel = (sid,bi,v) => {
     const sc = schools.find(s=>s.id===sid); const b = sc?.buildings[bi];
     setDb(prev=>{ const n={...prev}; n[yr]={...prev[yr]};
-      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:{...s,buildings:s.buildings.map((x,j)=>j!==bi?x:{...x,delivery:x.delivery===v?null:v})}); return n; });
+      n[yr][half]=prev[yr][half].map(s=>s.id!==sid?s:stampEdit({...s,buildings:s.buildings.map((x,j)=>j!==bi?x:{...x,delivery:x.delivery===v?null:v})}, `${b?.b||""} 납품`)); return n; });
     logAction("수정", `${sc?.school} · ${b?.b||""} 납품`, b?.delivery||"-", b?.delivery===v?"-":v);
   };
 
@@ -2190,6 +2232,7 @@ function SitesManager({ db, setDb, isMobile }) {
                 {(s.assignees||[]).length>0 && (
                   <div style={{ fontSize:11,color:C.t2,marginTop:5,paddingLeft:19 }}>👤 {s.assignees.join(" · ")}</div>
                 )}
+                {s.lastEdit && <div style={{ marginTop:4,paddingLeft:19 }}><LastEdit s={s} size={10}/></div>}
 
                 {/* 날짜 — 넓게 두 칸 */}
                 {/* 날짜 — 아이폰 날짜칸이 칸 밖으로 넘치지 않게 minWidth:0 + box-sizing 지정 */}
@@ -2285,6 +2328,7 @@ function SitesManager({ db, setDb, isMobile }) {
                       );
                       return <>{chip("착수계",!!pg["착수계"],C.blue)}{chip("검토",!!pg["검토"],C.purple)}{chip("제본",!!pg["제본"],C.purple)}{chip("완수",!!pg["완수"],C.green)}</>;
                     })()}
+                    <LastEdit s={s}/>
                   </div>
                 </div>
                 <div onClick={e=>e.stopPropagation()} style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
@@ -3843,7 +3887,8 @@ function MapPage({ db, setDb, allSchools, kakaoKey, isMobile }) {
                 {picked.end && ` · 완수 ${fd(picked.end)} (${ddL(calcDday(picked.end))})`}
               </span>
             </div>
-            {(picked.assignees||[]).length>0 && <div style={{ fontSize:12,color:C.t3,marginBottom:8 }}>👤 {picked.assignees.join(", ")}</div>}
+            {(picked.assignees||[]).length>0 && <div style={{ fontSize:12,color:C.t3,marginBottom:6 }}>👤 {picked.assignees.join(", ")}</div>}
+            {picked.lastEdit && <div style={{ marginBottom:8 }}><LastEdit s={picked} size={10}/></div>}
 
             {/* 위치 지정 도구 */}
             <div style={{ marginTop:8,padding:"10px 12px",borderRadius:9,
