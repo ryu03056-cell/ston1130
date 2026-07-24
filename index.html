@@ -278,6 +278,23 @@ const siteTel = (s) => {
   return "";
 };
 
+/* 길찾기 — 좌표가 있으면 목적지로 바로, 없으면 이름으로 검색해서 열어준다 */
+const routeLinks = (site, pos) => {
+  const nm = encodeURIComponent((site && site.school) || "현장");
+  if (pos && pos.lat && pos.lng) {
+    return {
+      exact: true,
+      kakao: `https://map.kakao.com/link/to/${nm},${pos.lat},${pos.lng}`,
+      tmap:  `tmap://route?goalname=${nm}&goalx=${pos.lng}&goaly=${pos.lat}`,
+      apple: `https://maps.apple.com/?daddr=${pos.lat},${pos.lng}&dirflg=d`,
+      naver: `nmap://route/car?dlat=${pos.lat}&dlng=${pos.lng}&dname=${nm}&appname=ston.app`,
+    };
+  }
+  const q = encodeURIComponent(`${(site&&site.school)||""} ${(site&&site.region)||""}`.trim());
+  return { exact: false, kakao: `https://map.kakao.com/link/search/${q}` };
+};
+const openRoute = (url) => { try { window.open(url, "_blank"); } catch { window.location.href = url; } };
+
 const STEPS = ["착수계","현장조사","기타자료","보고서","검토","제본","납품","완수"];
 const STEP_ICON = { 착수계:"📝", 현장조사:"📍", 기타자료:"📎", 보고서:"📄", 검토:"🔍", 제본:"📚", 납품:"📦", 완수:"🏁" };
 const STEP_SPECIAL = { 검토:true, 제본:true };   // 별도 강조
@@ -1207,6 +1224,9 @@ function DayPanel({ dateStr, label, allSchools, setDb, onClose, isMobile }) {
       {getFlags(s).map(fv=>{ const o=FLAG_OPTS.find(x=>x.v===fv); return o? <span key={fv} style={{ fontSize:9,fontWeight:700,color:o.color }}>{o.label}</span> : null; })}
       <span style={{ fontSize:9,color:C.t3 }}>{s.region}</span>
       <TelBtn tel={siteTel(s)}/>
+      <button onClick={(e)=>{ e.stopPropagation(); openRoute(routeLinks(s, null).kakao); }} title="카카오맵으로 길찾기"
+        style={{ padding:"3px 10px",borderRadius:5,fontSize:10,fontWeight:800,
+          border:`1px solid ${C.purple}45`,background:C.purpleL,color:C.purple,cursor:"pointer",whiteSpace:"nowrap" }}>🧭 길찾기</button>
       <button onClick={()=>setEditId(s.id)} style={{ padding:"3px 10px",borderRadius:5,fontSize:10,fontWeight:700,
         border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
     </div>
@@ -2151,6 +2171,9 @@ function SitesManager({ db, setDb, isMobile }) {
                   <span style={{ fontWeight:800,fontSize:15,color:C.t1,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
                   {urgent && <Tag bg={C.redL} color={C.red} border={`1px solid ${C.red}30`}>⚡</Tag>}
                   {s.carried && <Tag bg={C.orange+"18"} color={C.orange} border={`1px solid ${C.orange}40`}>🍂</Tag>}
+                  <button onClick={e=>{e.stopPropagation(); openRoute(routeLinks(s,null).kakao);}} title="길찾기"
+                    style={{ padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:800,background:C.purpleL,
+                      border:`1px solid ${C.purple}45`,color:C.purple,cursor:"pointer",flexShrink:0 }}>🧭</button>
                   <button onClick={e=>{e.stopPropagation();setEditId(s.id);}}
                     style={{ padding:"5px 11px",borderRadius:6,fontSize:11,fontWeight:700,background:C.blueL,
                       border:`1px solid ${C.blue}40`,color:C.blue,cursor:"pointer",flexShrink:0 }}>✏ 수정</button>
@@ -3785,6 +3808,31 @@ function MapPage({ db, setDb, allSchools, kakaoKey, isMobile }) {
               <button onClick={()=>setEditId(picked.id)} style={{ padding:"6px 13px",borderRadius:7,fontSize:13,fontWeight:700,
                 border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer",whiteSpace:"nowrap" }}>✏ 수정</button>
             </div>
+
+            {/* 길찾기 — 지도 앱을 열어 이 현장까지 안내 시작 */}
+            {(() => {
+              const rl = routeLinks(picked, posOf(picked));
+              return (
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:8 }}>
+                  <span style={{ fontSize:11,fontWeight:800,color:C.t2 }}>🧭 길찾기</span>
+                  <button onClick={()=>openRoute(rl.kakao)}
+                    style={{ padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",
+                      border:`1px solid ${C.purple}45`,background:C.purpleL,color:C.purple }}>카카오맵</button>
+                  {rl.exact && <>
+                    <button onClick={()=>openRoute(rl.tmap)}
+                      style={{ padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",
+                        border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue }}>티맵</button>
+                    <button onClick={()=>openRoute(rl.naver)}
+                      style={{ padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",
+                        border:`1px solid ${C.green}45`,background:C.greenL,color:C.green }}>네이버</button>
+                    <button onClick={()=>openRoute(rl.apple)}
+                      style={{ padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",
+                        border:`1px solid ${C.border}`,background:C.surfaceL,color:C.t2 }}>애플지도</button>
+                  </>}
+                  {!rl.exact && <span style={{ fontSize:10,color:C.orange }}>위치 미확정 — 이름으로 검색해서 열려요</span>}
+                </div>
+              );
+            })()}
             <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6 }}>
               {picked._manual ? <span style={{ fontSize:10,color:C.green,fontWeight:700 }}>🟢 직접 지정한 위치</span>
                 : picked._exact ? <span style={{ fontSize:10,color:C.blue,fontWeight:700 }}>🔵 찾은 위치</span>
