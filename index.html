@@ -1530,19 +1530,20 @@ function Calendar({ allSchools, setDb, isMobile }) {
     moveLock.current = now;
     if (dir > 0) nextMonth(); else prevMonth();
   };
+  /* 좌우로만 반응 — 위아래는 페이지 스크롤 그대로 두기 위해 건드리지 않음 */
   const onCalWheel = (e) => {
-    if (Math.abs(e.deltaY) < 2) return;
+    if (Math.abs(e.deltaX) < 2 || Math.abs(e.deltaX) < Math.abs(e.deltaY)) return;
     e.preventDefault();
-    wheelAcc.current += e.deltaY;
+    wheelAcc.current += e.deltaX;
     if (Math.abs(wheelAcc.current) >= 60) { shiftMonth(wheelAcc.current > 0 ? 1 : -1); wheelAcc.current = 0; }
   };
   const onCalTouchStart = (e) => { swipeStart.current = { y:e.touches[0].clientY, x:e.touches[0].clientX, moved:false }; };
   const onCalTouchMove  = (e) => {
     const st = swipeStart.current; if (!st || st.moved) return;
     const dy = e.touches[0].clientY - st.y, dx = e.touches[0].clientX - st.x;
-    if (Math.abs(dy) > 46 && Math.abs(dy) > Math.abs(dx)) {
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) {
       st.moved = true;
-      shiftMonth(dy < 0 ? 1 : -1);                 // 위로 밀면(내리면) 다음 달
+      shiftMonth(dx < 0 ? 1 : -1);                 // 왼쪽으로 밀면 다음 달
     }
   };
   const onCalTouchEnd = () => { swipeStart.current = null; };
@@ -1638,7 +1639,7 @@ function Calendar({ allSchools, setDb, isMobile }) {
 
           <div onWheel={onCalWheel} onTouchStart={onCalTouchStart} onTouchMove={onCalTouchMove} onTouchEnd={onCalTouchEnd}
             style={{ background:C.surface,border:BD,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,.06)",
-              touchAction:"pan-x",overscrollBehavior:"contain" }}>
+              touchAction:"pan-y" }}>
             <table style={{ width:"100%",borderCollapse:"collapse",tableLayout:"fixed" }}>
               <colgroup>{[0,1,2,3,4,5,6].map(i=><col key={i}/>)}</colgroup>
               <thead>
@@ -1710,7 +1711,7 @@ function Calendar({ allSchools, setDb, isMobile }) {
                 <div style={{ width:10,height:10,borderRadius:2,background:v }}/><span style={{ fontSize:10,color:C.t3 }}>{k}</span>
               </div>
             ))}
-            <span style={{ fontSize:10,color:C.t4 }}>날짜를 누르면 그날 현장이 열려요 · 달력에서 위아래로 밀면 달이 넘어갑니다</span>
+            <span style={{ fontSize:10,color:C.t4 }}>날짜를 누르면 그날 현장이 열려요 · 달력을 좌우로 밀면 달이 넘어갑니다</span>
           </div>
         </div>
 
@@ -1781,13 +1782,17 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
   };
 
   /* 삭제는 두 단계 — 버튼을 눌러도 바로 지워지지 않고 확인 창을 한 번 더 거친다 */
+  /* 실제로 지우지 않고 휴지통으로 — 설정 → 휴지통에서 되살릴 수 있음 */
   const doDelete = () => {
     setDb(prev => {
       const next = {...prev}; next[yr] = {...prev[yr]};
-      next[yr][half] = (prev[yr]?.[half] || []).filter(s => s.id !== sc.id);
+      next[yr][half] = (prev[yr]?.[half] || []).map(s => s.id !== sc.id ? s : ({
+        ...s, deleted:true, deletedAt:Date.now(),
+        deletedBy:(typeof CURRENT_USER!=="undefined" && (CURRENT_USER.name||CURRENT_USER.email))||"알수없음",
+      }));
       return next;
     });
-    logAction("삭제", `현장 · ${sc.school}`, sc.school, null);
+    logAction("삭제", `현장 · ${sc.school}`, sc.school, "휴지통으로 이동");
     setConfirmDel(false);
     onClose();
   };
@@ -1957,8 +1962,8 @@ function EditPanel({ sc, yr, half, setDb, onClose }) {
             <div style={{ fontSize:17,fontWeight:900,color:C.t1,marginBottom:8 }}>진짜로 삭제하시겠습니까?</div>
             <div style={{ fontSize:13,fontWeight:800,color:C.red,marginBottom:6,wordBreak:"break-all" }}>{sc.school}</div>
             <div style={{ fontSize:12,color:C.t3,lineHeight:1.7,marginBottom:18 }}>
-              이 현장의 <b>{(sc.buildings||[]).length}개 동</b>과 일정·진행상황이 모두 사라집니다.<br/>
-              <b style={{ color:C.red }}>되돌릴 수 없습니다.</b>
+              이 현장의 <b>{(sc.buildings||[]).length}개 동</b>과 일정·진행상황이 목록에서 사라집니다.<br/>
+              <b style={{ color:C.green }}>설정 → 휴지통에서 되살릴 수 있어요.</b>
             </div>
             <div style={{ display:"flex",gap:8 }}>
               <button onClick={()=>setConfirmDel(false)}
@@ -2154,7 +2159,7 @@ function SitesManager({ db, setDb, isMobile }) {
     showToast("새 현장 추가됨 · 내용을 입력하세요");
   };
 
-  const schools = useMemo(()=>db[yr]?.[half]||[], [db,yr,half]);
+  const schools = useMemo(()=>(db[yr]?.[half]||[]).filter(s=>!s.deleted), [db,yr,half]);
 
   const updDate = (sid,field,v) => {
     const sc = schools.find(s=>s.id===sid);
@@ -2656,6 +2661,8 @@ function ExportImportPage({ db, setDb, saveNow }) {
   const doImport = () => {
     if (!parsed) return;
     setImporting(true);
+    /* 가져오기 전 상태를 통째로 백업 — 잘못 올려도 되돌릴 수 있게 */
+    makeSnapshot(db, "엑셀 가져오기 전").catch(()=>{});
     setTimeout(() => {
       let carryReport = [];
       /* 현재 db 기준으로 최종 결과(next) 계산 */
@@ -2945,6 +2952,9 @@ const FB_LOGS     = "ston/logs";      // 수정 로그
 const FB_CONFIG   = "ston/config";    // 팀/인원 설정 (관리자 편집)
 const FB_CHAT     = "ston/chat";      // 팀 채팅
 const FB_GEO      = "ston/geo";       // 현장 좌표 캐시 (한 번 찾으면 재사용)
+const FB_BK_IDX   = "ston/backup_index";  // 백업 목록(가벼움 — 목록만 읽을 때 사용)
+const FB_BK_DAT   = "ston/backup_data";   // 백업 본문(무거움 — 복원할 때만 읽음)
+const FB_UNDO     = "ston/undo";          // 최근 변경 되돌리기용 기록
 
 /* 푸시 알림 — OneSignal (Cloudflare Worker 경유, 본인 제외 전송) */
 function registerOneSignal(userName) {
@@ -2973,6 +2983,65 @@ const ADMIN_PW = "961211";
 let CURRENT_USER = { uid:null, email:null, name:"" };
 
 /* 수정 로그 한 건 기록 */
+/* ══════════════════════════════════════════════════════════════
+   안전장치 — 스냅샷(전체 백업) / 되돌리기 기록
+   ══════════════════════════════════════════════════════════════ */
+const BK_KEEP = 30;                      // 백업 보관 개수
+
+/* 반기별 건수 요약 — 목록에서 "뭐가 들어있는 백업인지" 보여주기 위함 */
+function bucketCounts(db) {
+  const out = {};
+  Object.entries(db||{}).forEach(([y,hs]) => Object.entries(hs||{}).forEach(([h,arr]) => {
+    out[`${y} ${h}`] = (arr||[]).length;
+  }));
+  return out;
+}
+
+/* 전체 데이터를 통째로 복사해 둔다. reason 예: "엑셀 가져오기 전", "자동(하루 1회)" */
+async function makeSnapshot(db, reason) {
+  if (typeof firebase === "undefined" || !firebase.apps.length) throw new Error("Firebase 미연결");
+  const id = String(Date.now());
+  const meta = {
+    at: Date.now(),
+    by: (typeof CURRENT_USER!=="undefined" && (CURRENT_USER.name || CURRENT_USER.email)) || "알수없음",
+    reason: String(reason||"수동 백업").slice(0,40),
+    cnt: countSchools(db),
+    buckets: bucketCounts(db),
+  };
+  await firebase.database().ref(`${FB_BK_DAT}/${id}`).set(stripUndefined(dbToFb(db)));
+  await firebase.database().ref(`${FB_BK_IDX}/${id}`).set(meta);
+  /* 오래된 백업 정리 */
+  try {
+    const snap = await firebase.database().ref(FB_BK_IDX).once("value");
+    const ids = Object.keys(snap.val()||{}).sort((a,b)=>Number(b)-Number(a));
+    for (const old of ids.slice(BK_KEEP)) {
+      firebase.database().ref(`${FB_BK_DAT}/${old}`).remove().catch(()=>{});
+      firebase.database().ref(`${FB_BK_IDX}/${old}`).remove().catch(()=>{});
+    }
+  } catch {}
+  return { id, ...meta };
+}
+
+/* 변경 하나하나를 되돌릴 수 있게 기록. 대량 변경(가져오기 등)은 스냅샷이 담당하므로 제외 */
+const UNDO_KEEP = 60;
+function pushUndo(entries) {
+  if (!entries.length || entries.length > 20) return;
+  try {
+    const ref = firebase.database().ref(FB_UNDO);
+    const by = (typeof CURRENT_USER!=="undefined" && (CURRENT_USER.name || CURRENT_USER.email)) || "알수없음";
+    entries.forEach(e => ref.push({ at:Date.now(), by, path:e.path,
+      before: e.before==null ? null : stripUndefined(e.before),
+      after:  e.after==null  ? null : stripUndefined(e.after),
+      label: e.label || "" }).catch(()=>{}));
+    /* 오래된 기록 정리 */
+    ref.once("value").then(sn => {
+      const v = sn.val()||{};
+      const keys = Object.keys(v).sort((a,b)=>(v[a].at||0)-(v[b].at||0));
+      keys.slice(0, Math.max(0, keys.length - UNDO_KEEP)).forEach(k => ref.child(k).remove().catch(()=>{}));
+    }).catch(()=>{});
+  } catch {}
+}
+
 function logAction(action, target, before, after) {
   try {
     if (typeof firebase === "undefined" || !firebase.apps.length) return;
@@ -3136,7 +3205,329 @@ function diffDb(prev, next) {
 /* ══════════════════════════════════════════════════════════════
    설정 / 관리자 모드 (팀·인원 관리 + 수정 로그)
 ══════════════════════════════════════════════════════════════ */
-function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db, setDb, saveNow, kakaoKey, online, fbStatus, lastSync, meta, users }) {
+/* ══════════════════════════════════════════════════════════════
+   안전장치 화면 — 백업/복원 · 휴지통 · 최근 변경 되돌리기 · 파일 보관
+   ══════════════════════════════════════════════════════════════ */
+function SafetyPanel({ db, setDb, saveNow, isMobile }) {
+  const [tab, setTab] = useState("backup");
+  const [list, setList] = useState(null);      // 백업 목록
+  const [undo, setUndo] = useState([]);        // 되돌리기 기록
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [confirmRestore, setConfirmRestore] = useState(null);
+  const fileRef = useRef();
+
+  const say = (t, ms=2600) => { setMsg(t); setTimeout(()=>setMsg(null), ms); };
+
+  useEffect(() => {
+    try {
+      const r = firebase.database().ref(FB_BK_IDX);
+      const cb = r.on("value", sn => {
+        const v = sn.val()||{};
+        setList(Object.entries(v).map(([id,m])=>({ id, ...m })).sort((a,b)=>Number(b.id)-Number(a.id)));
+      });
+      const r2 = firebase.database().ref(FB_UNDO);
+      const cb2 = r2.on("value", sn => {
+        const v = sn.val()||{};
+        setUndo(Object.entries(v).map(([k,e])=>({ key:k, ...e })).sort((a,b)=>(b.at||0)-(a.at||0)).slice(0,50));
+      });
+      return () => { try{ r.off("value",cb); r2.off("value",cb2); }catch{} };
+    } catch { return undefined; }
+  }, []);
+
+  /* 휴지통 */
+  const trash = useMemo(() => {
+    const out = [];
+    Object.entries(db||{}).forEach(([y,hs]) => Object.entries(hs||{}).forEach(([h,arr]) =>
+      (arr||[]).forEach(s => { if (s.deleted) out.push({ ...s, _year:y, _half:h }); })));
+    return out.sort((a,b)=>(b.deletedAt||0)-(a.deletedAt||0));
+  }, [db]);
+
+  const restoreSite = (s) => {
+    setDb(prev => {
+      const next = {...prev}; next[s._year] = {...prev[s._year]};
+      next[s._year][s._half] = (prev[s._year][s._half]||[]).map(x => x.id!==s.id ? x
+        : ({ ...x, deleted:false, deletedAt:null, deletedBy:null }));
+      return next;
+    });
+    logAction("수정", `현장 복원 · ${s.school}`, "휴지통", "복원");
+    say(`${s.school} 되살렸어요.`);
+  };
+  const purgeSite = (s) => {
+    if (!window.confirm(`'${s.school}'을(를) 완전히 지웁니다.\n이건 되살릴 수 없어요. 계속할까요?`)) return;
+    setDb(prev => {
+      const next = {...prev}; next[s._year] = {...prev[s._year]};
+      next[s._year][s._half] = (prev[s._year][s._half]||[]).filter(x => x.id!==s.id);
+      return next;
+    });
+    logAction("삭제", `완전 삭제 · ${s.school}`, s.school, null);
+    say(`${s.school} 완전히 삭제했어요.`);
+  };
+
+  /* 백업 만들기 */
+  const doBackup = async () => {
+    setBusy("backup");
+    try { const r = await makeSnapshot(db, "수동 백업"); say(`백업 완료 — ${r.cnt}개 현장`); }
+    catch(e){ say("백업 실패: " + ((e&&e.message)||e), 5000); }
+    setBusy("");
+  };
+
+  /* 복원 — 미리보기 후 확인 */
+  const openRestore = async (m) => {
+    setBusy("load-"+m.id);
+    try {
+      const sn = await firebase.database().ref(`${FB_BK_DAT}/${m.id}`).once("value");
+      const data = fbToDb(sn.val());
+      if (!data || !countSchools(data)) { say("이 백업에 데이터가 없어요.", 4000); setBusy(""); return; }
+      setConfirmRestore({ meta:m, data });
+    } catch(e){ say("백업을 읽지 못했어요: " + ((e&&e.message)||e), 5000); }
+    setBusy("");
+  };
+  const doRestore = async () => {
+    const { meta, data } = confirmRestore;
+    setBusy("restore");
+    try {
+      await makeSnapshot(db, "복원 직전");            // 복원 자체도 되돌릴 수 있게
+      await firebase.database().ref(FB_DATA).set(stripUndefined(dbToFb(data)));
+      setDb(data);
+      logAction("수정", "전체 복원", `${countSchools(db)}개`, `${countSchools(data)}개`);
+      say(`복원 완료 — ${countSchools(data)}개 현장`);
+      setConfirmRestore(null);
+    } catch(e){ say("복원 실패: " + ((e&&e.message)||e), 6000); }
+    setBusy("");
+  };
+
+  /* 되돌리기 — 그 현장만 이전 상태로 */
+  const undoOne = async (e) => {
+    if (!e.path) return;
+    const [y,h,id] = String(e.path).split("/");
+    setDb(prev => {
+      const next = {...prev};
+      next[y] = { ...(prev[y]||{}) };
+      const arr = (prev[y] && prev[y][h]) || [];
+      if (e.before) {
+        next[y][h] = arr.some(x=>String(x.id)===id) ? arr.map(x=>String(x.id)===id ? e.before : x) : [...arr, e.before];
+      } else {
+        next[y][h] = arr.filter(x=>String(x.id)!==id);
+      }
+      return next;
+    });
+    logAction("수정", `되돌리기 · ${e.label||""}`, "변경 후", "변경 전");
+    say("되돌렸어요.");
+  };
+
+  /* 파일로 보관 / 파일에서 복원 */
+  const downloadJson = () => {
+    try {
+      const blob = new Blob([JSON.stringify({ savedAt:new Date().toISOString(), cnt:countSchools(db), data:db }, null, 1)], { type:"application/json" });
+      const a = document.createElement("a");
+      const t = new Date();
+      a.href = URL.createObjectURL(blob);
+      a.download = `STON_백업_${t.getFullYear()}${String(t.getMonth()+1).padStart(2,"0")}${String(t.getDate()).padStart(2,"0")}.json`;
+      a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 3000);
+      say("백업 파일을 내려받았어요. 회사 드라이브에 보관해 주세요.");
+    } catch(e){ say("내려받기 실패: " + ((e&&e.message)||e), 5000); }
+  };
+  const uploadJson = (file) => {
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = async () => {
+      try {
+        const parsed = JSON.parse(r.result);
+        const data = parsed && parsed.data ? parsed.data : parsed;
+        const n = countSchools(data);
+        if (!n) { say("이 파일에는 현장 데이터가 없어요.", 4000); return; }
+        if (!window.confirm(`파일에 있는 ${n}개 현장으로 전체를 되돌립니다.\n지금 데이터는 자동 백업된 뒤 교체됩니다. 계속할까요?`)) return;
+        await makeSnapshot(db, "파일 복원 직전");
+        await firebase.database().ref(FB_DATA).set(stripUndefined(dbToFb(data)));
+        setDb(data);
+        say(`파일에서 복원 완료 — ${n}개 현장`);
+      } catch(e){ say("파일을 읽지 못했어요: " + ((e&&e.message)||e), 5000); }
+    };
+    r.readAsText(file);
+  };
+
+  const TabBtn = ({ id, label, n }) => (
+    <button onClick={()=>setTab(id)} style={{ flex:1,padding:"9px 6px",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",
+      border:`1.5px solid ${tab===id?C.blue:C.border}`,background:tab===id?C.blueL:"transparent",color:tab===id?C.blue:C.t3,whiteSpace:"nowrap" }}>
+      {label}{n>0 && <span style={{ marginLeft:4,fontSize:10,color:C.t4 }}>{n}</span>}
+    </button>
+  );
+
+  return (
+    <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px",marginBottom:14 }}>
+      <div style={{ fontSize:13,fontWeight:800,color:C.t1,marginBottom:4 }}>🛡 안전장치 · 백업과 되돌리기</div>
+      <div style={{ fontSize:11,color:C.t3,lineHeight:1.7,marginBottom:12 }}>
+        엑셀 가져오기·전체 초기화 전과 <b>하루에 한 번</b> 자동으로 전체 백업이 만들어져요. 잘못돼도 여기서 되돌릴 수 있습니다.
+      </div>
+
+      <div style={{ display:"flex",gap:6,marginBottom:12 }}>
+        <TabBtn id="backup" label="📦 백업" n={(list||[]).length}/>
+        <TabBtn id="trash"  label="🗑 휴지통" n={trash.length}/>
+        <TabBtn id="undo"   label="↩ 최근 변경" n={undo.length}/>
+        <TabBtn id="file"   label="💾 파일"/>
+      </div>
+
+      {msg && <div style={{ fontSize:11,color:C.blue,background:C.blueL,border:`1px solid ${C.blue}25`,borderRadius:8,padding:"8px 11px",marginBottom:10 }}>{msg}</div>}
+
+      {tab==="backup" && (
+        <div>
+          <button onClick={doBackup} disabled={busy==="backup"}
+            style={{ width:"100%",padding:"11px 0",borderRadius:9,border:"none",marginBottom:10,
+              background:busy==="backup"?C.t4:C.blue,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer" }}>
+            {busy==="backup" ? "백업 중…" : "📦 지금 백업 만들기"}
+          </button>
+          {list===null && <div style={{ fontSize:12,color:C.t4,padding:"12px 0" }}>불러오는 중…</div>}
+          {list && list.length===0 && <div style={{ fontSize:12,color:C.t4,padding:"12px 0" }}>아직 백업이 없어요. 위 버튼으로 하나 만들어 두세요.</div>}
+          <div style={{ display:"flex",flexDirection:"column",gap:6,maxHeight:320,overflowY:"auto" }}>
+            {(list||[]).map(m=>{
+              const t = new Date(m.at||Number(m.id));
+              return (
+                <div key={m.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"10px 11px",background:C.surfaceL,border:BD,borderRadius:8 }}>
+                  <div style={{ flex:1,minWidth:0 }}>
+                    <div style={{ fontSize:12,fontWeight:700,color:C.t1 }}>
+                      {t.getFullYear()}. {t.getMonth()+1}. {t.getDate()}. {String(t.getHours()).padStart(2,"0")}:{String(t.getMinutes()).padStart(2,"0")}
+                      <span style={{ marginLeft:6,fontSize:10,color:C.t3,fontWeight:500 }}>{m.reason}</span>
+                    </div>
+                    <div style={{ fontSize:10,color:C.t4,marginTop:2 }}>{m.cnt}개 현장 · {m.by}</div>
+                  </div>
+                  <button onClick={()=>openRestore(m)} disabled={busy.startsWith("load")}
+                    style={{ padding:"7px 12px",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0,
+                      border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue }}>
+                    {busy==="load-"+m.id ? "여는 중…" : "복원"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab==="trash" && (
+        <div>
+          <div style={{ fontSize:11,color:C.t3,marginBottom:8 }}>삭제한 현장은 여기 남아 있어요. 되살리거나 완전히 지울 수 있습니다.</div>
+          {trash.length===0 && <div style={{ fontSize:12,color:C.t4,padding:"12px 0" }}>휴지통이 비어 있어요.</div>}
+          <div style={{ display:"flex",flexDirection:"column",gap:6,maxHeight:320,overflowY:"auto" }}>
+            {trash.map(s=>(
+              <div key={`${s._year}-${s._half}-${s.id}`} style={{ display:"flex",alignItems:"center",gap:8,padding:"10px 11px",background:C.surfaceL,border:BD,borderRadius:8 }}>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:C.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</div>
+                  <div style={{ fontSize:10,color:C.t4,marginTop:2 }}>
+                    {isLH(s._year)?"LH":`${s._year} ${s._half}`} · {(s.buildings||[]).length}동
+                    {s.deletedAt && ` · ${agoText(s.deletedAt)} ${s.deletedBy||""}`}
+                  </div>
+                </div>
+                <button onClick={()=>restoreSite(s)} style={{ padding:"7px 11px",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0,
+                  border:`1px solid ${C.green}45`,background:C.greenL,color:C.green }}>되살리기</button>
+                <button onClick={()=>purgeSite(s)} style={{ padding:"7px 10px",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0,
+                  border:`1px solid ${C.red}35`,background:"transparent",color:C.red }}>완전삭제</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab==="undo" && (
+        <div>
+          <div style={{ fontSize:11,color:C.t3,marginBottom:8 }}>최근 변경을 하나씩 되돌립니다. 그 현장만 이전 상태로 돌아가요.</div>
+          {undo.length===0 && <div style={{ fontSize:12,color:C.t4,padding:"12px 0" }}>기록이 아직 없어요.</div>}
+          <div style={{ display:"flex",flexDirection:"column",gap:6,maxHeight:320,overflowY:"auto" }}>
+            {undo.map(e=>(
+              <div key={e.key} style={{ display:"flex",alignItems:"center",gap:8,padding:"10px 11px",background:C.surfaceL,border:BD,borderRadius:8 }}>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:C.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{e.label||e.path}</div>
+                  <div style={{ fontSize:10,color:C.t4,marginTop:2 }}>{e.by} · {agoText(e.at)}</div>
+                </div>
+                <button onClick={()=>undoOne(e)} style={{ padding:"7px 12px",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0,
+                  border:`1px solid ${C.orange}45`,background:C.orangeL,color:C.orange }}>↩ 되돌리기</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab==="file" && (
+        <div>
+          <div style={{ fontSize:11,color:C.t3,lineHeight:1.8,marginBottom:10 }}>
+            위 백업은 모두 <b>서버 안</b>에 있어요. 계정에 문제가 생기는 상황까지 대비하려면
+            <b> 파일로 받아 회사 드라이브에 보관</b>해 두는 게 안전합니다. <b>주 1회</b>를 권해요.
+          </div>
+          <button onClick={downloadJson}
+            style={{ width:"100%",padding:"12px 0",borderRadius:9,border:"none",marginBottom:8,
+              background:C.green,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer" }}>
+            💾 백업 파일 내려받기 ({countSchools(db)}개 현장)
+          </button>
+          <input ref={fileRef} type="file" accept="application/json,.json" style={{ display:"none" }}
+            onChange={e=>{ uploadJson(e.target.files&&e.target.files[0]); e.target.value=""; }}/>
+          <button onClick={()=>fileRef.current&&fileRef.current.click()}
+            style={{ width:"100%",padding:"12px 0",borderRadius:9,border:`1.5px solid ${C.border}`,
+              background:C.surface,color:C.t2,fontSize:13,fontWeight:700,cursor:"pointer" }}>
+            📂 백업 파일에서 되돌리기
+          </button>
+          <div style={{ fontSize:10,color:C.t4,marginTop:8,lineHeight:1.7 }}>
+            엑셀 관리 탭에서 받는 엑셀도 좋은 보관본이에요. 다만 파일로 되돌릴 땐 이 JSON이 더 정확합니다.
+          </div>
+        </div>
+      )}
+
+      {/* 복원 확인 — 무엇이 달라지는지 보여주고 확인 */}
+      {confirmRestore && (() => {
+        const cur = bucketCounts(db), old = bucketCounts(confirmRestore.data);
+        const keys = [...new Set([...Object.keys(cur), ...Object.keys(old)])].sort().reverse();
+        const t = new Date(confirmRestore.meta.at);
+        return (
+          <>
+            <div onClick={()=>setConfirmRestore(null)} style={{ position:"fixed",inset:0,background:"rgba(20,25,40,.5)",backdropFilter:"blur(2px)",zIndex:400 }}/>
+            <div style={{ position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:401,
+              width:400,maxWidth:"92vw",maxHeight:"84vh",overflowY:"auto",background:C.surface,borderRadius:16,
+              padding:"20px 20px 18px",boxShadow:"0 20px 60px rgba(20,30,50,.35)" }}>
+              <div style={{ fontSize:16,fontWeight:900,color:C.t1,marginBottom:4 }}>이 백업으로 되돌릴까요?</div>
+              <div style={{ fontSize:11,color:C.t3,marginBottom:12 }}>
+                {t.getFullYear()}. {t.getMonth()+1}. {t.getDate()}. {String(t.getHours()).padStart(2,"0")}:{String(t.getMinutes()).padStart(2,"0")} · {confirmRestore.meta.reason}
+              </div>
+              <div style={{ border:BD,borderRadius:9,overflow:"hidden",marginBottom:12 }}>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 70px 70px",background:C.surfaceL,padding:"7px 11px",fontSize:10,fontWeight:700,color:C.t3 }}>
+                  <span>구분</span><span style={{textAlign:"right"}}>지금</span><span style={{textAlign:"right"}}>복원 후</span>
+                </div>
+                {keys.map(k=>{
+                  const a=cur[k]||0, b=old[k]||0;
+                  return (
+                    <div key={k} style={{ display:"grid",gridTemplateColumns:"1fr 70px 70px",padding:"7px 11px",fontSize:12,borderTop:`1px solid ${C.surfaceD}` }}>
+                      <span style={{ color:C.t2 }}>{k}</span>
+                      <span style={{ textAlign:"right",color:C.t3 }}>{a}</span>
+                      <span style={{ textAlign:"right",fontWeight:800,color: b===a ? C.t3 : b<a ? C.red : C.green }}>{b}</span>
+                    </div>
+                  );
+                })}
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 70px 70px",padding:"8px 11px",fontSize:12,fontWeight:800,
+                  borderTop:`1.5px solid ${C.borderD}`,background:C.surfaceL }}>
+                  <span>합계</span>
+                  <span style={{ textAlign:"right",color:C.t2 }}>{countSchools(db)}</span>
+                  <span style={{ textAlign:"right",color:C.blue }}>{countSchools(confirmRestore.data)}</span>
+                </div>
+              </div>
+              <div style={{ fontSize:11,color:C.t3,lineHeight:1.7,marginBottom:14 }}>
+                지금 데이터는 <b>복원 직전</b>이라는 이름으로 자동 백업된 뒤 교체됩니다. 되돌리기가 잘못돼도 다시 돌아올 수 있어요.
+              </div>
+              <div style={{ display:"flex",gap:8 }}>
+                <button onClick={()=>setConfirmRestore(null)}
+                  style={{ flex:1,padding:"13px 0",borderRadius:10,border:`1.5px solid ${C.border}`,background:C.surface,
+                    color:C.t2,fontSize:14,fontWeight:700,cursor:"pointer" }}>아니요</button>
+                <button onClick={doRestore} disabled={busy==="restore"}
+                  style={{ flex:1,padding:"13px 0",borderRadius:10,border:"none",background:busy==="restore"?C.t4:C.blue,
+                    color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer" }}>
+                  {busy==="restore" ? "복원 중…" : "네, 복원합니다"}
+                </button>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+    </div>
+  );
+}
+
+function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db, setDb, saveNow, kakaoKey, isMobile, online, fbStatus, lastSync, meta, users }) {
   const [admin, setAdmin] = useState(false);
   const [pw, setPw] = useState("");
   const [pwErr, setPwErr] = useState("");
@@ -3322,6 +3713,8 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
             </div>
           </div>
 
+          <SafetyPanel db={db} setDb={setDb} saveNow={saveNow} isMobile={isMobile}/>
+
           {/* 지도(카카오맵) 설정 */}
           <div style={{ background:C.surface,border:BD,borderRadius:12,padding:"16px 18px",marginBottom:14 }}>
             <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
@@ -3495,7 +3888,7 @@ function ReportsPage({ mode, db, setDb, isMobile }) {
     const out = [];
     Object.entries(db||{}).forEach(([y,hs]) => Object.entries(hs||{}).forEach(([h,arr]) => {
       if (tab && (tab.y!==y || tab.h!==h)) return;
-      (arr||[]).forEach(s => out.push({ ...s, _year:y, _half:h }));
+      (arr||[]).forEach(s => { if (!s.deleted) out.push({ ...s, _year:y, _half:h }); });
     }));
     const q = search.trim();
     return q ? out.filter(s => (s.school||"").includes(q) || (s.region||"").includes(q)) : out;
@@ -3706,7 +4099,7 @@ function MapPage({ db, setDb, allSchools, kakaoKey, isMobile }) {
 
   const sites = useMemo(() => {
     if (!cur) return [];
-    let list = (db[cur.y] && db[cur.y][cur.h]) || [];
+    let list = ((db[cur.y] && db[cur.y][cur.h]) || []).filter(s=>!s.deleted);
     if (onlySoon) list = list.filter(s => { const d = calcDday(s.end); return d!==null && d<=30; });
     return list;
   }, [db, cur, onlySoon]);
@@ -3718,6 +4111,7 @@ function MapPage({ db, setDb, allSchools, kakaoKey, isMobile }) {
     const out = [];
     Object.keys(db||{}).forEach(y => Object.keys(db[y]||{}).forEach(h => {
       (db[y][h]||[]).forEach(s2 => {
+        if (s2.deleted) return;
         const nm = normSchool(s2.school);
         if (!nm.includes(key)) return;
         out.push({ s:s2, y, h, score: nm.startsWith(key) ? 0 : 1 });
@@ -4575,6 +4969,7 @@ function App() {
   dbLive.current = db;
   const dirty      = useRef(false);    // 저장 안 된 로컬 변경 있음
   const seededOnce = useRef(false);    // 빈 Firebase 최초 1회만 시드(루프 방지)
+  const dailyBkDone = useRef(false);   // 하루 1회 자동 백업
   const editorRef  = useRef(editor);
   editorRef.current = editor;
   const saveTimer  = useRef(null);
@@ -4695,6 +5090,17 @@ function App() {
     const keys = Object.keys(updates);
     if (keys.length === 0) { lastSynced.current = snapshot; return; }   // 변경 없음/원격 에코 → 저장 안 함
 
+    /* 되돌리기 기록 — 바뀐 현장의 '변경 전' 모습을 남겨 둔다 (대량 변경은 스냅샷이 담당) */
+    if (keys.length <= 20) {
+      const beforeMap = flatMapDb(lastSynced.current || {});
+      pushUndo(keys.map(k => {
+        const before = beforeMap[k] || null;
+        const after  = updates[k] || null;
+        const nm = (after && after.school) || (before && before.school) || "";
+        return { path:k, before, after, label: nm + (after ? (before ? " 수정" : " 추가") : " 삭제") };
+      }));
+    }
+
     setSyncing(true);
     setLastSync({ ok:null, at:Date.now(), n:keys.length });   // 저장 시도 시작(진행 중)
     const doSave = () => {
@@ -4726,6 +5132,8 @@ function App() {
 
   /* 전체 초기화: 리스너 끊고 → Firebase 비우고 → 빈 상태로 새로고침 (재시드 차단) */
   const resetAll = () => {
+    /* 초기화 전 상태를 통째로 백업 */
+    try { makeSnapshot(dbLive.current, "전체 초기화 전").catch(()=>{}); } catch {}
     try { localStorage.setItem("ston_fresh", "1"); } catch {}
     lastSynced.current = {};
     const ref = dataRef.current;
@@ -4773,11 +5181,33 @@ function App() {
     return sameDay ? `오늘 ${hh}:${mm}` : `${d.getMonth()+1}/${d.getDate()} ${hh}:${mm}`;
   };
 
+  /* 하루에 한 번, 그날 첫 사용자가 자동으로 전체 백업 */
+  useEffect(() => {
+    if (dailyBkDone.current) return;
+    if (countSchools(db) === 0) return;
+    const today = new Date();
+    const key = `${today.getFullYear()}-${today.getMonth()+1}-${today.getDate()}`;
+    let tid = setTimeout(async () => {
+      try {
+        const snap = await firebase.database().ref(FB_BK_IDX).once("value");
+        const list = Object.values(snap.val()||{});
+        const has = list.some(m => {
+          if (!m || !m.at) return false;
+          const d = new Date(m.at);
+          return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}` === key && String(m.reason||"").startsWith("자동");
+        });
+        if (!has) await makeSnapshot(dbLive.current, "자동(하루 1회)");
+        dailyBkDone.current = true;
+      } catch { dailyBkDone.current = true; }
+    }, 4000);   // 첫 로딩이 끝난 뒤 조용히
+    return () => clearTimeout(tid);
+  }, [db]);
+
   const allSchools = useMemo(() => {
     const list = [];
     Object.entries(db).forEach(([yr,halves]) =>
       Object.entries(halves).forEach(([half,schools]) =>
-        schools.forEach(s => list.push({ ...s, _year:yr, _half:half }))));
+        (schools||[]).forEach(s => { if (!s.deleted) list.push({ ...s, _year:yr, _half:half }); })));
     return list;
   }, [db]);
 
@@ -4791,7 +5221,7 @@ function App() {
     urgent: <ReportsPage mode="urgent" db={db} setDb={setDb} isMobile={isMobile}/>,
     done:   <ReportsPage mode="done"   db={db} setDb={setDb} isMobile={isMobile}/>,
     export: <ExportImportPage db={db} setDb={setDb} saveNow={saveNow}/>,
-    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb} saveNow={saveNow} kakaoKey={kakaoKey} online={online} fbStatus={fbStatus} lastSync={lastSync} meta={meta} users={users}/>,
+    settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb} saveNow={saveNow} kakaoKey={kakaoKey} isMobile={isMobile} online={online} fbStatus={fbStatus} lastSync={lastSync} meta={meta} users={users}/>,
   };
 
   /* 인증 게이트 */
