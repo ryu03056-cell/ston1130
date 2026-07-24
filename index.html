@@ -3379,6 +3379,208 @@ function SettingsPage({ cfgVer, logs, editor, authUser, onLogout, onResetAll, db
    전체 현황 (대시보드 요약)
 ══════════════════════════════════════════════════════════════ */
 /* ══════════════════════════════════════════════════════════════
+   보고서 현황 — 긴급/완료 두 탭이 같은 화면 구조를 공유
+   · 연도·반기 탭으로 그 시기에 어떤 현장이 있는지 확인
+   · 카드에서 보고서·FMS·납품을 바로 눌러 처리 (수정 화면 안 들어가도 됨)
+   · 완료에서 체크를 풀면 기준이 같아 긴급 쪽으로 다시 나타남
+   ══════════════════════════════════════════════════════════════ */
+const siteDone = (s) => {
+  const bs = (s && s.buildings) || [];
+  return bs.length > 0 && bs.every(b => b.rep && b.fmsD && b.delivery);
+};
+const doneAt = (s) => {                       // 완료로 볼 기준 날짜(완수일)
+  return s && s.end ? s.end : "";
+};
+
+function ReportsPage({ mode, db, setDb, isMobile }) {
+  const isUrgent = mode === "urgent";
+  const buckets = useMemo(() => {
+    const out = [];
+    Object.keys(db||{}).forEach(y => Object.keys(db[y]||{}).forEach(h => {
+      if ((db[y][h]||[]).length) out.push({ y, h });
+    }));
+    const rank = b => isLH(b.y) ? -1 : (parseInt(b.y,10)||0)*2 + (b.h==="하반기" ? 1 : 0);
+    return out.sort((a,b) => rank(b) - rank(a));
+  }, [db]);
+
+  /* 긴급은 전체가 기본(어느 반기든 급한 건 봐야 함), 완료는 최근 반기가 기본 */
+  const [tab, setTab] = useState(() => isUrgent ? null : (buckets[0] || null));
+  const [search, setSearch] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const pool = useMemo(() => {
+    const out = [];
+    Object.entries(db||{}).forEach(([y,hs]) => Object.entries(hs||{}).forEach(([h,arr]) => {
+      if (tab && (tab.y!==y || tab.h!==h)) return;
+      (arr||[]).forEach(s => out.push({ ...s, _year:y, _half:h }));
+    }));
+    const q = search.trim();
+    return q ? out.filter(s => (s.school||"").includes(q) || (s.region||"").includes(q)) : out;
+  }, [db, tab, search]);
+
+  /* 보고서·FMS·납품을 그 현장 전체 동에 한 번에 적용 */
+  const setAllB = (s, field) => {
+    const label = field==="rep" ? "보고서" : field==="fmsD" ? "FMS" : "납품";
+    const bs = s.buildings || [];
+    const allOn = bs.length>0 && bs.every(b => field==="delivery" ? !!b.delivery : !!b[field]);
+    setDb(prev => {
+      const next = { ...prev }; next[s._year] = { ...prev[s._year] };
+      next[s._year][s._half] = (prev[s._year][s._half]||[]).map(x => x.id!==s.id ? x : stampEdit({
+        ...x,
+        buildings: (x.buildings||[]).map(b => field==="delivery"
+          ? { ...b, delivery: allOn ? null : (b.delivery || "직납") }
+          : { ...b, [field]: !allOn }),
+      }, `${label} ${allOn?"해제":"완료"}`));
+      return next;
+    });
+    logAction("수정", `${s.school} · ${label} 일괄`, allOn?"완료":"미완", allOn?"미완":"완료");
+    setToast(`${s.school} · ${label} ${allOn?"해제했어요":"완료 처리했어요"}`);
+    setTimeout(()=>setToast(null), 1800);
+  };
+
+  /* 긴급: 완료 안 된 것 중 기한 기준으로 묶음 / 완료: 반기별 또는 완수일 순 */
+  const groups = useMemo(() => {
+    if (isUrgent) {
+      const live = pool.filter(s => !siteDone(s));
+      const withD = live.map(s => ({ s, d: calcDday(s.end) })).filter(x => x.d !== null);
+      const pick = (lo, hi) => withD.filter(x => x.d>=lo && x.d<=hi).sort((a,b)=>a.d-b.d).map(x=>x.s);
+      const g = [
+        { key:"over", label:"기한 초과", desc:"완수일이 지났어요", color:C.red,    items: withD.filter(x=>x.d<0).sort((a,b)=>a.d-b.d).map(x=>x.s) },
+        { key:"d7",   label:"D-7 이내",  desc:"이번 주 안에 끝내야 해요", color:C.orange, items: pick(0,7) },
+        { key:"d30",  label:"D-30 이내", desc:"한 달 안", color:C.yellow, items: pick(8,30) },
+      ];
+      const rest = live.filter(s => { const d=calcDday(s.end); return d===null || d>30; });
+      if (rest.length) g.push({ key:"rest", label:"그 외 진행 중", desc:"완수일 여유 있음 · 미정 포함", color:C.t3, items:rest });
+      return g.filter(x => x.items.length);
+    }
+    const done = pool.filter(siteDone);
+    if (tab) {
+      return done.length ? [{ key:"all", label:`${isLH(tab.y)?"LH 정밀":`${tab.y}년 ${tab.h}`} 완료`, desc:"", color:C.green,
+        items: done.sort((a,b)=>String(doneAt(b)).localeCompare(String(doneAt(a)))) }] : [];
+    }
+    const byBucket = new Map();
+    done.forEach(s => { const k=`${s._year}|${s._half}`; if(!byBucket.has(k)) byBucket.set(k,[]); byBucket.get(k).push(s); });
+    return buckets.map(b => {
+      const items = byBucket.get(`${b.y}|${b.h}`) || [];
+      return { key:`${b.y}-${b.h}`, label: isLH(b.y)?"LH 정밀":`${b.y}년 ${b.h}`, desc:"", color:C.green,
+        items: items.sort((a,b2)=>String(doneAt(b2)).localeCompare(String(doneAt(a)))) };
+    }).filter(g => g.items.length);
+  }, [pool, isUrgent, tab, buckets]);
+
+  const totalShown = groups.reduce((a,g)=>a+g.items.length, 0);
+  const editing = editId ? pool.find(s=>s.id===editId) : null;
+
+  const Card = ({ s, accent }) => {
+    const dd = calcDday(s.end);
+    const bs = s.buildings || [];
+    const cnt = f => bs.filter(b => f==="delivery" ? !!b.delivery : !!b[f]).length;
+    const tel = siteTel(s);
+    const done = siteDone(s);
+    return (
+      <div style={{ background:C.surface,border:BD,borderLeft:`4px solid ${accent}`,borderRadius:"0 11px 11px 0",
+        padding:isMobile?"12px 13px":"13px 16px",marginBottom:8 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:7 }}>
+          {isUrgent && <span style={{ fontSize:16,fontWeight:900,color:ddC(dd),minWidth:46 }}>{ddL(dd)}</span>}
+          {!isUrgent && <span style={{ fontSize:15,color:C.green }}>✓</span>}
+          <span style={{ fontSize:14,fontWeight:800,color:C.t1,flex:1,minWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{s.school}</span>
+          {tel && <a href={`tel:${tel.replace(/[^0-9+]/g,"")}`}
+            style={{ padding:"3px 9px",borderRadius:5,fontSize:10,fontWeight:800,textDecoration:"none",
+              border:`1px solid ${C.green}55`,background:C.greenL,color:C.green,whiteSpace:"nowrap" }}>📞 {tel}</a>}
+          <button onClick={()=>openRoute(routeLinks(s,null).kakao)}
+            style={{ padding:"3px 9px",borderRadius:5,fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",
+              border:`1px solid ${C.purple}45`,background:C.purpleL,color:C.purple }}>🧭</button>
+          <button onClick={()=>setEditId(s.id)}
+            style={{ padding:"3px 10px",borderRadius:5,fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",
+              border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue }}>✏ 수정</button>
+        </div>
+        <div style={{ fontSize:11,color:C.t3,marginBottom:8 }}>
+          {s.region} · {isLH(s._year)?"LH":`${String(s._year).slice(2)}년 ${s._half==="상반기"?"상":"하"}`} · {bs.length}동
+          {s.end && ` · 완수 ${fd(s.end)}`}
+          {(s.assignees||[]).length>0 && ` · 👤 ${s.assignees.join("·")}`}
+        </div>
+        {/* 눌러서 바로 처리 */}
+        <div style={{ display:"flex",gap:6,flexWrap:"wrap",alignItems:"center" }}>
+          {[{f:"rep",l:"보고서",c:C.purple},{f:"fmsD",l:"FMS",c:C.blue},{f:"delivery",l:"납품",c:C.green}].map(x=>{
+            const n = cnt(x.f), all = bs.length>0 && n===bs.length;
+            return (
+              <button key={x.f} onClick={()=>setAllB(s,x.f)}
+                style={{ padding:"7px 12px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",
+                  border:`1.5px solid ${all?x.c+"70":C.border}`,background:all?x.c+"14":C.surfaceL,color:all?x.c:C.t3 }}>
+                {all?"✓ ":""}{x.l} <span style={{ fontSize:10,opacity:.75 }}>{n}/{bs.length}</span>
+              </button>
+            );
+          })}
+          {!isUrgent && done && <span style={{ fontSize:10,color:C.t4 }}>← 눌러서 해제하면 다시 진행 중으로</span>}
+        </div>
+        <LastEdit s={s} size={9}/>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap" }}>
+        <h1 style={{ margin:0,fontSize:isMobile?18:22,fontWeight:900,color:C.t1 }}>
+          {isUrgent ? "🚨 긴급 보고서" : "✅ 완료 보고서"}
+        </h1>
+        <span style={{ fontSize:13,color:isUrgent?C.red:C.green,fontWeight:700 }}>{totalShown}건</span>
+      </div>
+      <div style={{ fontSize:11,color:C.t3,marginBottom:10 }}>
+        {isUrgent ? "완수일이 임박했거나 지난 현장이에요. 아래 버튼을 눌러 바로 처리할 수 있어요."
+                  : "보고서·FMS·납품이 모두 끝난 현장이에요. 다시 손봐야 하면 버튼을 눌러 해제하세요."}
+      </div>
+
+      {/* 연도·반기 탭 */}
+      <div style={{ display:"flex",gap:6,alignItems:"center",marginBottom:9,overflowX:"auto",paddingBottom:2,WebkitOverflowScrolling:"touch" }}>
+        <button onClick={()=>setTab(null)}
+          style={{ padding:"7px 13px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0,
+            border:`1.5px solid ${!tab?C.blue:C.border}`,background:!tab?C.blueL:C.surface,color:!tab?C.blue:C.t3 }}>전체</button>
+        {buckets.map(b=>{
+          const on = tab && tab.y===b.y && tab.h===b.h;
+          return (
+            <button key={`${b.y}-${b.h}`} onClick={()=>setTab(b)}
+              style={{ padding:"7px 12px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0,
+                border:`1.5px solid ${on?C.blue:C.border}`,background:on?C.blueL:C.surface,color:on?C.blue:C.t3 }}>
+              {isLH(b.y) ? "🏢 LH" : `${String(b.y).slice(2)}년 ${b.h==="상반기"?"상":"하"}`}
+            </button>
+          );
+        })}
+      </div>
+
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="학교명·지역 검색"
+        style={{ width:"100%",boxSizing:"border-box",padding:"10px 13px",background:C.surface,
+          border:`1.5px solid ${search?C.blue:C.border}`,borderRadius:9,color:C.t1,fontSize:14,outline:"none",marginBottom:12 }}/>
+
+      {groups.length===0 && (
+        <div style={{ textAlign:"center",padding:"44px 20px",color:C.t4 }}>
+          <div style={{ fontSize:26,marginBottom:8 }}>{isUrgent ? "👍" : "—"}</div>
+          <div style={{ fontSize:13 }}>{isUrgent ? "급한 현장이 없습니다." : "이 기간에 완료된 현장이 없습니다."}</div>
+        </div>
+      )}
+
+      {groups.map(g=>(
+        <div key={g.key} style={{ marginBottom:16 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderRadius:8,
+            background:g.color+"12",border:`1px solid ${g.color}25`,marginBottom:8 }}>
+            <span style={{ fontSize:13,fontWeight:800,color:g.color }}>{g.label}</span>
+            {g.desc && <span style={{ fontSize:10,color:C.t3 }}>{g.desc}</span>}
+            <span style={{ marginLeft:"auto",fontSize:12,fontWeight:800,color:g.color }}>{g.items.length}</span>
+          </div>
+          {g.items.map(s => <Card key={`${s._year}-${s._half}-${s.id}`} s={s} accent={g.color}/>)}
+        </div>
+      ))}
+
+      {editing && <EditPanel sc={editing} yr={editing._year} half={editing._half} setDb={setDb} onClose={()=>setEditId(null)} isMobile={isMobile}/>}
+      {toast && (
+        <div style={{ position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:C.t1,color:"#fff",
+          padding:"11px 18px",borderRadius:22,fontSize:13,fontWeight:600,zIndex:320,boxShadow:"0 8px 24px rgba(0,0,0,.25)" }}>{toast}</div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
    지도 — 현장 위치를 지도에 찍어 근방에 몰린 현장 확인
    · 카카오맵 키가 있으면 학교명/주소로 실제 위치를 찾아 표시(한 번 찾은 위치는 서버에 저장)
    · 키가 없어도 지역 기준 대략 위치로 분포를 볼 수 있음
@@ -4504,33 +4706,8 @@ function App() {
     sites:    <SitesManager db={db} setDb={setDb} isMobile={isMobile}/>,
     map:      <MapPage db={db} setDb={setDb} allSchools={allSchools} kakaoKey={kakaoKey} isMobile={isMobile}/>,
     chat:     <ChatPage editor={editor} isMobile={isMobile}/>,
-    urgent: (
-      <div>
-        <div style={{ fontSize:11,color:C.t3,letterSpacing:2,marginBottom:3,fontWeight:600 }}>URGENT</div>
-        <h1 style={{ margin:"0 0 16px",fontSize:22,fontWeight:900,color:C.t1 }}>긴급 보고서 <span style={{ fontSize:14,color:C.red,fontWeight:400 }}>D-7 이내 {urgent.length}건</span></h1>
-        {urgent.length===0 && <div style={{ color:C.t4,padding:32,textAlign:"center" }}>긴급 현장 없음</div>}
-        {urgent.map(s=>(
-          <div key={s.id} style={{ background:C.redL,border:`1.5px solid ${C.red}30`,borderLeft:`4px solid ${C.red}`,borderRadius:"0 12px 12px 0",padding:"14px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:12 }}>
-            <div style={{ fontSize:20,fontWeight:900,color:C.red,minWidth:50 }}>{ddL(calcDday(s.end))}</div>
-            <div style={{ flex:1 }}><div style={{ fontWeight:700,color:C.t1,fontSize:14 }}>{s.school}</div>
-              <div style={{ fontSize:11,color:C.t2 }}>{s.region} · {s._year} {s._half} · {s.buildings.length}동</div></div>
-          </div>
-        ))}
-      </div>
-    ),
-    done: (
-      <div>
-        <div style={{ fontSize:11,color:C.t3,letterSpacing:2,marginBottom:3,fontWeight:600 }}>COMPLETED</div>
-        <h1 style={{ margin:"0 0 16px",fontSize:22,fontWeight:900,color:C.t1 }}>완료 보고서</h1>
-        {allSchools.filter(s=>s.buildings.every(b=>b.rep&&b.fmsD)).map(s=>(
-          <div key={s.id} style={{ background:C.greenL,border:`1.5px solid ${C.green}30`,borderLeft:`4px solid ${C.green}`,borderRadius:"0 10px 10px 0",padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12 }}>
-            <div style={{ fontSize:16,color:C.green }}>✓</div>
-            <div style={{ flex:1 }}><div style={{ fontWeight:700,color:C.t1 }}>{s.school}</div>
-              <div style={{ fontSize:11,color:C.t2 }}>{s.region} · {s._year} {s._half} · 완수 {fd(s.end)}</div></div>
-          </div>
-        ))}
-      </div>
-    ),
+    urgent: <ReportsPage mode="urgent" db={db} setDb={setDb} isMobile={isMobile}/>,
+    done:   <ReportsPage mode="done"   db={db} setDb={setDb} isMobile={isMobile}/>,
     export: <ExportImportPage db={db} setDb={setDb} saveNow={saveNow}/>,
     settings: <SettingsPage cfgVer={cfgVer} logs={logs} editor={editor} authUser={authUser} onLogout={logout} onResetAll={resetAll} db={db} setDb={setDb} saveNow={saveNow} kakaoKey={kakaoKey} online={online} fbStatus={fbStatus} lastSync={lastSync} meta={meta} users={users}/>,
   };
