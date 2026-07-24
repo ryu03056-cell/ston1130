@@ -230,6 +230,14 @@ const jitter = (seed, amp=0.012) => {
   return [((h%1000)/1000 - 0.5)*amp, (((h>>10)%1000)/1000 - 0.5)*amp];
 };
 
+/* 두 좌표 사이 거리(km) — 검색 결과가 엉뚱한 도시로 잡혔는지 검사용 */
+const distKm = (a, b) => {
+  const R = 6371, rad = d => d*Math.PI/180;
+  const dLat = rad(b[0]-a[0]), dLng = rad(b[1]-a[1]);
+  const x = Math.sin(dLat/2)**2 + Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+};
+
 /* 카카오맵 SDK 로드 (키가 있을 때만) */
 let kakaoLoading = null;
 function loadKakao(key) {
@@ -3127,8 +3135,11 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
   const [picked, setPicked] = useState(null);    // 마커 클릭한 현장
   const [onlySoon, setOnlySoon] = useState(false);
   const [ready, setReady] = useState(false);     // 지도 생성 완료 여부
+  const [q, setQ] = useState("");                // 현장 검색어
+  const [focusId, setFocusId] = useState(null);  // 검색으로 이동할 현장
   const [diag, setDiag] = useState({ step:"대기 중", markers:0 });
   const mapRef = useRef(null), boxRef = useRef(null), clRef = useRef(null), kkRef = useRef(null);
+  const stopRef = useRef(false), fitRef = useRef(false), autoRef = useRef({});
 
   const sites = useMemo(() => {
     if (!cur) return [];
@@ -3136,6 +3147,30 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
     if (onlySoon) list = list.filter(s => { const d = calcDday(s.end); return d!==null && d<=30; });
     return list;
   }, [db, cur, onlySoon]);
+
+  /* 이름으로 현장 찾기 — 반기를 몰라도 전체에서 찾아준다 */
+  const matches = useMemo(() => {
+    const key = normSchool(q);
+    if (!key || key.length < 1) return [];
+    const out = [];
+    Object.keys(db||{}).forEach(y => Object.keys(db[y]||{}).forEach(h => {
+      (db[y][h]||[]).forEach(s2 => {
+        const nm = normSchool(s2.school);
+        if (!nm.includes(key)) return;
+        out.push({ s:s2, y, h, score: nm.startsWith(key) ? 0 : 1 });
+      });
+    }));
+    return out.sort((a,b)=> a.score-b.score || a.s.school.length-b.s.school.length).slice(0, 8);
+  }, [db, q]);
+
+  /* 검색 결과 선택 → 그 반기로 옮기고 지도 확대 */
+  const goTo = (m) => {
+    setQ("");
+    if (!cur || cur.y!==m.y || cur.h!==m.h) setSel({ y:m.y, h:m.h });
+    fitRef.current = true;              // 전체보기로 되돌아가지 않게
+    setFocusId(m.s.id);
+    setPicked(m.s);
+  };
 
   /* 저장된 좌표 불러오기 */
   useEffect(() => {
@@ -3187,73 +3222,167 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
     return { lat:rx[0]+dy, lng:rx[1]+dx, exact:false };
   }, [geo]);
 
-  /* 마커 그리기 */
+  /* 이동 대상이 정해지면 그 위치로 확대 (반기 전환 후 마커가 다시 그려진 뒤 실행) */
+  useEffect(() => {
+    if (!focusId || !ready) return;
+    const map = mapRef.current, kakao = kkRef.current;
+    if (!map || !kakao) return;
+    const target = sites.find(x => x.id === focusId);
+    if (!target) return;               // 아직 반기 전환 중
+    const p = posOf(target);
+    if (p) {
+      const ll = new kakao.maps.LatLng(p.lat, p.lng);
+      try { map.setLevel(p.exact ? 3 : 6); map.panTo(ll); } catch {}
+      setPicked({ ...target, _exact:p.exact });
+      setStatus(p.exact ? `${target.school} 위치로 이동했어요.`
+                        : `${target.school} — 정확한 위치를 못 찾아 지역 기준으로 이동했어요. 핀을 끌어 맞춰 주세요.`);
+    }
+    setFocusId(null);
+  }, [focusId, ready, sites, posOf]);
+
+
+  /* 마커 그리기 — 파란 핀=정확한 위치, 회색 핀=지역 기준 대략 위치. 핀을 끌어서 직접 고칠 수 있음 */
   useEffect(() => {
     const kakao = kkRef.current, map = mapRef.current;
     if (!ready || !kakao || !map) return;
-    if (clRef.current) { clRef.current.clear(); }
+    if (clRef.current) clRef.current.clear();
+
+    const pin = (color) => new kakao.maps.MarkerImage(
+      "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34" viewBox="0 0 26 34">
+           <path d="M13 0C5.8 0 0 5.8 0 13c0 9.3 13 21 13 21s13-11.7 13-21C26 5.8 20.2 0 13 0z" fill="${color}"/>
+           <circle cx="13" cy="12.5" r="4.6" fill="#fff"/></svg>`),
+      new kakao.maps.Size(26, 34), { offset: new kakao.maps.Point(13, 34) }
+    );
+    const exactPin = pin("#1D6FF2"), roughPin = pin("#9AA5B4");
+
     const markers = [];
     const bounds = new kakao.maps.LatLngBounds();
-    let any = false;
+    let any = false, nExact = 0;
     sites.forEach(s => {
       const p = posOf(s); if (!p) return;
-      any = true;
+      any = true; if (p.exact) nExact++;
       const ll = new kakao.maps.LatLng(p.lat, p.lng);
       bounds.extend(ll);
-      const mk = new kakao.maps.Marker({ position: ll, title: s.school });
+      const mk = new kakao.maps.Marker({ position: ll, title: s.school, image: p.exact ? exactPin : roughPin, draggable: true });
       kakao.maps.event.addListener(mk, "click", () => setPicked({ ...s, _exact:p.exact }));
+      /* 끌어서 놓으면 그 자리를 정확한 위치로 저장 */
+      kakao.maps.event.addListener(mk, "dragend", () => {
+        const q = mk.getPosition();
+        const val = { lat:q.getLat(), lng:q.getLng() };
+        setGeo(prev => ({ ...prev, [normSchool(s.school)]: val }));
+        try { firebase.database().ref(FB_GEO).update(stripUndefined({ [normSchool(s.school)]: val })).catch(()=>{}); } catch {}
+        setStatus(`${s.school} 위치를 직접 지정했어요.`);
+      });
       markers.push(mk);
     });
     if (!clRef.current) {
       clRef.current = new kakao.maps.MarkerClusterer({ map, averageCenter:true, minLevel:7, gridSize:70 });
     }
     clRef.current.addMarkers(markers);
-    setDiag(d => ({ ...d, markers: markers.length }));
-    if (any) { try { map.setBounds(bounds); } catch {} }
+    setDiag(d => ({ ...d, markers: markers.length, exact: nExact }));
+    /* 처음 그릴 때만 전체가 보이게 맞춤 (이후엔 보던 화면 유지) */
+    if (any && !fitRef.current) { try { map.setBounds(bounds); fitRef.current = true; } catch {} }
   }, [sites, posOf, ready]);
 
-  /* 정확한 위치 찾기 (한 번 찾으면 서버에 저장 → 다음부터 바로 표시) */
-  const runGeocode = async () => {
+  /* 정확한 위치 찾기
+     · 그 현장의 '지역'을 중심으로 반경 안에서만 검색 → 같은 이름의 다른 도시 학교를 잡지 않음
+     · 결과가 지역에서 너무 멀면 버림
+     · 이름을 여러 형태로 바꿔가며 시도 (괄호/외 N개소 등 제거) */
+  const runGeocode = async (onlyIds) => {
     const kakao = kkRef.current;
     if (!kakao) { setErr("지도가 아직 준비되지 않았어요."); return; }
-    const todo = sites.filter(s => !geo[normSchool(s.school)]);
+    let todo = sites.filter(s => !geo[normSchool(s.school)]);
+    if (onlyIds) todo = sites.filter(s => onlyIds.includes(s.id));
     if (!todo.length) { setStatus("모든 현장의 위치를 이미 찾았어요."); return; }
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); stopRef.current = false;
     const places = new kakao.maps.services.Places();
     const coder  = new kakao.maps.services.Geocoder();
-    const found = {};
+
+    /* 이름에서 검색을 방해하는 부분 제거 */
+    const variants = (name) => {
+      const raw = String(name||"").trim();
+      const v = [raw];
+      const cut = raw
+        .replace(/\s*외\s*\d+\s*개?소.*$/,"")     // "오산대교 외 3개소" → "오산대교"
+        .replace(/\([^)]*\)/g,"")                  // 괄호 내용 제거
+        .replace(/\[[^\]]*\]/g,"")
+        .replace(/\s*\d+\s*동$/,"")                // 끝의 "3동"
+        .trim();
+      if (cut && cut!==raw) v.push(cut);
+      const noSuffix = cut.replace(/(초|중|고)$/,"");
+      if (noSuffix && noSuffix!==cut && noSuffix.length>=2) v.push(noSuffix);
+      return [...new Set(v.filter(Boolean))];
+    };
+
     const lookup = (site) => new Promise(res => {
-      const byName = () => {
-        const q = `${site.school} ${site.region||""}`.trim();
-        places.keywordSearch(q, (r, st) => {
-          if (st === kakao.maps.services.Status.OK && r && r[0]) return res({ lat:+r[0].y, lng:+r[0].x });
-          res(null);
-        });
+      const rx = regionXY(site.region);
+      const center = rx ? new kakao.maps.LatLng(rx[0], rx[1]) : null;
+      const okNear = (lat,lng) => !rx || distKm([lat,lng], rx) <= 35;   // 지역에서 35km 넘으면 오검색으로 간주
+
+      const tryNames = (list, i) => {
+        if (i >= list.length) return res(null);
+        const opt = center ? { location:center, radius:20000, sort:kakao.maps.services.SortBy.DISTANCE } : {};
+        places.keywordSearch(list[i], (r, st) => {
+          if (st === kakao.maps.services.Status.OK && r && r.length) {
+            const hit = r.find(x => okNear(+x.y, +x.x)) || null;
+            if (hit) return res({ lat:+hit.y, lng:+hit.x });
+          }
+          tryNames(list, i+1);
+        }, opt);
       };
+
+      /* 주소가 있으면 주소 우선 (LH 단지) */
       if (site.addr) {
         coder.addressSearch(site.addr, (r, st) => {
-          if (st === kakao.maps.services.Status.OK && r && r[0]) return res({ lat:+r[0].y, lng:+r[0].x });
-          byName();
+          if (st === kakao.maps.services.Status.OK && r && r[0] && okNear(+r[0].y, +r[0].x)) {
+            return res({ lat:+r[0].y, lng:+r[0].x });
+          }
+          tryNames(variants(site.school).map(n => `${n} ${site.region||""}`.trim()), 0);
         });
-      } else byName();
+        return;
+      }
+      /* 지역명을 붙인 형태와 안 붙인 형태를 모두 시도 */
+      const names = variants(site.school);
+      const queries = [...names.map(n => `${n} ${site.region||""}`.trim()), ...names];
+      tryNames([...new Set(queries)], 0);
     });
+
+    const found = {};
     let ok = 0;
     for (let i=0; i<todo.length; i++) {
-      const s = todo[i];
-      setStatus(`위치 찾는 중… ${i+1}/${todo.length} · ${s.school}`);
+      if (stopRef.current) { setStatus(`중단했어요 (${i}/${todo.length} 진행)`); break; }
+      const s2 = todo[i];
+      setStatus(`위치 찾는 중… ${i+1}/${todo.length} · ${s2.school}`);
       try {
-        const hit = await lookup(s);
-        if (hit) { found[normSchool(s.school)] = hit; ok++; }
+        const hit = await lookup(s2);
+        if (hit) { found[normSchool(s2.school)] = hit; ok++; }
       } catch {}
-      await new Promise(r => setTimeout(r, 90));         // 과도한 연속 호출 방지
+      await new Promise(r => setTimeout(r, 80));
     }
     if (Object.keys(found).length) {
-      try { await firebase.database().ref(FB_GEO).update(stripUndefined(found)); } catch(e){ setErr("위치 저장 실패: "+((e&&e.message)||e)); }
+      try { await firebase.database().ref(FB_GEO).update(stripUndefined(found)); }
+      catch(e){ setErr("위치 저장 실패: "+((e&&e.message)||e)); }
       setGeo(p => ({ ...p, ...found }));
     }
     setBusy(false);
-    setStatus(`완료 — ${ok}개 위치를 찾았어요${ok<todo.length?` (${todo.length-ok}개는 이름으로 못 찾아 지역 기준으로 표시)`:""}`);
+    if (!stopRef.current) {
+      const failN = todo.length - ok;
+      setStatus(`완료 — ${ok}개 정확한 위치를 찾았어요${failN?` · ${failN}개는 이름으로 못 찾아 지역 기준(회색 핀)으로 표시` : ""}`);
+    }
   };
+
+  /* 지도가 준비되면 좌표 없는 현장을 자동으로 찾아준다 (반기별 1회) */
+  useEffect(() => {
+    if (!ready || busy || !cur) return;
+    const key = `${cur.y}-${cur.h}`;
+    if (autoRef.current[key]) return;
+    const missing = sites.filter(s => !geo[normSchool(s.school)]).length;
+    if (!missing) return;
+    autoRef.current[key] = true;
+    const t = setTimeout(() => runGeocode(), 600);
+    return () => clearTimeout(t);
+  }, [ready, busy, cur, sites, geo]);
 
   const exactCnt = sites.filter(s => geo[normSchool(s.school)]).length;
   const noPos    = sites.filter(s => !posOf(s)).length;
@@ -3273,12 +3402,52 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
         <div style={{ fontSize:12,color:C.t3,marginTop:4 }}>가까이 몰려 있는 현장을 묶어서 볼 수 있어요. 지도를 확대하면 개별 현장으로 나뉩니다.</div>
       </div>
 
+      {/* 현장 이름으로 찾기 */}
+      <div style={{ position:"relative",marginBottom:12 }}>
+        <div style={{ display:"flex",gap:6 }}>
+          <input value={q} onChange={e=>setQ(e.target.value)}
+            onKeyDown={e=>{ if(e.key==="Enter" && matches.length) goTo(matches[0]); if(e.key==="Escape") setQ(""); }}
+            placeholder="현장 이름으로 찾기 (예: 용문고, 시온고)"
+            style={{ flex:1,padding:"11px 13px",background:C.surface,border:`1.5px solid ${q?C.blue:C.border}`,
+              borderRadius:9,color:C.t1,fontSize:14,outline:"none" }}/>
+          {q && <button onClick={()=>setQ("")} style={{ padding:"0 14px",borderRadius:9,border:`1px solid ${C.border}`,
+            background:C.surface,color:C.t3,fontSize:13,fontWeight:700,cursor:"pointer" }}>지우기</button>}
+        </div>
+        {q && (
+          <div style={{ position:"absolute",top:"100%",left:0,right:0,marginTop:4,background:C.surface,
+            border:`1px solid ${C.border}`,borderRadius:10,boxShadow:"0 8px 24px rgba(20,30,50,.14)",zIndex:40,overflow:"hidden" }}>
+            {matches.length===0 && <div style={{ padding:"12px 14px",fontSize:12,color:C.t4 }}>일치하는 현장이 없어요.</div>}
+            {matches.map(m => {
+              const has = !!geo[normSchool(m.s.school)];
+              return (
+                <button key={`${m.y}-${m.h}-${m.s.id}`} onClick={()=>goTo(m)}
+                  style={{ width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 13px",background:"transparent",
+                    border:"none",borderBottom:`1px solid ${C.surfaceD}`,cursor:"pointer",textAlign:"left" }}>
+                  <span style={{ fontSize:13 }}>{has ? "🔵" : "⚪"}</span>
+                  <span style={{ flex:1,minWidth:0,overflow:"hidden" }}>
+                    <span style={{ display:"block",fontSize:13,fontWeight:700,color:C.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.s.school}</span>
+                    <span style={{ display:"block",fontSize:10,color:C.t4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+                      {(m.s.buildings||[]).map(b=>b.b).filter(Boolean).slice(0,3).join(" · ")||"동 정보 없음"}
+                      {m.s.end ? ` · 완수 ${fd(m.s.end)}` : ""}
+                    </span>
+                  </span>
+                  <span style={{ fontSize:10,color:C.t3,whiteSpace:"nowrap" }}>{m.s.region}</span>
+                  <span style={{ fontSize:10,color:C.t4,whiteSpace:"nowrap" }}>
+                    {isLH(m.y) ? "LH" : `${String(m.y).slice(2)}년 ${m.h==="상반기"?"상":"하"}`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* 반기 선택 + 필터 */}
       <div style={{ display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:12 }}>
         {buckets.map(b => {
           const on = cur && cur.y===b.y && cur.h===b.h;
           return (
-            <button key={`${b.y}-${b.h}`} onClick={()=>{ setSel(b); setPicked(null); }}
+            <button key={`${b.y}-${b.h}`} onClick={()=>{ setSel(b); setPicked(null); fitRef.current=false; }}
               style={{ padding:"7px 13px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",
                 border:`1.5px solid ${on?C.blue:C.border}`,background:on?C.blueL:C.surface,color:on?C.blue:C.t3 }}>
               {isLH(b.y) ? "🏢 LH 정밀" : `${String(b.y).slice(2)}년 ${b.h==="상반기"?"상":"하"}`}
@@ -3323,15 +3492,23 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
       ) : (
         <>
           <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10 }}>
-            <button onClick={runGeocode} disabled={busy}
-              style={{ padding:"9px 16px",borderRadius:9,border:"none",background:busy?C.t4:C.blue,color:"#fff",
-                fontSize:13,fontWeight:700,cursor:busy?"default":"pointer" }}>
-              {busy ? "찾는 중…" : "📍 정확한 위치 찾기"}
-            </button>
+            {busy ? (
+              <button onClick={()=>{ stopRef.current = true; }}
+                style={{ padding:"9px 16px",borderRadius:9,border:`1.5px solid ${C.red}`,background:C.redL,color:C.red,
+                  fontSize:13,fontWeight:700,cursor:"pointer" }}>■ 중지</button>
+            ) : (
+              <button onClick={()=>runGeocode()}
+                style={{ padding:"9px 16px",borderRadius:9,border:"none",background:C.blue,color:"#fff",
+                  fontSize:13,fontWeight:700,cursor:"pointer" }}>📍 못 찾은 위치 찾기</button>
+            )}
             <span style={{ fontSize:11,color:C.t3 }}>
-              정확한 위치 {exactCnt} / {sites.length}
-              {noPos>0 && <span style={{ color:C.orange,marginLeft:6 }}>· 지역 정보 없어 미표시 {noPos}개</span>}
+              🔵 정확한 위치 <b style={{color:C.blue}}>{exactCnt}</b> · ⚪ 대략 위치 <b style={{color:C.t3}}>{sites.length-exactCnt-noPos}</b>
+              {noPos>0 && <span style={{ color:C.orange,marginLeft:6 }}>· 미표시 {noPos}</span>}
             </span>
+          </div>
+          <div style={{ fontSize:11,color:C.t3,background:C.blueL,border:`1px solid ${C.blue}25`,borderRadius:8,padding:"8px 11px",marginBottom:10,lineHeight:1.7 }}>
+            <b style={{color:C.blue}}>회색 핀</b>은 이름으로 위치를 못 찾아 <b>시(市) 중심에 임시로 찍은 것</b>이에요.
+            핀을 <b>손가락(마우스)으로 끌어다 놓으면</b> 그 자리가 정확한 위치로 저장됩니다 — 한 번만 옮기면 모두에게 반영돼요.
           </div>
           {/* 진단 — 어디까지 됐는지 바로 보이게 */}
           <div style={{ fontSize:11,color:C.t2,background:C.surfaceL,border:BD,borderRadius:8,padding:"8px 11px",marginBottom:10,display:"flex",gap:12,flexWrap:"wrap" }}>
@@ -3363,6 +3540,18 @@ function MapPage({ db, allSchools, kakaoKey, isMobile, onEdit }) {
             {picked.tel && <a href={`tel:${String(picked.tel).replace(/[^0-9+]/g,"")}`}
               style={{ padding:"5px 12px",borderRadius:6,fontSize:12,fontWeight:800,textDecoration:"none",
                 border:`1px solid ${C.green}55`,background:C.greenL,color:C.green }}>📞 전화</a>}
+            <button onClick={()=>runGeocode([picked.id])} disabled={busy}
+              style={{ padding:"5px 12px",borderRadius:6,fontSize:12,fontWeight:700,
+                border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:busy?"default":"pointer" }}>🔍 위치 다시 찾기</button>
+            {geo[normSchool(picked.school)] && (
+              <button onClick={()=>{
+                const k = normSchool(picked.school);
+                setGeo(prev => { const n={...prev}; delete n[k]; return n; });
+                try { firebase.database().ref(FB_GEO).child(k).remove().catch(()=>{}); } catch {}
+                setStatus(`${picked.school} 저장된 위치를 지웠어요.`);
+              }} style={{ padding:"5px 12px",borderRadius:6,fontSize:12,fontWeight:700,
+                border:`1px solid ${C.red}40`,background:C.redL,color:C.red,cursor:"pointer" }}>위치 지우기</button>
+            )}
             {onEdit && <button onClick={()=>onEdit(picked)} style={{ padding:"5px 12px",borderRadius:6,fontSize:12,fontWeight:700,
               border:`1px solid ${C.blue}40`,background:C.blueL,color:C.blue,cursor:"pointer" }}>✏ 수정</button>}
           </div>
