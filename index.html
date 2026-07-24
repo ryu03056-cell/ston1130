@@ -562,6 +562,7 @@ const stampEdit = (s, what) => ({
   ...s,
   lastEdit: {
     by: typeof CURRENT_USER !== "undefined" && (CURRENT_USER.name || CURRENT_USER.email) || "알수없음",
+    uid: typeof CURRENT_USER !== "undefined" && CURRENT_USER.uid || null,
     at: Date.now(),
     what: String(what || "수정").slice(0, 40)
   }
@@ -3667,80 +3668,10 @@ function DayPanel({
 /* ══════════════════════════════════════════════════════════════
    현장 일정 — 영구 캘린더 (드래그로 일정 변경)
 ══════════════════════════════════════════════════════════════ */
-/* 오늘 한눈에 — 앱 열자마자 상황 파악 */
-function TodayBar({
-  allSchools,
-  isMobile,
-  onPick
-}) {
-  const t = new Date();
-  const key = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
-  const live = allSchools.filter(s => !siteDone(s));
-  const todayN = allSchools.filter(s => s.field === key || s.start === key || s.end === key).length;
-  const weekN = live.filter(s => {
-    const d = calcDday(s.end);
-    return d !== null && d >= 0 && d <= 7;
-  }).length;
-  const overN = live.filter(s => {
-    const d = calcDday(s.end);
-    return d !== null && d < 0;
-  }).length;
-  const items = [{
-    l: "오늘 일정",
-    v: todayN,
-    c: C.blue
-  }, {
-    l: "이번 주 완수",
-    v: weekN,
-    c: C.orange,
-    go: "reports"
-  }, {
-    l: "기한 초과",
-    v: overN,
-    c: C.red,
-    go: "reports"
-  }];
-  return /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6,
-      marginBottom: 12
-    }
-  }, items.map(x => /*#__PURE__*/React.createElement("button", {
-    key: x.l,
-    onClick: () => x.go && onPick && onPick(x.go),
-    style: {
-      flex: 1,
-      padding: isMobile ? "10px 4px" : "12px 8px",
-      borderRadius: 10,
-      background: C.surface,
-      border: BD,
-      borderTop: `3px solid ${x.c}`,
-      cursor: x.go ? "pointer" : "default",
-      textAlign: "center"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: isMobile ? 18 : 22,
-      fontWeight: 900,
-      color: x.v > 0 ? x.c : C.t4,
-      lineHeight: 1
-    }
-  }, x.v), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: isMobile ? 9 : 10,
-      color: C.t3,
-      marginTop: 4,
-      fontWeight: 600,
-      whiteSpace: "nowrap"
-    }
-  }, x.l))));
-}
 function Calendar({
   allSchools,
   setDb,
-  isMobile,
-  onGo
+  isMobile
 }) {
   const today = new Date();
   const [yr, setYr] = useState(today.getFullYear());
@@ -3905,11 +3836,7 @@ function Calendar({
       justifyContent: "space-between",
       marginBottom: 14
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TodayBar, {
-    allSchools: allSchools,
-    isMobile: isMobile,
-    onPick: onGo
-  }), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.t3,
@@ -9855,8 +9782,9 @@ function SettingsPage({
       fontSize: 9,
       color: C.t4,
       marginTop: 3
-    }
-  }, l.by, l.email ? ` (${l.email})` : "", " · ", fmtTs(l.ts)))))), /*#__PURE__*/React.createElement("div", {
+    },
+    title: l.email || ""
+  }, l.by, " · ", fmtTs(l.ts)))))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 9,
       color: C.t4,
@@ -11928,6 +11856,7 @@ function BoardPage({
   const [body, setBody] = useState("");
   const [files, setFiles] = useState([]); // 새 글에 붙일 파일 [{name,size,url,path}]
   const [busy, setBusy] = useState("");
+  const [prog, setProg] = useState(null); // 큰 파일 올릴 때 진행률
   const [msg, setMsg] = useState(null);
   const [pin, setPin] = useState(false);
   const [q, setQ] = useState("");
@@ -11959,6 +11888,7 @@ function BoardPage({
   const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + "MB" : n >= 1024 ? Math.round(n / 1024) + "KB" : n + "B";
 
   /* 파일 올리기 — Firebase Storage 에 저장하고 주소만 글에 붙인다 */
+  const MAX_MB = 200; // 한 파일 최대 용량
   const uploadFiles = async list => {
     if (!list || !list.length) return;
     if (typeof firebase === "undefined" || !firebase.storage) {
@@ -11968,15 +11898,22 @@ function BoardPage({
     setBusy("upload");
     const added = [];
     for (const f of Array.from(list)) {
-      if (f.size > 25 * 1024 * 1024) {
-        say(`${f.name} 은(는) 25MB를 넘어 건너뛰었어요.`, 4000);
+      if (f.size > MAX_MB * 1024 * 1024) {
+        say(`${f.name} 은(는) ${MAX_MB}MB를 넘어 건너뛰었어요. 압축하거나 나눠서 올려주세요.`, 5000);
         continue;
       }
       try {
         const safe = String(f.name).replace(/[^\w.\-가-힣() ]/g, "_");
         const path = `board/${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${safe}`;
-        const snap = await firebase.storage().ref(path).put(f);
-        const url = await snap.ref.getDownloadURL();
+        /* 큰 파일은 시간이 걸리므로 진행률을 보여준다 */
+        const task = firebase.storage().ref(path).put(f);
+        await new Promise((res, rej) => {
+          task.on("state_changed", sn => setProg({
+            name: f.name,
+            pct: sn.totalBytes ? Math.round(sn.bytesTransferred / sn.totalBytes * 100) : 0
+          }), rej, res);
+        });
+        const url = await task.snapshot.ref.getDownloadURL();
         added.push({
           name: f.name,
           size: f.size,
@@ -11987,6 +11924,7 @@ function BoardPage({
         say(`${f.name} 올리기 실패: ${e && e.message || e}`, 5000);
       }
     }
+    setProg(null);
     setFiles(p2 => [...p2, ...added]);
     setBusy("");
     if (added.length) say(`${added.length}개 올렸어요.`);
@@ -12082,7 +12020,7 @@ function BoardPage({
       color: C.t3,
       marginBottom: 10
     }
-  }, "공지·인수인계·양식 공유용이에요. 자료를 올리면 누구나 내려받을 수 있습니다."), msg && /*#__PURE__*/React.createElement("div", {
+  }, "공지·인수인계·양식 공유용이에요. 한 파일 최대 200MB까지 올릴 수 있고, 누구나 내려받을 수 있습니다."), msg && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.blue,
@@ -12168,7 +12106,7 @@ function BoardPage({
       fontWeight: 700,
       cursor: "pointer"
     }
-  }, busy === "upload" ? "올리는 중…" : "📎 자료 첨부"), /*#__PURE__*/React.createElement("label", {
+  }, busy === "upload" ? "올리는 중…" : `📎 자료 첨부 (최대 ${MAX_MB}MB)`), /*#__PURE__*/React.createElement("label", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -12194,7 +12132,47 @@ function BoardPage({
       fontWeight: 700,
       cursor: "pointer"
     }
-  }, "올리기")), files.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "올리기")), prog && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 9
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      fontSize: 11,
+      color: C.t2,
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      minWidth: 0,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, prog.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 800,
+      color: C.blue
+    }
+  }, prog.pct, "%")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 6,
+      background: C.surfaceD,
+      borderRadius: 3,
+      overflow: "hidden"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: `${prog.pct}%`,
+      height: "100%",
+      background: C.blue,
+      borderRadius: 3,
+      transition: "width .2s"
+    }
+  }))), files.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
@@ -13083,8 +13061,7 @@ function App() {
     schedule: /*#__PURE__*/React.createElement(Calendar, {
       allSchools: allSchools,
       setDb: setDb,
-      isMobile: isMobile,
-      onGo: setMenu
+      isMobile: isMobile
     }),
     sites: /*#__PURE__*/React.createElement(SitesManager, {
       db: db,
