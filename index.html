@@ -11861,6 +11861,15 @@ function BoardPage({
   const [pin, setPin] = useState(false);
   const [q, setQ] = useState("");
   const fileRef = useRef();
+  /* ── 글 수정 ── */
+  const [editId, setEditId] = useState(null); // 수정 중인 글 id
+  const [eTitle, setETitle] = useState("");
+  const [eBody, setEBody] = useState("");
+  const [eFiles, setEFiles] = useState([]); // 수정 중 첨부 목록(원본 + 새로 올린 것)
+  const [ePin, setEPin] = useState(false);
+  const eOrigin = useRef([]); // 수정 시작 당시 첨부 (취소 시 되돌리기 판단용)
+  const eAdded = useRef([]); // 수정 중 새로 올린 것 (취소하면 저장소에서 지움)
+  const eFileRef = useRef();
   const me = editor || "익명";
   const say = (t, ms = 2600) => {
     setMsg(t);
@@ -11889,7 +11898,7 @@ function BoardPage({
 
   /* 파일 올리기 — Firebase Storage 에 저장하고 주소만 글에 붙인다 */
   const MAX_MB = 200; // 한 파일 최대 용량
-  const uploadFiles = async list => {
+  const uploadFiles = async (list, mode = "new") => {
     if (!list || !list.length) return;
     if (typeof firebase === "undefined" || !firebase.storage) {
       say("파일 저장소를 사용할 수 없어요.", 4000);
@@ -11925,9 +11934,76 @@ function BoardPage({
       }
     }
     setProg(null);
-    setFiles(p2 => [...p2, ...added]);
+    if (mode === "edit") {
+      eAdded.current = [...eAdded.current, ...added];
+      setEFiles(p2 => [...p2, ...added]);
+    } else {
+      setFiles(p2 => [...p2, ...added]);
+    }
     setBusy("");
     if (added.length) say(`${added.length}개 올렸어요.`);
+  };
+
+  /* ── 수정 시작 / 취소 / 저장 ──
+     첨부는 '저장'을 눌러야 실제로 반영된다. 취소하면 새로 올린 파일만 저장소에서 지우고
+     원래 있던 첨부는 그대로 남는다 → 잘못 눌러도 자료가 날아가지 않음. */
+  const startEdit = p2 => {
+    setWriting(false);
+    setEditId(p2.id);
+    setETitle(p2.title || "");
+    setEBody(p2.body || "");
+    const fs = p2.files || [];
+    setEFiles(fs);
+    setEPin(!!p2.pin);
+    eOrigin.current = fs;
+    eAdded.current = [];
+  };
+  const cancelEdit = () => {
+    /* 수정 중 새로 올렸던 파일은 쓰이지 않으므로 저장소에서 정리 */
+    try {
+      eAdded.current.forEach(f => {
+        if (f.path) firebase.storage().ref(f.path).delete().catch(() => {});
+      });
+    } catch {}
+    eAdded.current = [];
+    eOrigin.current = [];
+    setEditId(null);
+    setETitle("");
+    setEBody("");
+    setEFiles([]);
+    setEPin(false);
+  };
+  const saveEdit = p2 => {
+    const t = eTitle.trim();
+    if (!t) {
+      say("제목을 넣어주세요.");
+      return;
+    }
+    const keptPaths = new Set(eFiles.map(f => f.path).filter(Boolean));
+    try {
+      firebase.database().ref(`${FB_BOARD}/${p2.id}`).update({
+        title: t,
+        body: eBody.trim(),
+        pin: !!ePin,
+        files: eFiles.length ? eFiles : null,
+        editedAt: Date.now(),
+        editedBy: me
+      }).then(() => {
+        /* 저장이 끝난 뒤에야 빠진 첨부를 저장소에서 지운다 */
+        try {
+          (eOrigin.current || []).forEach(f => {
+            if (f.path && !keptPaths.has(f.path)) firebase.storage().ref(f.path).delete().catch(() => {});
+          });
+        } catch {}
+        eAdded.current = [];
+        eOrigin.current = [];
+        say("수정했어요.");
+      }).catch(e => say("수정 실패: " + (e && e.message || e), 5000));
+      logAction("수정", "게시판", p2.title, t);
+      setEditId(null);
+    } catch (e) {
+      say("수정 실패: " + (e && e.message || e), 5000);
+    }
   };
   const submit = () => {
     const t = title.trim();
@@ -12000,6 +12076,7 @@ function BoardPage({
     }
   }, posts.length, "개"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
+      if (editId) cancelEdit();
       setWriting(v => !v);
       setOpenId(null);
     },
@@ -12258,6 +12335,7 @@ function BoardPage({
   }, shown.map(p2 => {
     const isOpen = openId === p2.id;
     const mine = p2.by === me;
+    const isEditing = editId === p2.id;
     return /*#__PURE__*/React.createElement("div", {
       key: p2.id,
       style: {
@@ -12320,7 +12398,13 @@ function BoardPage({
         color: C.t3,
         marginTop: 5
       }
-    }, p2.by, " · ", agoText(p2.at))), isOpen && /*#__PURE__*/React.createElement("div", {
+    }, p2.by, " · ", agoText(p2.at), p2.editedAt && /*#__PURE__*/React.createElement("span", {
+      title: `${p2.editedBy || ""} 님이 ${agoText(p2.editedAt)} 수정`,
+      style: {
+        marginLeft: 6,
+        color: C.t4
+      }
+    }, "· 수정됨 ", agoText(p2.editedAt)))), isOpen && !isEditing && /*#__PURE__*/React.createElement("div", {
       style: {
         padding: isMobile ? "0 14px 14px" : "0 16px 16px",
         borderTop: `1px solid ${C.surfaceD}`
@@ -12404,6 +12488,18 @@ function BoardPage({
         color: C.t2
       }
     }, p2.pin ? "고정 해제" : "맨 위 고정"), mine && /*#__PURE__*/React.createElement("button", {
+      onClick: () => startEdit(p2),
+      style: {
+        padding: "8px 13px",
+        borderRadius: 7,
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        border: `1px solid ${C.blue}40`,
+        background: C.blueL,
+        color: C.blue
+      }
+    }, "✏ 수정"), mine && /*#__PURE__*/React.createElement("button", {
       onClick: () => removePost(p2),
       style: {
         padding: "8px 13px",
@@ -12415,7 +12511,183 @@ function BoardPage({
         background: C.redL,
         color: C.red
       }
-    }, "삭제"))));
+    }, "삭제"))), isOpen && isEditing && /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: isMobile ? "12px 14px 14px" : "14px 16px 16px",
+        borderTop: `1px solid ${C.surfaceD}`,
+        background: C.blue + "06"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        fontWeight: 800,
+        color: C.blue,
+        marginBottom: 8
+      }
+    }, "✏ 글 수정"), /*#__PURE__*/React.createElement("input", {
+      value: eTitle,
+      onChange: e => setETitle(e.target.value),
+      placeholder: "제목",
+      style: {
+        width: "100%",
+        boxSizing: "border-box",
+        padding: "11px 12px",
+        background: C.surface,
+        border: BD,
+        borderRadius: 8,
+        color: C.t1,
+        fontSize: 15,
+        fontWeight: 700,
+        outline: "none",
+        marginBottom: 8
+      }
+    }), /*#__PURE__*/React.createElement("textarea", {
+      value: eBody,
+      onChange: e => setEBody(e.target.value),
+      rows: isMobile ? 6 : 8,
+      placeholder: "내용을 적어주세요",
+      style: {
+        width: "100%",
+        boxSizing: "border-box",
+        padding: "11px 12px",
+        background: C.surface,
+        border: BD,
+        borderRadius: 8,
+        color: C.t1,
+        fontSize: 14,
+        outline: "none",
+        resize: "vertical",
+        lineHeight: 1.7,
+        fontFamily: "inherit"
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        alignItems: "center",
+        marginTop: 9
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      ref: eFileRef,
+      type: "file",
+      multiple: true,
+      style: {
+        display: "none"
+      },
+      onChange: e => {
+        uploadFiles(e.target.files, "edit");
+        e.target.value = "";
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: () => eFileRef.current && eFileRef.current.click(),
+      disabled: busy === "upload",
+      style: {
+        padding: "9px 14px",
+        borderRadius: 8,
+        border: `1.5px solid ${C.border}`,
+        background: C.surface,
+        color: C.t2,
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer"
+      }
+    }, busy === "upload" ? "올리는 중…" : "📎 자료 추가"), /*#__PURE__*/React.createElement("label", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        fontSize: 12,
+        color: C.t2,
+        cursor: "pointer"
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      checked: ePin,
+      onChange: e => setEPin(e.target.checked)
+    }), " 맨 위 고정")), eFiles.length > 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 5,
+        marginTop: 9
+      }
+    }, eFiles.map((f, i) => /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "7px 10px",
+        background: C.surface,
+        border: BD,
+        borderRadius: 7
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: C.t1,
+        flex: 1,
+        minWidth: 0,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }
+    }, "📎 ", f.name), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: C.t4
+      }
+    }, fmtSize(f.size)), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setEFiles(p3 => p3.filter((_, j) => j !== i)),
+      title: "이 첨부 빼기",
+      style: {
+        border: "none",
+        background: "transparent",
+        color: C.red,
+        fontSize: 14,
+        cursor: "pointer",
+        lineHeight: 1
+      }
+    }, "×")))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: C.t4,
+        marginTop: 8
+      }
+    }, "첨부를 빼도 '저장'을 눌러야 실제로 지워져요. 취소하면 원래대로 돌아갑니다."), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 6,
+        marginTop: 10
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: cancelEdit,
+      style: {
+        padding: "9px 16px",
+        borderRadius: 8,
+        border: `1.5px solid ${C.border}`,
+        background: C.surface,
+        color: C.t3,
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: "pointer"
+      }
+    }, "취소"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => saveEdit(p2),
+      disabled: busy === "upload",
+      style: {
+        marginLeft: "auto",
+        padding: "9px 22px",
+        borderRadius: 8,
+        border: "none",
+        background: busy === "upload" ? C.t4 : C.blue,
+        color: "#fff",
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: busy === "upload" ? "default" : "pointer"
+      }
+    }, "저장"))));
   })));
 }
 
