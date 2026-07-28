@@ -4187,7 +4187,10 @@ function LI({
   val,
   on,
   type = "text",
-  col
+  col,
+  list,
+  placeholder,
+  hint
 }) {
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4204,6 +4207,8 @@ function LI({
   }, label), /*#__PURE__*/React.createElement("input", {
     type: type,
     value: val,
+    list: list,
+    placeholder: placeholder,
     onChange: e => on(e.target.value),
     style: {
       padding: "7px 9px",
@@ -4215,7 +4220,12 @@ function LI({
       outline: "none",
       width: "100%"
     }
-  }));
+  }), hint && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: C.t4
+    }
+  }, hint));
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -4226,9 +4236,11 @@ function EditPanel({
   yr,
   half,
   setDb,
-  onClose
+  onClose,
+  isNew
 }) {
   const isMobile = useIsMobile();
+  const [nameErr, setNameErr] = useState("");
   const tc = {
     a: C.blue,
     b: C.blueL,
@@ -4276,6 +4288,12 @@ function EditPanel({
   const [confirmDel, setConfirmDel] = useState(false); // 삭제 확인 창
 
   const save = () => {
+    /* 새로 만드는 현장은 이름이 있어야 저장된다 */
+    if (isNew && !String(f.school || "").trim()) {
+      setNameErr("현장명을 입력해 주세요.");
+      return;
+    }
+    setNameErr("");
     const beforeStr = `${(sc.assignees || []).join(",") || "-"} · 진행 ${STEPS.filter(k => sc.progress && sc.progress[k]).length}/${STEPS.length}`;
     const afterStr = `${f.assignees.join(",") || "-"} · 진행 ${STEPS.filter(k => prog[k]).length}/${STEPS.length}`;
     setDb(prev => {
@@ -4285,9 +4303,8 @@ function EditPanel({
       next[yr] = {
         ...(prev[yr] || {})
       };
-      next[yr][half] = (prev[yr]?.[half] || []).map(s => {
-        if (s.id !== sc.id) return s;
-        return stampEdit({
+      const arr = prev[yr]?.[half] || [];
+      const build = s => stampEdit({
           ...s,
           school: f.school || s.school,
           no: f.no,
@@ -4317,11 +4334,12 @@ function EditPanel({
             jong: b.jong ?? null,
             budget: b.budget ?? null
           }))
-        }, "현장 정보 수정");
-      });
+        }, isNew ? "현장 추가" : "현장 정보 수정");
+      /* 목록에 없으면(=새 현장) 이때 비로소 추가된다 → 취소하면 아무것도 안 남는다 */
+      next[yr][half] = arr.some(s => s.id === sc.id) ? arr.map(s => s.id === sc.id ? build(s) : s) : [...arr, build(sc)];
       return next;
     });
-    logAction("수정", `현장 · ${sc.school}`, beforeStr, afterStr);
+    logAction(isNew ? "추가" : "수정", `현장 · ${f.school || sc.school}`, isNew ? null : beforeStr, afterStr);
     setSaved(true);
     setTimeout(() => {
       setSaved(false);
@@ -4392,19 +4410,19 @@ function EditPanel({
       fontWeight: 700,
       marginBottom: 3
     }
-  }, "✏ 현장 수정 · ", yr, " ", half), /*#__PURE__*/React.createElement("div", {
+  }, isNew ? "➕ 새 현장 · " : "✏ 현장 수정 · ", yr, " ", half), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 17,
       fontWeight: 900,
       color: C.t1
     }
-  }, sc.school), /*#__PURE__*/React.createElement("div", {
+  }, f.school || (isNew ? "새 현장" : sc.school)), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
       color: C.t3,
       marginTop: 2
     }
-  }, sc.region, " · ", sc.buildings.length, "동 · No.", sc.no)), /*#__PURE__*/React.createElement("button", {
+  }, f.region || "지역 미입력", " · ", bf.length, "동", f.no ? ` · No.${f.no}` : "")), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
       width: 28,
@@ -4453,8 +4471,28 @@ function EditPanel({
     on: v => setF(p => ({
       ...p,
       school: v
-    }))
+    })),
+    placeholder: "예: 김포양곡중학교"
   })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      gridColumn: "span 2"
+    }
+  }, /*#__PURE__*/React.createElement(LI, {
+    label: "📍 지역",
+    val: f.region,
+    on: v => setF(p => ({
+      ...p,
+      region: v
+    })),
+    list: "region-list",
+    placeholder: "예: 김포 · 남양주 · 수원",
+    hint: "지도에서 현장 위치를 잡을 때 쓰입니다"
+  }), /*#__PURE__*/React.createElement("datalist", {
+    id: "region-list"
+  }, Object.keys(REGION_XY).map(r => /*#__PURE__*/React.createElement("option", {
+    key: r,
+    value: r
+  })))), /*#__PURE__*/React.createElement("div", {
     style: {
       gridColumn: "span 2"
     }
@@ -4510,14 +4548,7 @@ function EditPanel({
         color: on ? o.color : C.t3
       }
     }, on && "✓ ", o.label);
-  }))), /*#__PURE__*/React.createElement(LI, {
-    label: "지역",
-    val: f.region,
-    on: v => setF(p => ({
-      ...p,
-      region: v
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("div", {
     style: {
       gridColumn: "span 2"
     }
@@ -4965,6 +4996,13 @@ function EditPanel({
     }
   }, "+ 동 추가")), /*#__PURE__*/React.createElement("div", {
     style: {
+      padding: nameErr ? "0 22px 8px" : "0",
+      fontSize: 13,
+      fontWeight: 700,
+      color: C.red
+    }
+  }, nameErr ? `⚠ ${nameErr}` : null), /*#__PURE__*/React.createElement("div", {
+    style: {
       padding: "14px 22px",
       paddingBottom: "calc(14px + env(safe-area-inset-bottom))",
       borderTop: BD,
@@ -4972,7 +5010,7 @@ function EditPanel({
       display: "flex",
       gap: 8
     }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, !isNew && /*#__PURE__*/React.createElement("button", {
     onClick: () => setConfirmDel(true),
     title: "현장 삭제",
     style: {
@@ -5013,7 +5051,7 @@ function EditPanel({
       transition: "background .3s",
       boxShadow: `0 4px 14px ${saved ? C.green : C.blue}40`
     }
-  }, saved ? "✓ 저장됨!" : "✓ 저장 · 캘린더 자동 반영"))), confirmDel && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, saved ? "✓ 저장됨!" : isNew ? "✓ 이대로 현장 추가" : "✓ 저장 · 캘린더 자동 반영"))), confirmDel && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     onClick: () => setConfirmDel(false),
     style: {
       position: "fixed",
@@ -5583,6 +5621,7 @@ function SitesManager({
   const [open, setOpen] = useState(new Set());
   const [copied, setCopied] = useState(null);
   const [editId, setEditId] = useState(null);
+  const [draft, setDraft] = useState(null); // 아직 저장 안 한 새 현장
   const [copyOpen, setCopyOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const showToast = m => {
@@ -5598,15 +5637,11 @@ function SitesManager({
   /* 새 현장 추가 → 현재 연/반기에 빈 학교 생성 후 편집창 열기 */
   const addNewSite = () => {
     const id = `new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    /* 이름이 겹치면 중복 정리가 같은 현장으로 보고 합쳐버린다 → 번호를 붙여 겹치지 않게.
-       (휴지통에 있는 것까지 포함해서 확인한다) */
-    const bucket = db[yr]?.[half] || [];
-    let seq = 1,
-      name = "새 현장";
-    while (bucket.some(s => String(s.school || "").trim() === name)) name = `새 현장 ${++seq}`;
+    /* 여기서는 목록에 넣지 않는다. 수정창에서 '저장'을 눌러야 비로소 추가된다.
+       취소하면 아무 흔적도 남지 않는다. */
     const newSc = {
       id,
-      school: name,
+      school: "",
       no: "",
       region: "",
       kind: "정기점검",
@@ -5628,21 +5663,11 @@ function SitesManager({
         delivery: null
       }]
     };
-    setDb(prev => {
-      const n = {
-        ...prev
-      };
-      n[yr] = {
-        ...(prev[yr] || {})
-      };
-      n[yr][half] = [...(prev[yr]?.[half] || []), newSc];
-      return n;
-    });
+    setDraft(newSc);
     setEditId(id);
-    /* 필터·검색이 켜져 있으면 방금 추가한 현장이 목록에서 걸러져 안 보인다 */
+    /* 필터·검색이 켜져 있으면 저장 후에도 목록에서 걸러져 안 보인다 */
     setStF("전체");
     setSearch("");
-    showToast(`${name} 추가됨 · 내용을 입력하세요`);
   };
   const schools = useMemo(() => (db[yr]?.[half] || []).filter(s => !s.deleted), [db, yr, half]);
   const updDate = (sid, field, v) => {
@@ -5730,7 +5755,8 @@ function SitesManager({
     noD: allB.filter(b => b.rep && !b.delivery).length
   };
   const years = Object.keys(db).sort((a, b) => b - a);
-  const editSc = editId ? schools.find(s => s.id === editId) : null;
+  const isDraft = !!(draft && draft.id === editId);
+  const editSc = isDraft ? draft : editId ? schools.find(s => s.id === editId) : null;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -6940,7 +6966,11 @@ function SitesManager({
     yr: yr,
     half: half,
     setDb: setDb,
-    onClose: () => setEditId(null)
+    isNew: isDraft,
+    onClose: () => {
+      setEditId(null);
+      setDraft(null);
+    }
   }), copyOpen && /*#__PURE__*/React.createElement(CopyHalfModal, {
     db: db,
     setDb: setDb,
