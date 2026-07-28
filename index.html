@@ -212,7 +212,12 @@ function mergeSites(a, b) {
 
 /* 한 반기(또는 LH) 안에서 중복 제거 — 순서 유지 */
 function dedupeBucket(arr) {
-  const list = (arr || []).filter(Boolean);
+  const all = (arr || []).filter(Boolean);
+  /* 휴지통(삭제 표시) 현장은 병합 대상에서 빼둔다.
+     이걸 안 빼면 버려진 '새 현장'이 새로 추가한 현장을 빨아들이고
+     deleted:true 까지 물려줘서, 추가해도 화면에 안 나타난다. */
+  const trashed = all.filter(s => s.deleted);
+  const list = all.filter(s => !s.deleted);
   const kept = [],
     slots = new Map(); // 학교명 → kept 인덱스 목록
   list.forEach(s => {
@@ -229,7 +234,7 @@ function dedupeBucket(arr) {
       slots.set(nm, idxs);
     } else kept[hit] = mergeSites(kept[hit], s);
   });
-  return kept;
+  return kept.concat(trashed);
 }
 
 /* db 전체 중복 정리 — 바뀐 게 없으면 원본을 그대로 돌려준다(불필요한 저장 방지) */
@@ -5593,9 +5598,15 @@ function SitesManager({
   /* 새 현장 추가 → 현재 연/반기에 빈 학교 생성 후 편집창 열기 */
   const addNewSite = () => {
     const id = `new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    /* 이름이 겹치면 중복 정리가 같은 현장으로 보고 합쳐버린다 → 번호를 붙여 겹치지 않게.
+       (휴지통에 있는 것까지 포함해서 확인한다) */
+    const bucket = db[yr]?.[half] || [];
+    let seq = 1,
+      name = "새 현장";
+    while (bucket.some(s => String(s.school || "").trim() === name)) name = `새 현장 ${++seq}`;
     const newSc = {
       id,
-      school: "새 현장",
+      school: name,
       no: "",
       region: "",
       kind: "정기점검",
@@ -5628,7 +5639,10 @@ function SitesManager({
       return n;
     });
     setEditId(id);
-    showToast("새 현장 추가됨 · 내용을 입력하세요");
+    /* 필터·검색이 켜져 있으면 방금 추가한 현장이 목록에서 걸러져 안 보인다 */
+    setStF("전체");
+    setSearch("");
+    showToast(`${name} 추가됨 · 내용을 입력하세요`);
   };
   const schools = useMemo(() => (db[yr]?.[half] || []).filter(s => !s.deleted), [db, yr, half]);
   const updDate = (sid, field, v) => {
@@ -10541,7 +10555,9 @@ function MapPage({
         });
       });
     }));
-    return out.sort((a, b) => a.score - b.score || a.s.school.length - b.s.school.length).slice(0, 8);
+    /* 같은 학교가 여러 반기에 걸쳐 있으면 최근 것부터 (LH는 맨 뒤) */
+    const rank = x => isLH(x.y) ? -1 : (parseInt(x.y, 10) || 0) * 2 + (x.h === "하반기" ? 1 : 0);
+    return out.sort((a, b) => a.score - b.score || rank(b) - rank(a) || a.s.school.length - b.s.school.length).slice(0, 8);
   }, [db, q]);
 
   /* 검색 결과 선택 → 그 반기로 옮기고 지도 확대 */
@@ -11148,6 +11164,10 @@ function MapPage({
     }
   }, "일치하는 현장이 없어요."), matches.map(m => {
     const has = !!geo[normSchool(m.s.school)];
+    /* 어느 반기 건인지가 제일 먼저 보여야 같은 학교가 여러 번 나와도 헷갈리지 않는다 */
+    const lh = isLH(m.y);
+    const hc = lh ? C.purple : m.h === "상반기" ? C.blue : C.orange;
+    const hlabel = lh ? "LH" : `${String(m.y).slice(2)}년 ${m.h === "상반기" ? "상" : "하"}`;
     return /*#__PURE__*/React.createElement("button", {
       key: `${m.y}-${m.h}-${m.s.id}`,
       onClick: () => goTo(m),
@@ -11155,7 +11175,7 @@ function MapPage({
         width: "100%",
         display: "flex",
         alignItems: "center",
-        gap: 8,
+        gap: 9,
         padding: "10px 13px",
         background: "transparent",
         border: "none",
@@ -11165,9 +11185,19 @@ function MapPage({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 15
+        flexShrink: 0,
+        minWidth: 54,
+        textAlign: "center",
+        padding: "5px 7px",
+        borderRadius: 6,
+        fontSize: 13,
+        fontWeight: 800,
+        color: hc,
+        background: hc + "16",
+        border: `1px solid ${hc}45`,
+        whiteSpace: "nowrap"
       }
-    }, has ? "🔵" : "⚪"), /*#__PURE__*/React.createElement("span", {
+    }, lh ? "🏢 LH" : hlabel), /*#__PURE__*/React.createElement("span", {
       style: {
         flex: 1,
         minWidth: 0,
@@ -11192,19 +11222,13 @@ function MapPage({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, (m.s.buildings || []).map(b => b.b).filter(Boolean).slice(0, 3).join(" · ") || "동 정보 없음", m.s.end ? ` · 완수 ${fd(m.s.end)}` : "")), /*#__PURE__*/React.createElement("span", {
+    }, m.s.region ? `${m.s.region} · ` : "", (m.s.buildings || []).map(b => b.b).filter(Boolean).slice(0, 3).join(" · ") || "동 정보 없음", m.s.end ? ` · 완수 ${fd(m.s.end)}` : "")), /*#__PURE__*/React.createElement("span", {
+      title: has ? "위치 저장됨" : "위치 미확정",
       style: {
-        fontSize: 12,
-        color: C.t3,
-        whiteSpace: "nowrap"
+        fontSize: 15,
+        flexShrink: 0
       }
-    }, m.s.region), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 12,
-        color: C.t4,
-        whiteSpace: "nowrap"
-      }
-    }, isLH(m.y) ? "LH" : `${String(m.y).slice(2)}년 ${m.h === "상반기" ? "상" : "하"}`));
+    }, has ? "🔵" : "⚪"));
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
