@@ -27,7 +27,7 @@
 </script>
 <style>
   html,body,#root{margin:0;padding:0;height:100%;}
-  body{font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;}
+  body{font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;-webkit-text-size-adjust:100%;line-height:1.5;}
   #boot{display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:14px;color:#8A94A6;background:#F0F2F5;}
   #boot .logo{font-size:28px;font-weight:900;color:#1A2332;letter-spacing:-0.5px;}
   #boot .bar{width:120px;height:4px;border-radius:4px;background:#E2E6ED;overflow:hidden;}
@@ -54,12 +54,12 @@ const C = {
   surface: "#FFFFFF",
   surfaceL: "#F7F9FB",
   surfaceD: "#ECEEF2",
-  border: "#E2E6ED",
-  borderD: "#CDD2DB",
+  border: "#D7DCE5",
+  borderD: "#B3BBC8",
   t1: "#1A2332",
-  t2: "#4A5568",
-  t3: "#8A94A6",
-  t4: "#BCC3CE",
+  t2: "#3F4A5C",
+  t3: "#5C6879",
+  t4: "#67717F",
   team1: "#1D6FF2",
   team1b: "#EBF2FF",
   team1c: "#1058CC",
@@ -432,7 +432,7 @@ function RouteChooser({
     style: {
       padding: "13px 0",
       borderRadius: 10,
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 800,
       cursor: "pointer",
       border: `1.5px solid ${bd}`,
@@ -466,20 +466,20 @@ function RouteChooser({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 15,
+      fontSize: 16,
       fontWeight: 900,
       color: C.t1,
       marginBottom: 3
     }
   }, "🧭 길찾기"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t3,
       marginBottom: 4
     }
   }, site.school), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: pos ? C.t4 : C.orange,
       marginBottom: 14
     }
@@ -523,7 +523,7 @@ function RouteChooser({
       border: `1px solid ${C.border}`,
       background: "transparent",
       color: C.t3,
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -632,14 +632,16 @@ function getProgress(s) {
 }
 
 /* ── 기준일 & D-day ── */
-const BASE_DATE = (() => {
+/* 오늘 날짜 — 앱을 며칠씩 켜두면 자정을 넘겨도 D-day가 안 바뀌던 문제 때문에
+   상수로 굳히지 않고 필요할 때마다 다시 계산한다. */
+const todayStr = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-})();
-const calcDday = (end, base = BASE_DATE) => {
+};
+const calcDday = (end, base) => {
   if (!end) return null;
   const [y, m, d] = end.split("-").map(Number);
-  const [by, bm, bd] = base.split("-").map(Number);
+  const [by, bm, bd] = (base || todayStr()).split("-").map(Number);
   return Math.floor((new Date(y, m - 1, d) - new Date(by, bm - 1, bd)) / 86400000);
 };
 /* calcDday: 미래(남음)=+, 과거(지남)=−
@@ -1370,7 +1372,7 @@ function Tag({
 }) {
   return /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       padding: "2px 7px",
       borderRadius: 4,
@@ -1394,7 +1396,7 @@ function Pill({
     style: {
       padding: "5px 11px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 600,
       border: `1.5px solid ${active ? ac : C.border}`,
       background: active ? ac + "18" : "transparent",
@@ -1466,18 +1468,19 @@ function StepBar({
 function Toast({
   msg
 }) {
+  const isMobile = useIsMobile();
   if (!msg) return null;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
-      bottom: 28,
+      bottom: isMobile ? `calc(${TAB_H + 18}px + env(safe-area-inset-bottom))` : 28,
       left: "50%",
       transform: "translateX(-50%)",
       background: C.surface,
       border: `1px solid ${C.green}`,
       borderRadius: 10,
       padding: "11px 20px",
-      fontSize: 12,
+      fontSize: 14,
       color: C.green,
       fontWeight: 700,
       boxShadow: "0 8px 24px rgba(0,0,0,.15)",
@@ -3044,9 +3047,9 @@ function DayPanel({
         ...prev
       };
       next[sc._year] = {
-        ...prev[sc._year]
+        ...(prev[sc._year] || {})
       };
-      next[sc._year][sc._half] = prev[sc._year][sc._half].map(s => {
+      next[sc._year][sc._half] = (prev[sc._year]?.[sc._half] || []).map(s => {
         if (s.id !== sid) return s;
         const cur = s.assignees || [];
         const upd = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
@@ -3074,9 +3077,9 @@ function DayPanel({
       onClick: e => e.stopPropagation(),
       title: `${num} 로 전화`,
       style: {
-        padding: "3px 9px",
+        padding: isMobile ? "9px 12px" : "3px 9px",
         borderRadius: 5,
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 800,
         textDecoration: "none",
         border: `1px solid ${C.green}55`,
@@ -3100,7 +3103,7 @@ function DayPanel({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 800,
       color: C.t1,
       flex: 1,
@@ -3114,14 +3117,14 @@ function DayPanel({
     return o ? /*#__PURE__*/React.createElement("span", {
       key: fv,
       style: {
-        fontSize: 9,
+        fontSize: 12,
         fontWeight: 700,
         color: o.color
       }
     }, o.label) : null;
   }), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t3
     }
   }, s.region), /*#__PURE__*/React.createElement(TelBtn, {
@@ -3133,9 +3136,9 @@ function DayPanel({
     },
     title: "길찾기",
     style: {
-      padding: "3px 10px",
+      padding: isMobile ? "9px 13px" : "3px 10px",
       borderRadius: 5,
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 800,
       border: `1px solid ${C.purple}45`,
       background: C.purpleL,
@@ -3146,9 +3149,9 @@ function DayPanel({
   }, "🧭 길찾기"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setEditId(s.id),
     style: {
-      padding: "3px 10px",
+      padding: isMobile ? "9px 13px" : "3px 10px",
       borderRadius: 5,
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       border: `1px solid ${C.blue}40`,
       background: C.blueL,
@@ -3207,7 +3210,7 @@ function DayPanel({
           display: "inline-flex",
           alignItems: "center",
           gap: 4,
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: 700,
           color: "#fff",
           background: mc,
@@ -3219,13 +3222,13 @@ function DayPanel({
       }, name, /*#__PURE__*/React.createElement("button", {
         onClick: () => toggleAssignee(s.id, name),
         style: {
-          width: 14,
-          height: 14,
+          width: 19,
+          height: 19,
           borderRadius: "50%",
           border: "none",
           background: "rgba(255,255,255,.3)",
           color: "#fff",
-          fontSize: 10,
+          fontSize: 12,
           fontWeight: 900,
           cursor: "pointer",
           lineHeight: 1,
@@ -3244,7 +3247,7 @@ function DayPanel({
         border: `1.5px solid ${C.blue}`,
         background: open ? C.blue : C.surface,
         color: open ? "#fff" : C.blue,
-        fontSize: 16,
+        fontSize: 17,
         fontWeight: 700,
         cursor: "pointer",
         lineHeight: 1,
@@ -3255,7 +3258,7 @@ function DayPanel({
       }
     }, "+"), assignees.length === 0 && !open && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4
       }
     }, "+ 버튼으로 인원 추가")), open && /*#__PURE__*/React.createElement("div", {
@@ -3268,7 +3271,7 @@ function DayPanel({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t4,
         fontWeight: 600,
         marginBottom: 5
@@ -3290,7 +3293,7 @@ function DayPanel({
         style: {
           padding: "5px 12px",
           borderRadius: 20,
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: 700,
           cursor: "pointer",
           background: mc + "14",
@@ -3310,7 +3313,7 @@ function DayPanel({
     }, s.buildings.map((b, i) => /*#__PURE__*/React.createElement("span", {
       key: i,
       style: {
-        fontSize: 9,
+        fontSize: 12,
         padding: "1px 6px",
         borderRadius: 3,
         background: C.surfaceL,
@@ -3321,7 +3324,7 @@ function DayPanel({
     }, b.b, b.floor ? ` (${b.floor}층)` : ""))), s.buildings.some(b => b.note) && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 6,
-        fontSize: 9,
+        fontSize: 12,
         color: C.t3,
         padding: "3px 8px",
         background: C.yellowL,
@@ -3348,7 +3351,7 @@ function DayPanel({
     s: s
   }), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t2
     }
   }, "▶ 용역 착수 · ", s.buildings.length, "동 · 완수 ", fd(s.end), " (", ddL(calcDday(s.end)), ")"), /*#__PURE__*/React.createElement(EditLine, {
@@ -3369,7 +3372,7 @@ function DayPanel({
     s: s
   }), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t2
     }
   }, "🏁 완수 예정 · ", s.buildings.length, "동", (s.assignees || []).length ? ` · ${s.assignees.join("·")}` : ""), /*#__PURE__*/React.createElement(EditLine, {
@@ -3462,7 +3465,7 @@ function DayPanel({
       }
     }), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t4
       }
     }, "아래로 쓸어내리면 닫혀요"));
@@ -3515,7 +3518,7 @@ function DayPanel({
       background: `${C.blue}20`,
       border: `1px solid ${C.blue}40`,
       color: C.blue,
-      fontSize: 18,
+      fontSize: 19,
       cursor: "pointer",
       display: "flex",
       alignItems: "center",
@@ -3542,7 +3545,7 @@ function DayPanel({
     }
   }, "—"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13
+      fontSize: 15
     }
   }, "등록된 일정 없음")), fieldSchools.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3560,11 +3563,11 @@ function DayPanel({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 15
+      fontSize: 16
     }
   }, "📍"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.blue
     }
@@ -3575,7 +3578,7 @@ function DayPanel({
       color: "#fff",
       padding: "2px 9px",
       borderRadius: 10,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700
     }
   }, fieldSchools.length)), fieldSchools.map(s => /*#__PURE__*/React.createElement(FieldCard, {
@@ -3597,11 +3600,11 @@ function DayPanel({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 15
+      fontSize: 16
     }
   }, "▶"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.green
     }
@@ -3612,7 +3615,7 @@ function DayPanel({
       color: "#fff",
       padding: "2px 9px",
       borderRadius: 10,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700
     }
   }, startSchools.length)), startSchools.map(s => /*#__PURE__*/React.createElement(StartCard, {
@@ -3630,11 +3633,11 @@ function DayPanel({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 15
+      fontSize: 16
     }
   }, "📦"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.orange
     }
@@ -3645,7 +3648,7 @@ function DayPanel({
       color: "#fff",
       padding: "2px 9px",
       borderRadius: 10,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700
     }
   }, endSchools.length)), endSchools.map(s => /*#__PURE__*/React.createElement(EndCard, {
@@ -3807,10 +3810,10 @@ function Calendar({
           ...prev
         };
         next[sc._year] = {
-          ...prev[sc._year]
+          ...(prev[sc._year] || {})
         };
         const lb = field === "field" ? "현장조사일" : field === "start" ? "착수일" : "완수일";
-        next[sc._year][sc._half] = prev[sc._year][sc._half].map(s => s.id !== schoolId ? s : stampEdit({
+        next[sc._year][sc._half] = (prev[sc._year]?.[sc._half] || []).map(s => s.id !== schoolId ? s : stampEdit({
           ...s,
           [field]: nd
         }, `${lb} 변경`));
@@ -3838,7 +3841,7 @@ function Calendar({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       letterSpacing: 2,
       fontWeight: 600,
@@ -3857,7 +3860,7 @@ function Calendar({
       background: C.blueL,
       border: `1px solid ${C.blue}30`,
       borderRadius: 8,
-      fontSize: 11,
+      fontSize: 13,
       color: C.blue,
       fontWeight: 600,
       marginBottom: 14,
@@ -3887,8 +3890,8 @@ function Calendar({
   }, /*#__PURE__*/React.createElement("button", {
     onClick: prevMonth,
     style: {
-      width: isMobile ? 34 : 38,
-      height: isMobile ? 34 : 38,
+      width: isMobile ? 40 : 44,
+      height: isMobile ? 40 : 44,
       borderRadius: 8,
       border: BD,
       background: C.surface,
@@ -3913,8 +3916,8 @@ function Calendar({
   }, yr, "년 ", mo, "월"), /*#__PURE__*/React.createElement("button", {
     onClick: nextMonth,
     style: {
-      width: isMobile ? 34 : 38,
-      height: isMobile ? 34 : 38,
+      width: isMobile ? 40 : 44,
+      height: isMobile ? 40 : 44,
       borderRadius: 8,
       border: BD,
       background: C.surface,
@@ -3954,7 +3957,7 @@ function Calendar({
       border: `1px solid ${yr === y ? C.blue : C.border}`,
       background: yr === y ? C.blueL : "transparent",
       color: yr === y ? C.blue : C.t3,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 600,
       cursor: "pointer"
     }
@@ -3975,7 +3978,7 @@ function Calendar({
       border: `1px solid ${mo === m ? C.blue : C.border}`,
       background: mo === m ? C.blueL : "transparent",
       color: mo === m ? C.blue : C.t3,
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 600,
       cursor: "pointer"
     }
@@ -4038,7 +4041,7 @@ function Calendar({
       style: {
         padding: isMobile ? "6px 6px 5px" : "7px 8px 7px",
         verticalAlign: "top",
-        height: isMobile ? 92 : 118,
+        height: isMobile ? 112 : 138,
         width: "14.285%",
         borderRight: di < 6 ? BD : "none",
         cursor: day ? "pointer" : "default",
@@ -4050,8 +4053,8 @@ function Calendar({
       }
     }, day && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       style: {
-        width: isMobile ? 26 : 34,
-        height: isMobile ? 26 : 34,
+        width: isMobile ? 30 : 38,
+        height: isMobile ? 30 : 38,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -4069,7 +4072,7 @@ function Calendar({
         top: "50%",
         left: "50%",
         transform: "translate(-50%,-60%)",
-        fontSize: 9,
+        fontSize: 12,
         color: C.blue,
         fontWeight: 700,
         pointerEvents: "none",
@@ -4085,7 +4088,7 @@ function Calendar({
         flexDirection: "column",
         gap: isMobile ? 2 : 3
       }
-    }, evs.slice(0, isMobile ? 2 : 99).map((e, ei) => /*#__PURE__*/React.createElement("div", {
+    }, evs.slice(0, isMobile ? 3 : 99).map((e, ei) => /*#__PURE__*/React.createElement("div", {
       key: ei,
       draggable: true,
       onDragStart: () => setDragging({
@@ -4118,13 +4121,13 @@ function Calendar({
         opacity: .85,
         fontSize: isMobile ? 8 : 10
       }
-    }, e.assignees.length > 0 ? ` (${e.assignees.map(n => n[0]).join("·")})` : ` ${e.headcount}명`))), evs.length > (isMobile ? 2 : 99) && /*#__PURE__*/React.createElement("div", {
+    }, e.assignees.length > 0 ? ` (${e.assignees.map(n => n[0]).join("·")})` : ` ${e.headcount}명`))), evs.length > (isMobile ? 3 : 99) && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: isMobile ? 9 : 11,
         color: C.t4,
         paddingLeft: 4
       }
-    }, "+", evs.length - (isMobile ? 2 : 99), "건"))));
+    }, "+", evs.length - (isMobile ? 3 : 99), "건"))));
   })))))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -4153,12 +4156,12 @@ function Calendar({
     }
   }), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3
     }
   }, k))), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4
     }
   }, "날짜를 누르면 그날 현장이 열려요 · 달력을 좌우로 밀면 달이 넘어갑니다"))), selDay && /*#__PURE__*/React.createElement(DayPanel, {
@@ -4189,7 +4192,7 @@ function LI({
     }
   }, /*#__PURE__*/React.createElement("label", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700
     }
@@ -4203,7 +4206,7 @@ function LI({
       border: BD,
       borderRadius: 6,
       color: col || C.t1,
-      fontSize: 11,
+      fontSize: 13,
       outline: "none",
       width: "100%"
     }
@@ -4275,9 +4278,9 @@ function EditPanel({
         ...prev
       };
       next[yr] = {
-        ...prev[yr]
+        ...(prev[yr] || {})
       };
-      next[yr][half] = prev[yr][half].map(s => {
+      next[yr][half] = (prev[yr]?.[half] || []).map(s => {
         if (s.id !== sc.id) return s;
         return stampEdit({
           ...s,
@@ -4329,7 +4332,7 @@ function EditPanel({
         ...prev
       };
       next[yr] = {
-        ...prev[yr]
+        ...(prev[yr] || {})
       };
       next[yr][half] = (prev[yr]?.[half] || []).map(s => s.id !== sc.id ? s : {
         ...s,
@@ -4370,6 +4373,7 @@ function EditPanel({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "18px 22px 14px",
+      paddingTop: "calc(18px + env(safe-area-inset-top))",
       borderBottom: BD,
       flexShrink: 0,
       display: "flex",
@@ -4378,20 +4382,20 @@ function EditPanel({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: tc.a,
       fontWeight: 700,
       marginBottom: 3
     }
   }, "✏ 현장 수정 · ", yr, " ", half), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 16,
+      fontSize: 17,
       fontWeight: 900,
       color: C.t1
     }
   }, sc.school), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginTop: 2
     }
@@ -4404,7 +4408,7 @@ function EditPanel({
       background: C.surfaceL,
       border: BD,
       color: C.t3,
-      fontSize: 16,
+      fontSize: 17,
       cursor: "pointer"
     }
   }, "×")), /*#__PURE__*/React.createElement("div", {
@@ -4423,7 +4427,7 @@ function EditPanel({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       color: C.t2,
       marginBottom: 12
@@ -4465,7 +4469,7 @@ function EditPanel({
     }
   }, /*#__PURE__*/React.createElement("label", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700
     }
@@ -4493,7 +4497,7 @@ function EditPanel({
         minWidth: 74,
         padding: "8px 10px",
         borderRadius: 7,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
         border: `1.5px solid ${on ? o.color : C.border}`,
@@ -4527,7 +4531,7 @@ function EditPanel({
     }
   }, /*#__PURE__*/React.createElement("label", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700
     }
@@ -4543,7 +4547,7 @@ function EditPanel({
       border: BD,
       borderRadius: 6,
       color: C.t1,
-      fontSize: 11,
+      fontSize: 13,
       outline: "none"
     }
   }, ["정기점검", "정밀점검", "내진성능", "구조감리", "내진보강설계", "구조검토"].map(k => /*#__PURE__*/React.createElement("option", {
@@ -4583,7 +4587,7 @@ function EditPanel({
     }
   }, /*#__PURE__*/React.createElement("label", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700
     }
@@ -4614,7 +4618,7 @@ function EditPanel({
       style: {
         padding: "6px 12px",
         borderRadius: 20,
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 700,
         cursor: "pointer",
         background: on ? mc : C.surface,
@@ -4638,20 +4642,20 @@ function EditPanel({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       color: C.t2
     }
   }, "📋 업무 진행 단계"), /*#__PURE__*/React.createElement("div", {
     style: {
       marginLeft: "auto",
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 800,
       color: progDone === STEPS.length ? C.green : tc.a
     }
   }, progDone, "/", STEPS.length, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4,
       marginLeft: 4,
       fontWeight: 600
@@ -4703,32 +4707,32 @@ function EditPanel({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        width: 20,
-        height: 20,
+        width: 24,
+        height: 24,
         borderRadius: "50%",
         flexShrink: 0,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 800,
         background: on ? col : C.surfaceD,
         color: on ? "#fff" : C.t4
       }
     }, on ? "✓" : i + 1), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 13
+        fontSize: 15
       }
     }, STEP_ICON[k]), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         color: on ? col : C.t2,
         flex: 1
       }
     }, k), sp && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 8,
+        fontSize: 11,
         fontWeight: 700,
         color: C.purple,
         background: C.purpleL,
@@ -4738,13 +4742,13 @@ function EditPanel({
     }, "중요"));
   })), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t4,
       marginTop: 8
     }
   }, "* 단계를 눌러 완료/미완료를 전환하세요. 검토·제본은 별도 강조됩니다.")), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       color: C.t2,
       marginBottom: 10
@@ -4775,13 +4779,13 @@ function EditPanel({
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: 700,
       color: tc.a
     }
   }, bi + 1), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       color: C.t1,
       flex: 1
@@ -4808,9 +4812,9 @@ function EditPanel({
       [x.f]: !v[x.f]
     })),
     style: {
-      padding: "3px 8px",
+      padding: isMobile ? "9px 11px" : "3px 8px",
       borderRadius: 5,
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: 700,
       cursor: "pointer",
       border: `1px solid ${b[x.f] ? x.ac + "60" : C.border}`,
@@ -4824,9 +4828,9 @@ function EditPanel({
       delivery: v.delivery === dv ? "" : dv
     })),
     style: {
-      padding: "3px 7px",
+      padding: isMobile ? "9px 10px" : "3px 7px",
       borderRadius: 5,
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: 700,
       cursor: "pointer",
       border: `1px solid ${b.delivery === dv ? C.green + "60" : C.border}`,
@@ -4836,9 +4840,9 @@ function EditPanel({
   }, dv[0])), /*#__PURE__*/React.createElement("button", {
     onClick: () => setBf(p => p.filter((_, i) => i !== bi)),
     style: {
-      padding: "3px 6px",
+      padding: isMobile ? "9px 10px" : "3px 6px",
       borderRadius: 5,
-      fontSize: 10,
+      fontSize: 12,
       cursor: "pointer",
       border: `1px solid ${C.red}30`,
       background: C.redL,
@@ -4880,7 +4884,7 @@ function EditPanel({
     }
   }, /*#__PURE__*/React.createElement("label", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700,
       display: "block",
@@ -4900,13 +4904,13 @@ function EditPanel({
       border: BD,
       borderRadius: 6,
       color: C.blue,
-      fontSize: 11,
+      fontSize: 13,
       outline: "none",
       fontFamily: "monospace"
     }
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700,
       display: "block",
@@ -4927,7 +4931,7 @@ function EditPanel({
       border: BD,
       borderRadius: 6,
       color: C.t1,
-      fontSize: 11,
+      fontSize: 13,
       outline: "none",
       resize: "vertical",
       lineHeight: 1.5
@@ -4950,13 +4954,14 @@ function EditPanel({
       border: `1.5px dashed ${C.border}`,
       background: "transparent",
       color: C.t3,
-      fontSize: 12,
+      fontSize: 14,
       cursor: "pointer",
       marginBottom: 8
     }
   }, "+ 동 추가")), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "14px 22px",
+      paddingBottom: "calc(14px + env(safe-area-inset-bottom))",
       borderTop: BD,
       flexShrink: 0,
       display: "flex",
@@ -4972,7 +4977,7 @@ function EditPanel({
       border: `1.5px solid ${C.red}40`,
       background: C.redL,
       color: C.red,
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -4985,7 +4990,7 @@ function EditPanel({
       border: BD,
       background: "transparent",
       color: C.t3,
-      fontSize: 13,
+      fontSize: 15,
       cursor: "pointer"
     }
   }, "취소"), /*#__PURE__*/React.createElement("button", {
@@ -4997,7 +5002,7 @@ function EditPanel({
       background: saved ? C.green : C.blue,
       border: "none",
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer",
       transition: "background .3s",
@@ -5034,14 +5039,14 @@ function EditPanel({
     }
   }, "🗑"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 17,
+      fontSize: 18,
       fontWeight: 900,
       color: C.t1,
       marginBottom: 8
     }
   }, "진짜로 삭제하시겠습니까?"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.red,
       marginBottom: 6,
@@ -5049,7 +5054,7 @@ function EditPanel({
     }
   }, sc.school), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t3,
       lineHeight: 1.7,
       marginBottom: 18
@@ -5072,7 +5077,7 @@ function EditPanel({
       border: `1.5px solid ${C.border}`,
       background: C.surface,
       color: C.t2,
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -5085,7 +5090,7 @@ function EditPanel({
       border: "none",
       background: C.red,
       color: "#fff",
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 800,
       cursor: "pointer",
       boxShadow: `0 4px 14px ${C.red}45`
@@ -5240,13 +5245,13 @@ function CopyHalfModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 17,
+      fontSize: 18,
       fontWeight: 900,
       color: C.t1
     }
   }, "📋 다른 반기에서 현장 복사"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t3,
       marginTop: 4
     }
@@ -5267,7 +5272,7 @@ function CopyHalfModal({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 18
+      fontSize: 19
     }
   }, "⚡"), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5275,13 +5280,13 @@ function CopyHalfModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 800,
       color: hc
     }
   }, "완수일이 ", toYr, "년 ", toHalf, "인 현장 ", autoCandidates.length, "개"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3,
       marginTop: 2
     }
@@ -5293,7 +5298,7 @@ function CopyHalfModal({
       border: "none",
       background: hc,
       color: "#fff",
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap"
@@ -5340,13 +5345,13 @@ function CopyHalfModal({
     onClick: () => setKeepOrig(v => !v)
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       color: C.t1
     }
   }, "날짜·진행상태 그대로 이월"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3,
       marginTop: 1
     }
@@ -5373,7 +5378,7 @@ function CopyHalfModal({
       background: "transparent",
       border: "none",
       color: C.t1,
-      fontSize: 13,
+      fontSize: 15,
       outline: "none",
       flex: 1
     }
@@ -5388,7 +5393,7 @@ function CopyHalfModal({
       textAlign: "center",
       padding: "40px 0",
       color: C.t4,
-      fontSize: 13
+      fontSize: 15
     }
   }, "복사할 다른 반기 데이터가 없습니다."), buckets.map(bk => {
     const rows = bk.arr.filter(ms);
@@ -5413,13 +5418,13 @@ function CopyHalfModal({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 800,
         color: bhc
       }
     }, bk.h === "상반기" ? "🌱" : "🍂", " ", bk.y, "년 ", bk.h), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t4
       }
     }, rows.length, "개"), /*#__PURE__*/React.createElement("button", {
@@ -5428,7 +5433,7 @@ function CopyHalfModal({
         marginLeft: "auto",
         padding: "4px 10px",
         borderRadius: 6,
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 700,
         border: `1px solid ${bhc}40`,
         background: allSelInBucket(bk) ? bhc : C.surfaceL,
@@ -5465,12 +5470,12 @@ function CopyHalfModal({
           justifyContent: "center",
           flexShrink: 0,
           color: "#fff",
-          fontSize: 13,
+          fontSize: 15,
           fontWeight: 900
         }
       }, on ? "✓" : ""), /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 13,
+          fontSize: 15,
           fontWeight: 700,
           color: C.t1,
           flex: 1,
@@ -5480,12 +5485,12 @@ function CopyHalfModal({
         }
       }, s.school), /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 11,
+          fontSize: 13,
           color: C.t4
         }
       }, s.region, " · ", (s.buildings || []).length, "동"), dup && /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 9,
+          fontSize: 12,
           color: C.orange,
           fontWeight: 700,
           background: C.orangeL,
@@ -5506,7 +5511,7 @@ function CopyHalfModal({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       color: C.t2,
       fontWeight: 600
     }
@@ -5519,7 +5524,7 @@ function CopyHalfModal({
       border: BD,
       background: "transparent",
       color: C.t3,
-      fontSize: 13,
+      fontSize: 15,
       cursor: "pointer"
     }
   }, "취소"), /*#__PURE__*/React.createElement("button", {
@@ -5531,7 +5536,7 @@ function CopyHalfModal({
       border: "none",
       background: selCount === 0 ? C.surfaceD : C.blue,
       color: selCount === 0 ? C.t4 : "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: selCount === 0 ? "default" : "pointer"
     }
@@ -5636,7 +5641,7 @@ function SitesManager({
       n[yr] = {
         ...prev[yr]
       };
-      n[yr][half] = prev[yr][half].map(s => s.id !== sid ? s : stampEdit({
+      n[yr][half] = (prev[yr]?.[half] || []).map(s => s.id !== sid ? s : stampEdit({
         ...s,
         [field]: v
       }, `${lbl} 변경`));
@@ -5656,7 +5661,7 @@ function SitesManager({
       n[yr] = {
         ...prev[yr]
       };
-      n[yr][half] = prev[yr][half].map(s => s.id !== sid ? s : stampEdit({
+      n[yr][half] = (prev[yr]?.[half] || []).map(s => s.id !== sid ? s : stampEdit({
         ...s,
         buildings: s.buildings.map((x, j) => j !== bi ? x : {
           ...x,
@@ -5677,7 +5682,7 @@ function SitesManager({
       n[yr] = {
         ...prev[yr]
       };
-      n[yr][half] = prev[yr][half].map(s => s.id !== sid ? s : stampEdit({
+      n[yr][half] = (prev[yr]?.[half] || []).map(s => s.id !== sid ? s : stampEdit({
         ...s,
         buildings: s.buildings.map((x, j) => j !== bi ? x : {
           ...x,
@@ -5726,7 +5731,7 @@ function SitesManager({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       letterSpacing: 2,
       marginBottom: 3,
@@ -5767,7 +5772,7 @@ function SitesManager({
       border: `1.5px solid ${yr === y ? C.blue : C.border}`,
       background: yr === y ? C.blueL : "transparent",
       color: yr === y ? C.blue : C.t3,
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: yr === y ? 800 : 600,
       cursor: "pointer",
       whiteSpace: "nowrap"
@@ -5791,7 +5796,7 @@ function SitesManager({
         border: `1.5px solid ${on ? hc : C.border}`,
         background: on ? hc + "12" : "transparent",
         color: on ? hc : C.t3,
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: on ? 800 : 600,
         cursor: "pointer",
         display: "flex",
@@ -5802,11 +5807,11 @@ function SitesManager({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 14
+        fontSize: 16
       }
     }, h === "상반기" ? "🌱" : h === "정밀" ? "🏢" : "🍂"), h, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         padding: "1px 6px",
         borderRadius: 10,
         background: on ? hc + "20" : C.surfaceL,
@@ -5842,14 +5847,14 @@ function SitesManager({
       borderBottom: `3px solid ${yr === y ? C.blue : "transparent"}`,
       background: yr === y ? C.blueL : "transparent",
       color: yr === y ? C.blue : C.t3,
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: yr === y ? 800 : 500,
       cursor: "pointer",
       whiteSpace: "nowrap"
     }
   }, isLH(y) ? "🏢 LH" : `${y}년`, " ", yr === y && /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       marginLeft: 5,
       color: C.t4
     }
@@ -5872,7 +5877,7 @@ function SitesManager({
         borderBottom: `3px solid ${on ? hc : "transparent"}`,
         background: on ? hc + "12" : "transparent",
         color: on ? hc : C.t3,
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: on ? 700 : 500,
         cursor: "pointer",
         display: "flex",
@@ -5882,11 +5887,11 @@ function SitesManager({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 15
+        fontSize: 16
       }
     }, h === "상반기" ? "🌱" : h === "정밀" ? "🏢" : "🍂"), h, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         padding: "1px 6px",
         borderRadius: 10,
         background: on ? hc + "20" : C.surfaceL,
@@ -5898,7 +5903,7 @@ function SitesManager({
     style: {
       marginLeft: "auto",
       padding: "0 16px",
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       fontWeight: 600,
       whiteSpace: "nowrap"
@@ -5991,7 +5996,7 @@ function SitesManager({
       background: "transparent",
       border: "none",
       color: C.t1,
-      fontSize: 13,
+      fontSize: 15,
       outline: "none",
       flex: 1
     }
@@ -6001,7 +6006,7 @@ function SitesManager({
       background: "transparent",
       border: "none",
       color: C.t4,
-      fontSize: 15,
+      fontSize: 16,
       padding: 0,
       cursor: "pointer"
     }
@@ -6017,7 +6022,7 @@ function SitesManager({
     ac: C.purple,
     onClick: () => setStF(ff),
     style: {
-      fontSize: 11
+      fontSize: 13
     }
   }, ff)), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6035,7 +6040,7 @@ function SitesManager({
       border: `1.5px solid ${C.blue}40`,
       background: C.blueL,
       color: C.blue,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap"
@@ -6049,7 +6054,7 @@ function SitesManager({
       border: "none",
       background: C.blue,
       color: "#fff",
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -6080,7 +6085,7 @@ function SitesManager({
   }, ["학교 · 시설명", "현장조사일", "완수일", "D-day", "보고서·FMS·납품", "수정"].map((h, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700,
       letterSpacing: .5,
@@ -6127,7 +6132,7 @@ function SitesManager({
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         color: C.t4,
-        fontSize: 12,
+        fontSize: 14,
         transform: isOpen ? "rotate(90deg)" : "none",
         transition: "transform .2s",
         flexShrink: 0
@@ -6135,7 +6140,7 @@ function SitesManager({
     }, "›"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 800,
-        fontSize: 15,
+        fontSize: 16,
         color: C.t1,
         flex: 1,
         minWidth: 0,
@@ -6158,9 +6163,9 @@ function SitesManager({
       },
       title: "길찾기",
       style: {
-        padding: "5px 10px",
+        padding: isMobile ? "9px 12px" : "5px 10px",
         borderRadius: 6,
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 800,
         background: C.purpleL,
         border: `1px solid ${C.purple}45`,
@@ -6174,9 +6179,9 @@ function SitesManager({
         setEditId(s.id);
       },
       style: {
-        padding: "5px 11px",
+        padding: isMobile ? "9px 13px" : "5px 11px",
         borderRadius: 6,
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 700,
         background: C.blueL,
         border: `1px solid ${C.blue}40`,
@@ -6195,12 +6200,12 @@ function SitesManager({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t3
       }
     }, s.region), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t4
       }
     }, s.buildings.length, "동"), getFlags(s).map(fv => {
@@ -6208,7 +6213,7 @@ function SitesManager({
       return o ? /*#__PURE__*/React.createElement("span", {
         key: fv,
         style: {
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: 700,
           color: o.color
         }
@@ -6217,9 +6222,9 @@ function SitesManager({
       href: `tel:${tel.replace(/[^0-9+]/g, "")}`,
       onClick: e => e.stopPropagation(),
       style: {
-        padding: "3px 9px",
+        padding: isMobile ? "9px 12px" : "3px 9px",
         borderRadius: 5,
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 800,
         textDecoration: "none",
         border: `1px solid ${C.green}55`,
@@ -6229,7 +6234,7 @@ function SitesManager({
       }
     }, "📞 ", tel)), (s.assignees || []).length > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t2,
         marginTop: 5,
         paddingLeft: 19
@@ -6261,7 +6266,7 @@ function SitesManager({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t4,
         fontWeight: 700
       }
@@ -6274,7 +6279,7 @@ function SitesManager({
         border: `1px solid ${C.border}`,
         borderRadius: 7,
         color: C.blue,
-        fontSize: 13,
+        fontSize: 15,
         padding: "9px 4px",
         outline: "none",
         width: "100%",
@@ -6295,7 +6300,7 @@ function SitesManager({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t4,
         fontWeight: 700
       }
@@ -6312,7 +6317,7 @@ function SitesManager({
         border: `1px solid ${C.border}`,
         borderRadius: 7,
         color: C.orange,
-        fontSize: 13,
+        fontSize: 15,
         padding: "9px 4px",
         outline: "none",
         width: "100%",
@@ -6352,7 +6357,7 @@ function SitesManager({
     }].map(x => /*#__PURE__*/React.createElement("span", {
       key: x.k,
       style: {
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 700,
         padding: "3px 8px",
         borderRadius: 5,
@@ -6379,7 +6384,7 @@ function SitesManager({
         }
       }, /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 13,
+          fontSize: 15,
           color: C.t1,
           fontWeight: 700,
           flex: 1,
@@ -6387,12 +6392,12 @@ function SitesManager({
         }
       }, b.b), b.floor && /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 10,
+          fontSize: 12,
           color: C.t4
         }
       }, b.floor, "층"), b.area && /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 10,
+          fontSize: 12,
           color: C.t4
         }
       }, b.area.toLocaleString(), "㎡"), b.fms && /*#__PURE__*/React.createElement("button", {
@@ -6400,7 +6405,7 @@ function SitesManager({
         style: {
           padding: "4px 9px",
           borderRadius: 5,
-          fontSize: 10,
+          fontSize: 12,
           fontWeight: 700,
           border: `1px solid ${copied === `f-${iid}` ? C.green : C.border}`,
           background: copied === `f-${iid}` ? C.greenL : C.surface,
@@ -6433,7 +6438,7 @@ function SitesManager({
         style: {
           padding: "6px 11px",
           borderRadius: 6,
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: 700,
           border: `1px solid ${x.v ? x.ac + "60" : C.border}`,
           background: x.v ? x.bc : C.surface,
@@ -6446,7 +6451,7 @@ function SitesManager({
         style: {
           padding: "6px 11px",
           borderRadius: 6,
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: 700,
           border: `1px solid ${b.delivery === dv ? C.green + "60" : C.border}`,
           background: b.delivery === dv ? C.greenL : C.surface,
@@ -6455,7 +6460,7 @@ function SitesManager({
         }
       }, dv))), b.note && /*#__PURE__*/React.createElement("div", {
         style: {
-          fontSize: 11,
+          fontSize: 13,
           color: C.t2,
           marginTop: 7,
           padding: "6px 9px",
@@ -6502,7 +6507,7 @@ function SitesManager({
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         color: C.t4,
-        fontSize: 11,
+        fontSize: 13,
         display: "inline-block",
         transform: isOpen ? "rotate(90deg)" : "none",
         transition: "transform .2s"
@@ -6510,7 +6515,7 @@ function SitesManager({
     }, "›"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 800,
-        fontSize: 14,
+        fontSize: 16,
         color: C.t1
       }
     }, s.school), s.carried && /*#__PURE__*/React.createElement(Tag, {
@@ -6519,7 +6524,7 @@ function SitesManager({
       border: `1px solid ${C.orange}40`
     }, "🍂 이월"), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t3
       }
     }, s.region), tel && /*#__PURE__*/React.createElement("a", {
@@ -6529,7 +6534,7 @@ function SitesManager({
       style: {
         padding: "2px 8px",
         borderRadius: 5,
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 800,
         textDecoration: "none",
         border: `1px solid ${C.green}55`,
@@ -6546,19 +6551,19 @@ function SitesManager({
       return o ? /*#__PURE__*/React.createElement("span", {
         key: fv,
         style: {
-          fontSize: 10,
+          fontSize: 12,
           fontWeight: 700,
           color: o.color
         }
       }, o.label) : null;
     }), (s.assignees || []).length > 0 && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t2
       }
     }, "👤 ", s.assignees.join("·")), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4
       }
     }, s.buildings.length, "동")), /*#__PURE__*/React.createElement("div", {
@@ -6577,7 +6582,7 @@ function SitesManager({
       const pg = s.progress || {};
       const chip = (label, on, col) => /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 9,
+          fontSize: 12,
           fontWeight: 700,
           padding: "1px 6px",
           borderRadius: 4,
@@ -6605,7 +6610,7 @@ function SitesManager({
         border: `1px solid ${C.border}`,
         borderRadius: 5,
         color: C.blue,
-        fontSize: 11,
+        fontSize: 13,
         padding: "3px 5px",
         outline: "none",
         width: "100%",
@@ -6628,7 +6633,7 @@ function SitesManager({
         border: `1px solid ${C.border}`,
         borderRadius: 5,
         color: C.orange,
-        fontSize: 11,
+        fontSize: 13,
         padding: "3px 5px",
         outline: "none",
         width: "100%",
@@ -6637,7 +6642,7 @@ function SitesManager({
       }
     })), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 800,
         color: ddC(dd),
         textAlign: "center",
@@ -6667,15 +6672,15 @@ function SitesManager({
     }].map(x => /*#__PURE__*/React.createElement("div", {
       key: x.k,
       style: {
-        width: 26,
-        height: 20,
+        width: 32,
+        height: 26,
         borderRadius: 4,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         background: x.v ? x.c + "18" : C.surfaceL,
         border: `1px solid ${x.v ? x.c + "50" : C.border}`,
-        fontSize: 9,
+        fontSize: 12,
         fontWeight: 700,
         color: x.v ? x.c : C.t4
       }
@@ -6691,9 +6696,9 @@ function SitesManager({
         setEditId(s.id);
       },
       style: {
-        padding: "3px 9px",
+        padding: isMobile ? "9px 12px" : "3px 9px",
         borderRadius: 5,
-        fontSize: 9,
+        fontSize: 12,
         fontWeight: 700,
         background: C.blueL,
         border: `1px solid ${C.blue}40`,
@@ -6722,23 +6727,23 @@ function SitesManager({
         }
       }, /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 13,
+          fontSize: 15,
           color: C.t1,
           fontWeight: 600
         }
       }, b.b), b.floor && /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 10,
+          fontSize: 12,
           color: C.t4
         }
       }, b.floor, "층"), b.area && /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 10,
+          fontSize: 12,
           color: C.t4
         }
       }, b.area.toLocaleString(), "㎡")), b.note && /*#__PURE__*/React.createElement("div", {
         style: {
-          fontSize: 10,
+          fontSize: 12,
           color: C.t2,
           marginTop: 3,
           padding: "3px 9px",
@@ -6762,7 +6767,7 @@ function SitesManager({
         style: {
           padding: "4px 8px",
           borderRadius: 5,
-          fontSize: 9,
+          fontSize: 12,
           fontWeight: 700,
           border: `1px solid ${copied === `f-${iid}` ? C.green : C.border}`,
           background: copied === `f-${iid}` ? C.greenL : C.surfaceL,
@@ -6771,7 +6776,7 @@ function SitesManager({
         }
       }, copied === `f-${iid}` ? "✓ 복사" : "🔐 FMS") : /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 10,
+          fontSize: 12,
           color: C.t4
         }
       }, "-")), /*#__PURE__*/React.createElement("div", {
@@ -6782,7 +6787,7 @@ function SitesManager({
         }
       }, /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 10,
+          fontSize: 12,
           color: C.t3
         }
       }, fd(s.end))), /*#__PURE__*/React.createElement("div", {
@@ -6793,7 +6798,7 @@ function SitesManager({
         }
       }, /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: 700,
           color: ddC(dd)
         }
@@ -6820,10 +6825,10 @@ function SitesManager({
         key: x.f,
         onClick: () => toggleB(s.id, bi, x.f),
         style: {
-          width: 26,
-          height: 22,
+          width: 32,
+          height: 26,
           borderRadius: 4,
-          fontSize: 9,
+          fontSize: 12,
           fontWeight: 700,
           border: `1px solid ${x.v ? x.ac + "60" : C.border}`,
           background: x.v ? x.bc : C.surfaceL,
@@ -6837,7 +6842,7 @@ function SitesManager({
           height: 22,
           padding: "0 5px",
           borderRadius: 4,
-          fontSize: 9,
+          fontSize: 12,
           fontWeight: 700,
           border: `1px solid ${b.delivery === dv ? C.green + "60" : C.border}`,
           background: b.delivery === dv ? C.greenL : C.surfaceL,
@@ -6865,14 +6870,14 @@ function SitesManager({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 600,
         color: C.t3,
         marginBottom: 6
       }
     }, bucketEmpty ? `이 기간(${yr} ${half})에 등록된 현장이 없습니다.` : `필터에 맞는 현장이 없습니다. (${yr} ${half} 전체 ${schools.length}개)`), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t4,
         marginBottom: 14
       }
@@ -6885,7 +6890,6 @@ function SitesManager({
       }
     }, filterOn && /*#__PURE__*/React.createElement("button", {
       onClick: () => {
-        setTeamF("전체");
         setStF("전체");
         setSearch("");
       },
@@ -6895,7 +6899,7 @@ function SitesManager({
         background: C.blue,
         border: "none",
         color: "#fff",
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 700,
         cursor: "pointer"
       }
@@ -6903,7 +6907,6 @@ function SitesManager({
       onClick: () => {
         setYr(firstFull.y);
         setHalf(firstFull.h);
-        setTeamF("전체");
         setStF("전체");
         setSearch("");
       },
@@ -6913,7 +6916,7 @@ function SitesManager({
         background: C.blue,
         border: "none",
         color: "#fff",
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 700,
         cursor: "pointer"
       }
@@ -7228,8 +7231,9 @@ function ExportImportPage({
     }, 400);
   };
   const doExport = (yr, half) => {
-    const schools = db[yr]?.[half];
-    if (!schools) return;
+    /* 휴지통(삭제 표시) 현장은 내보내지 않는다 */
+    const schools = (db[yr]?.[half] || []).filter(s => !s.deleted);
+    if (!schools.length) return;
     const wb = XLSX.utils.book_new();
     const sn = `${yr.slice(2)}년(${half === "상반기" ? "상" : "하"})`;
     const entries = [{
@@ -7247,7 +7251,10 @@ function ExportImportPage({
   const doExportAll = () => {
     const wb = XLSX.utils.book_new();
     const entries = [];
-    Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, schools]) => {
+    Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => {
+      /* 휴지통 현장 제외 */
+      const schools = (arr || []).filter(s => !s.deleted);
+      if (!schools.length) return;
       XLSX.utils.book_append_sheet(wb, buildSheet(schools), `${yr.slice(2)}년(${half === "상반기" ? "상" : "하"})`);
       entries.push({
         yr,
@@ -7275,7 +7282,7 @@ function ExportImportPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       letterSpacing: 2,
       fontWeight: 600,
@@ -7290,7 +7297,7 @@ function ExportImportPage({
     }
   }, "엑셀 가져오기 · 내보내기"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t3,
       marginTop: 4
     }
@@ -7330,7 +7337,7 @@ function ExportImportPage({
     }
   }, x.v), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginTop: 4
     }
@@ -7357,13 +7364,13 @@ function ExportImportPage({
     }
   }, "📥"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 800,
       color: C.t1
     }
   }, "엑셀 업로드"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginTop: 1
     }
@@ -7407,14 +7414,14 @@ function ExportImportPage({
     }
   }, "📂"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 700,
       color: dragOver ? C.blue : C.t1,
       marginBottom: 4
     }
   }, dragOver ? "여기에 놓으세요!" : "엑셀 파일을 드래그하거나 클릭"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3
     }
   }, ".xlsx / .xls · 기존 엑셀 그대로 올리면 돼요")), parsed && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -7434,13 +7441,13 @@ function ExportImportPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       color: C.green
     }
   }, parsed.fileName, " 파싱 완료"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t2,
       marginTop: 1
     }
@@ -7452,7 +7459,7 @@ function ExportImportPage({
       border: BD,
       background: "transparent",
       color: C.t3,
-      fontSize: 11,
+      fontSize: 13,
       cursor: "pointer"
     }
   }, "취소")), /*#__PURE__*/React.createElement("div", {
@@ -7468,11 +7475,11 @@ function ExportImportPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13
+      fontSize: 15
     }
   }, "🔄"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t2,
       lineHeight: 1.55
     }
@@ -7501,13 +7508,13 @@ function ExportImportPage({
       }
     }, /*#__PURE__*/React.createElement("span", null, sh.half === "상반기" ? "🌱" : "🍂"), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: 800,
         color: C.t1
       }
     }, sh.year, "년 ", sh.half), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         padding: "2px 8px",
         borderRadius: 10,
         background: hc + "18",
@@ -7516,7 +7523,7 @@ function ExportImportPage({
       }
     }, sh.count, "개 학교 · ", sh.bCount, "개 동"), sh.budHit > 0 && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         padding: "2px 8px",
         borderRadius: 10,
         background: C.green + "18",
@@ -7525,7 +7532,7 @@ function ExportImportPage({
       }
     }, "💰 예산 ", sh.budHit, "건"), sh.noteHit > 0 && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         padding: "2px 8px",
         borderRadius: 10,
         background: C.yellow + "22",
@@ -7541,7 +7548,7 @@ function ExportImportPage({
     }, sh.schools.slice(0, 10).map(s => /*#__PURE__*/React.createElement("span", {
       key: s.id,
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t2,
         padding: "1px 6px",
         borderRadius: 3,
@@ -7550,7 +7557,7 @@ function ExportImportPage({
       }
     }, s.school)), sh.schools.length > 10 && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t4,
         padding: "1px 6px"
       }
@@ -7603,7 +7610,7 @@ function ExportImportPage({
       onClick: () => setAutoCarry(v => !v)
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 800,
         color: C.t1
       }
@@ -7613,7 +7620,7 @@ function ExportImportPage({
       }
     }, "(", carryCount, "개)")), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t3,
         marginTop: 2,
         lineHeight: 1.5
@@ -7634,7 +7641,7 @@ function ExportImportPage({
       border: BD,
       background: "transparent",
       color: C.t3,
-      fontSize: 13,
+      fontSize: 15,
       cursor: "pointer"
     }
   }, "취소"), /*#__PURE__*/React.createElement("button", {
@@ -7646,7 +7653,7 @@ function ExportImportPage({
       background: C.blue,
       border: "none",
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer",
       boxShadow: `0 4px 14px ${C.blue}40`,
@@ -7667,21 +7674,21 @@ function ExportImportPage({
     }
   }, saveResult && !saveResult.ok ? "⚠️" : "✅"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 800,
       color: saveResult && !saveResult.ok ? C.red : C.green,
       marginBottom: 4
     }
   }, saveResult && !saveResult.ok ? "화면 반영됨 · 서버 저장 실패" : "가져오기 + 서버 저장 완료!"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t2,
       marginBottom: 10
     }
   }, saveResult && !saveResult.ok ? "데이터는 화면에 있지만 서버에 저장되지 않았어요. 아래 오류를 확인하세요." : `서버에 ${saveResult ? saveResult.total : countSchools(db)}개 학교 저장됨 · 껐다 켜도 유지돼요`), saveResult && !saveResult.ok && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "inline-block",
-      fontSize: 11,
+      fontSize: 13,
       color: C.red,
       background: C.surface,
       border: `1px solid ${C.red}40`,
@@ -7694,7 +7701,7 @@ function ExportImportPage({
   }, "❌ ", saveResult.err), saveResult && saveResult.dedup > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "block",
-      fontSize: 11,
+      fontSize: 13,
       color: C.blue,
       background: C.blueL,
       border: `1px solid ${C.blue}40`,
@@ -7708,7 +7715,7 @@ function ExportImportPage({
   }, "🧹 중복 현장 ", saveResult.dedup, "건 자동 정리 (같은 학교가 두 번 올라가지 않게 합쳤어요)"), carryInfo && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "block",
-      fontSize: 11,
+      fontSize: 13,
       color: "#9A5B0A",
       background: C.orange + "18",
       border: `1px solid ${C.orange}40`,
@@ -7731,7 +7738,7 @@ function ExportImportPage({
       border: `1px solid ${C.green}`,
       background: "transparent",
       color: C.green,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -7749,7 +7756,7 @@ function ExportImportPage({
   }, /*#__PURE__*/React.createElement("span", null, "⚠"), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
-      fontSize: 12,
+      fontSize: 14,
       color: C.red
     }
   }, err), /*#__PURE__*/React.createElement("button", {
@@ -7758,7 +7765,7 @@ function ExportImportPage({
       background: "transparent",
       border: "none",
       color: C.red,
-      fontSize: 16,
+      fontSize: 17,
       cursor: "pointer"
     }
   }, "×")), /*#__PURE__*/React.createElement("div", {
@@ -7771,7 +7778,7 @@ function ExportImportPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       color: C.t2,
       marginBottom: 7
@@ -7785,7 +7792,7 @@ function ExportImportPage({
   }, ["시트명 26년(상)/(하)·하반기·26하", "1열 팀", "5열 학교", "6열 시설", "12열 현장조사", "14열 완수", "16열 FMS", "17열 플래그", "18열 특기", "19열 보고서◎", "20열 납품", "21열 FMS◎"].map(t => /*#__PURE__*/React.createElement("span", {
     key: t,
     style: {
-      fontSize: 9,
+      fontSize: 12,
       padding: "2px 7px",
       borderRadius: 4,
       background: C.surface,
@@ -7820,13 +7827,13 @@ function ExportImportPage({
     }
   }, "📤"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 800,
       color: C.t1
     }
   }, "엑셀 내보내기"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginTop: 1
     }
@@ -7838,7 +7845,7 @@ function ExportImportPage({
       border: "none",
       borderRadius: 9,
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer",
       boxShadow: `0 4px 12px ${C.green}40`
@@ -7868,7 +7875,7 @@ function ExportImportPage({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 18
+        fontSize: 19
       }
     }, isLH(yr) ? "🏢" : half === "상반기" ? "🌱" : "🍂"), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -7876,13 +7883,13 @@ function ExportImportPage({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 800,
         color: C.t1
       }
     }, isLH(yr) ? "🏢 LH 정밀" : `${yr}년 ${half}`), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t3,
         marginTop: 2
       }
@@ -7898,7 +7905,7 @@ function ExportImportPage({
         background: hc + "15",
         border: `1.5px solid ${hc}40`,
         color: hc,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
         whiteSpace: "nowrap"
@@ -7927,7 +7934,6 @@ const FB_META = "ston/meta"; // 마지막 수정자/시각
 const FB_PRESENCE = "ston/presence"; // 동시 접속자
 const FB_LOGS = "ston/logs"; // 수정 로그
 const FB_CONFIG = "ston/config"; // 팀/인원 설정 (관리자 편집)
-const FB_CHAT = "ston/chat"; // 팀 채팅
 const FB_GEO = "ston/geo"; // 현장 좌표 캐시 (한 번 찾으면 재사용)
 const FB_BK_IDX = "ston/backup_index"; // 백업 목록(가벼움 — 목록만 읽을 때 사용)
 const FB_BK_DAT = "ston/backup_data"; // 백업 본문(무거움 — 복원할 때만 읽음)
@@ -8173,68 +8179,6 @@ function diffPaths(prev, next) {
 }
 /* 원격(Firebase) db를 로컬에 병합 — 로컬 학교를 절대 삭제하지 않고, 같은 ID는 원격으로 갱신,
    원격에만 있는 학교는 추가. → 어떤 echo가 와도 화면에서 학교가 사라지지 않음. */
-function mergeRemote(local, remote) {
-  const out = {};
-  Object.entries(local || {}).forEach(([yr, hs]) => {
-    out[yr] = {};
-    Object.entries(hs || {}).forEach(([h, arr]) => {
-      out[yr][h] = (arr || []).slice();
-    });
-  });
-  let changed = false;
-  Object.entries(remote || {}).forEach(([yr, hs]) => {
-    out[yr] = out[yr] || {};
-    Object.entries(hs || {}).forEach(([h, rArr]) => {
-      const cur = out[yr][h] || [];
-      const idx = {};
-      cur.forEach((s, i) => {
-        idx[s.id] = i;
-      });
-      const merged = cur.slice();
-      (rArr || []).forEach(rs => {
-        if (idx[rs.id] != null) {
-          if (JSON.stringify(merged[idx[rs.id]]) !== JSON.stringify(rs)) {
-            merged[idx[rs.id]] = rs;
-            changed = true;
-          }
-        } else {
-          merged.push(rs);
-          changed = true;
-        }
-      });
-      out[yr][h] = merged;
-    });
-  });
-  return {
-    db: out,
-    changed
-  };
-}
-function diffDb(prev, next) {
-  const updates = {};
-  const pv = prev || {};
-  Object.entries(next).forEach(([yr, halves]) => {
-    Object.entries(halves).forEach(([half, schools]) => {
-      const prevArr = pv[yr]?.[half] || [];
-      const prevById = {};
-      prevArr.forEach(s => {
-        prevById[s.id] = s;
-      });
-      schools.forEach(s => {
-        const before = prevById[s.id];
-        if (!before || JSON.stringify(before) !== JSON.stringify(s)) {
-          updates[`${yr}/${half}/${s.id}`] = stripUndefined(s); // undefined 제거 후 저장
-        }
-        delete prevById[s.id];
-      });
-      Object.keys(prevById).forEach(id => {
-        updates[`${yr}/${half}/${id}`] = null;
-      });
-    });
-  });
-  return updates;
-}
-
 /* ══════════════════════════════════════════════════════════════
    설정 / 관리자 모드 (팀·인원 관리 + 수정 로그)
 ══════════════════════════════════════════════════════════════ */
@@ -8305,7 +8249,7 @@ function SafetyPanel({
         ...prev
       };
       next[s._year] = {
-        ...prev[s._year]
+        ...(prev[s._year] || {})
       };
       next[s._year][s._half] = (prev[s._year][s._half] || []).map(x => x.id !== s.id ? x : {
         ...x,
@@ -8318,6 +8262,32 @@ function SafetyPanel({
     logAction("수정", `현장 복원 · ${s.school}`, "휴지통", "복원");
     say(`${s.school} 되살렸어요.`);
   };
+  /* 오래된 휴지통 정리 — 지운 현장은 계속 서버에 남아 용량에 더해지므로 한 번에 비운다.
+     자동으로 지우지는 않는다. 사람이 확인하고 누를 때만. */
+  const TRASH_KEEP_DAYS = 30;
+  const oldTrash = trash.filter(s => s.deletedAt && s.deletedAt < Date.now() - TRASH_KEEP_DAYS * 86400000);
+  const purgeOld = () => {
+    if (!oldTrash.length) {
+      say(`${TRASH_KEEP_DAYS}일이 지난 항목이 없어요.`);
+      return;
+    }
+    if (!window.confirm(`지운 지 ${TRASH_KEEP_DAYS}일이 넘은 현장 ${oldTrash.length}개를 완전히 삭제합니다.\n되살릴 수 없어요. 계속할까요?`)) return;
+    setDb(prev => {
+      const next = {
+        ...prev
+      };
+      oldTrash.forEach(s => {
+        const cur = next[s._year] && next[s._year][s._half] || prev[s._year] && prev[s._year][s._half] || [];
+        next[s._year] = {
+          ...(next[s._year] || prev[s._year] || {})
+        };
+        next[s._year][s._half] = cur.filter(x => x.id !== s.id);
+      });
+      return next;
+    });
+    logAction("삭제", "휴지통 비우기", `${oldTrash.length}개`, null);
+    say(`${oldTrash.length}개를 완전히 지웠어요.`);
+  };
   const purgeSite = s => {
     if (!window.confirm(`'${s.school}'을(를) 완전히 지웁니다.\n이건 되살릴 수 없어요. 계속할까요?`)) return;
     setDb(prev => {
@@ -8325,7 +8295,7 @@ function SafetyPanel({
         ...prev
       };
       next[s._year] = {
-        ...prev[s._year]
+        ...(prev[s._year] || {})
       };
       next[s._year][s._half] = (prev[s._year][s._half] || []).filter(x => x.id !== s.id);
       return next;
@@ -8462,7 +8432,7 @@ function SafetyPanel({
       flex: 1,
       padding: "9px 6px",
       borderRadius: 8,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       border: `1.5px solid ${tab === id ? C.blue : C.border}`,
@@ -8473,7 +8443,7 @@ function SafetyPanel({
   }, label, n > 0 && /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 4,
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4
     }
   }, n));
@@ -8487,14 +8457,14 @@ function SafetyPanel({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1,
       marginBottom: 4
     }
   }, "🛡 안전장치 · 백업과 되돌리기"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       lineHeight: 1.7,
       marginBottom: 12
@@ -8522,7 +8492,7 @@ function SafetyPanel({
     label: "💾 파일"
   })), msg && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.blue,
       background: C.blueL,
       border: `1px solid ${C.blue}25`,
@@ -8541,19 +8511,19 @@ function SafetyPanel({
       marginBottom: 10,
       background: busy === "backup" ? C.t4 : C.blue,
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
   }, busy === "backup" ? "백업 중…" : "📦 지금 백업 만들기"), list === null && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t4,
       padding: "12px 0"
     }
   }, "불러오는 중…"), list && list.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t4,
       padding: "12px 0"
     }
@@ -8585,20 +8555,20 @@ function SafetyPanel({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         color: C.t1
       }
     }, t.getFullYear(), ". ", t.getMonth() + 1, ". ", t.getDate(), ". ", String(t.getHours()).padStart(2, "0"), ":", String(t.getMinutes()).padStart(2, "0"), /*#__PURE__*/React.createElement("span", {
       style: {
         marginLeft: 6,
-        fontSize: 10,
+        fontSize: 12,
         color: C.t3,
         fontWeight: 500
       }
     }, m.reason)), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4,
         marginTop: 2
       }
@@ -8608,7 +8578,7 @@ function SafetyPanel({
       style: {
         padding: "7px 12px",
         borderRadius: 7,
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 700,
         cursor: "pointer",
         flexShrink: 0,
@@ -8619,13 +8589,27 @@ function SafetyPanel({
     }, busy === "load-" + m.id ? "여는 중…" : "복원"));
   }))), tab === "trash" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginBottom: 8
     }
-  }, "삭제한 현장은 여기 남아 있어요. 되살리거나 완전히 지울 수 있습니다."), trash.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "삭제한 현장은 여기 남아 있어요. 되살리거나 완전히 지울 수 있습니다. 지운 현장도 서버 용량을 차지하니 가끔 비워 주세요."), oldTrash.length > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: purgeOld,
     style: {
-      fontSize: 12,
+      width: "100%",
+      padding: "11px 0",
+      borderRadius: 9,
+      marginBottom: 10,
+      border: `1.5px solid ${C.red}45`,
+      background: C.redL,
+      color: C.red,
+      fontSize: 15,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, `🧹 ${TRASH_KEEP_DAYS}일 지난 ${oldTrash.length}개 완전 삭제`), trash.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
       color: C.t4,
       padding: "12px 0"
     }
@@ -8655,7 +8639,7 @@ function SafetyPanel({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       color: C.t1,
       overflow: "hidden",
@@ -8664,7 +8648,7 @@ function SafetyPanel({
     }
   }, s.school), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4,
       marginTop: 2
     }
@@ -8673,7 +8657,7 @@ function SafetyPanel({
     style: {
       padding: "7px 11px",
       borderRadius: 7,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700,
       cursor: "pointer",
       flexShrink: 0,
@@ -8686,7 +8670,7 @@ function SafetyPanel({
     style: {
       padding: "7px 10px",
       borderRadius: 7,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700,
       cursor: "pointer",
       flexShrink: 0,
@@ -8696,13 +8680,13 @@ function SafetyPanel({
     }
   }, "완전삭제"))))), tab === "undo" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginBottom: 8
     }
   }, "최근 변경을 하나씩 되돌립니다. 그 현장만 이전 상태로 돌아가요."), undo.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t4,
       padding: "12px 0"
     }
@@ -8732,7 +8716,7 @@ function SafetyPanel({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       color: C.t1,
       overflow: "hidden",
@@ -8741,7 +8725,7 @@ function SafetyPanel({
     }
   }, e.label || e.path), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4,
       marginTop: 2
     }
@@ -8750,7 +8734,7 @@ function SafetyPanel({
     style: {
       padding: "7px 12px",
       borderRadius: 7,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700,
       cursor: "pointer",
       flexShrink: 0,
@@ -8760,7 +8744,7 @@ function SafetyPanel({
     }
   }, "↩ 되돌리기"))))), tab === "file" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       lineHeight: 1.8,
       marginBottom: 10
@@ -8775,7 +8759,7 @@ function SafetyPanel({
       marginBottom: 8,
       background: C.green,
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -8799,13 +8783,13 @@ function SafetyPanel({
       border: `1.5px solid ${C.border}`,
       background: C.surface,
       color: C.t2,
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
   }, "📂 백업 파일에서 되돌리기"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4,
       marginTop: 8,
       lineHeight: 1.7
@@ -8842,14 +8826,14 @@ function SafetyPanel({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 16,
+        fontSize: 17,
         fontWeight: 900,
         color: C.t1,
         marginBottom: 4
       }
     }, "이 백업으로 되돌릴까요?"), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t3,
         marginBottom: 12
       }
@@ -8866,7 +8850,7 @@ function SafetyPanel({
         gridTemplateColumns: "1fr 70px 70px",
         background: C.surfaceL,
         padding: "7px 11px",
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 700,
         color: C.t3
       }
@@ -8887,7 +8871,7 @@ function SafetyPanel({
           display: "grid",
           gridTemplateColumns: "1fr 70px 70px",
           padding: "7px 11px",
-          fontSize: 12,
+          fontSize: 14,
           borderTop: `1px solid ${C.surfaceD}`
         }
       }, /*#__PURE__*/React.createElement("span", {
@@ -8911,7 +8895,7 @@ function SafetyPanel({
         display: "grid",
         gridTemplateColumns: "1fr 70px 70px",
         padding: "8px 11px",
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 800,
         borderTop: `1.5px solid ${C.borderD}`,
         background: C.surfaceL
@@ -8928,7 +8912,7 @@ function SafetyPanel({
       }
     }, countSchools(confirmRestore.data)))), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t3,
         lineHeight: 1.7,
         marginBottom: 14
@@ -8947,7 +8931,7 @@ function SafetyPanel({
         border: `1.5px solid ${C.border}`,
         background: C.surface,
         color: C.t2,
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: 700,
         cursor: "pointer"
       }
@@ -8961,7 +8945,7 @@ function SafetyPanel({
         border: "none",
         background: busy === "restore" ? C.t4 : C.blue,
         color: "#fff",
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: 800,
         cursor: "pointer"
       }
@@ -9006,11 +8990,14 @@ function SettingsPage({
 
   /* 모든 학교 평면화 (매출용) */
   const allSchools = [];
-  Object.entries(db || {}).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => (arr || []).forEach(s => allSchools.push({
-    ...s,
-    _year: yr,
-    _half: half
-  }))));
+  Object.entries(db || {}).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => (arr || []).forEach(s => {
+    if (s.deleted) return; // 휴지통 현장은 매출에서 뺀다
+    allSchools.push({
+      ...s,
+      _year: yr,
+      _half: half
+    });
+  })));
   const revTotal = allSchools.reduce((a, s) => a + (Number(s.contract) || 0), 0);
   const revDone = allSchools.filter(s => getProgress(s).done === STEPS.length).reduce((a, s) => a + (Number(s.contract) || 0), 0);
   const revIng = allSchools.filter(s => {
@@ -9027,9 +9014,9 @@ function SettingsPage({
           ...prev
         };
         next[sc._year] = {
-          ...prev[sc._year]
+          ...(prev[sc._year] || {})
         };
-        next[sc._year][sc._half] = prev[sc._year][sc._half].map(s => s.id !== sid ? s : {
+        next[sc._year][sc._half] = (prev[sc._year]?.[sc._half] || []).map(s => s.id !== sid ? s : {
           ...s,
           contract: n
         });
@@ -9157,7 +9144,7 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       letterSpacing: 2,
       fontWeight: 600,
@@ -9180,7 +9167,7 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1,
       marginBottom: 10
@@ -9190,7 +9177,7 @@ function SettingsPage({
       display: "grid",
       gridTemplateColumns: "auto 1fr",
       gap: "7px 12px",
-      fontSize: 12,
+      fontSize: 14,
       marginBottom: 12,
       alignItems: "center"
     }
@@ -9245,7 +9232,7 @@ function SettingsPage({
       border: `1.5px solid ${C.blue}50`,
       background: C.blueL,
       color: C.blue,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: diagBusy ? "default" : "pointer",
       opacity: diagBusy ? .6 : 1
@@ -9259,7 +9246,7 @@ function SettingsPage({
       border: `1.5px solid ${C.purple}50`,
       background: C.purpleL,
       color: C.purple,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: diagBusy ? "default" : "pointer",
       opacity: diagBusy ? .6 : 1
@@ -9271,7 +9258,7 @@ function SettingsPage({
       background: diag.err ? C.redL : C.surfaceL,
       border: `1px solid ${diag.err ? C.red + "40" : C.border}`,
       borderRadius: 8,
-      fontSize: 11.5,
+      fontSize: 13.5,
       color: diag.err ? C.red : C.t2,
       whiteSpace: "pre-wrap",
       lineHeight: 1.6
@@ -9296,7 +9283,7 @@ function SettingsPage({
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      fontSize: 18
+      fontSize: 19
     }
   }, "👤"), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9304,13 +9291,13 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 800,
       color: C.t1
     }
   }, editor || "이름 미설정"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3
     }
   }, authUser?.email || (authUser?.isAnonymous ? "링크 접속 (로그인 없음)" : ""))), authUser?.email ? /*#__PURE__*/React.createElement("button", {
@@ -9321,7 +9308,7 @@ function SettingsPage({
       border: `1.5px solid ${C.red}40`,
       background: C.redL,
       color: C.red,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -9335,14 +9322,14 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1,
       marginBottom: 4
     }
   }, "🔒 관리자 모드"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginBottom: 12
     }
@@ -9364,7 +9351,7 @@ function SettingsPage({
       border: BD,
       borderRadius: 8,
       color: C.t1,
-      fontSize: 13,
+      fontSize: 15,
       outline: "none"
     }
   }), /*#__PURE__*/React.createElement("button", {
@@ -9375,13 +9362,13 @@ function SettingsPage({
       background: C.t1,
       border: "none",
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
   }, "진입")), pwErr && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.red,
       marginTop: 8
     }
@@ -9398,11 +9385,11 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 14
+      fontSize: 16
     }
   }, "🔓"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700
     }
   }, "관리자 모드"), /*#__PURE__*/React.createElement("button", {
@@ -9414,7 +9401,7 @@ function SettingsPage({
       border: "1px solid rgba(255,255,255,.3)",
       background: "transparent",
       color: "#fff",
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 600,
       cursor: "pointer"
     }
@@ -9428,14 +9415,14 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1,
       marginBottom: 6
     }
   }, "🛟 데이터 관리"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       lineHeight: 1.6,
       marginBottom: 12
@@ -9461,7 +9448,7 @@ function SettingsPage({
       background: C.blue,
       border: "none",
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer",
       boxShadow: `0 3px 10px ${C.blue}33`
@@ -9478,7 +9465,7 @@ function SettingsPage({
       background: C.surface,
       border: `1.5px solid ${C.red}55`,
       color: C.red,
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -9504,13 +9491,13 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1
     }
   }, "🗺 지도(카카오맵) 설정"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       padding: "2px 8px",
       borderRadius: 10,
@@ -9519,7 +9506,7 @@ function SettingsPage({
     }
   }, kakaoKey ? "연결됨" : "미설정")), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       lineHeight: 1.9,
       marginBottom: 10
@@ -9556,7 +9543,7 @@ function SettingsPage({
       border: `1.5px solid ${C.border}`,
       borderRadius: 8,
       color: C.t1,
-      fontSize: 13,
+      fontSize: 15,
       outline: "none"
     }
   }), /*#__PURE__*/React.createElement("button", {
@@ -9577,7 +9564,7 @@ function SettingsPage({
       background: C.blue,
       border: "none",
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -9597,14 +9584,14 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1
     }
   }, "👥 인원 관리"), /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 8,
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4
     }
   }, MEMBERS.length, "명")), /*#__PURE__*/React.createElement("div", {
@@ -9622,7 +9609,7 @@ function SettingsPage({
         display: "inline-flex",
         alignItems: "center",
         gap: 5,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         color: mc,
         background: mc + "14",
@@ -9635,13 +9622,13 @@ function SettingsPage({
         if (confirm(`'${nm}' 님을 명단에서 뺄까요?`)) delMember(nm);
       },
       style: {
-        width: 15,
-        height: 15,
+        width: 19,
+        height: 19,
         borderRadius: "50%",
         border: "none",
         background: mc,
         color: "#fff",
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 900,
         cursor: "pointer",
         lineHeight: 1,
@@ -9650,7 +9637,7 @@ function SettingsPage({
     }, "×"));
   }), MEMBERS.length === 0 && /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t4
     }
   }, "등록된 인원이 없습니다.")), /*#__PURE__*/React.createElement("div", {
@@ -9670,7 +9657,7 @@ function SettingsPage({
       border: `1.5px dashed ${C.border}`,
       borderRadius: 8,
       color: C.t1,
-      fontSize: 13,
+      fontSize: 15,
       outline: "none"
     }
   }), /*#__PURE__*/React.createElement("button", {
@@ -9681,7 +9668,7 @@ function SettingsPage({
       background: C.blue,
       border: "none",
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -9700,19 +9687,19 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1
     }
   }, "📝 최근 수정 내역"), /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 8,
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4
     }
   }, logs.length, "건")), logs.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t4,
       padding: "20px 0",
       textAlign: "center"
@@ -9738,7 +9725,7 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: 700,
       padding: "2px 7px",
       borderRadius: 4,
@@ -9754,13 +9741,13 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       color: C.t1
     }
   }, l.target), (l.before || l.after) && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3,
       marginTop: 2,
       wordBreak: "break-all"
@@ -9779,14 +9766,14 @@ function SettingsPage({
     }
   }, l.after)), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t4,
       marginTop: 3
     },
     title: l.email || ""
   }, l.by, " · ", fmtTs(l.ts)))))), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t4,
       marginTop: 10
     }
@@ -9800,14 +9787,14 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1,
       marginBottom: 4
     }
   }, "💰 매출 관리"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginBottom: 12
     }
@@ -9844,13 +9831,13 @@ function SettingsPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3,
       marginBottom: 5
     }
   }, k.l), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 16,
+      fontSize: 17,
       fontWeight: 800,
       color: k.c
     }
@@ -9876,7 +9863,7 @@ function SettingsPage({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         color: C.t1,
         flex: 1,
@@ -9887,7 +9874,7 @@ function SettingsPage({
       }
     }, s.school), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t4
       }
     }, s._year, " ", s._half), revEdit === s.id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("input", {
@@ -9901,7 +9888,7 @@ function SettingsPage({
         padding: "5px 8px",
         border: BD,
         borderRadius: 6,
-        fontSize: 12,
+        fontSize: 14,
         textAlign: "right",
         outline: "none"
       }
@@ -9913,7 +9900,7 @@ function SettingsPage({
         background: C.green,
         border: "none",
         color: "#fff",
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 700,
         cursor: "pointer"
       }
@@ -9930,7 +9917,7 @@ function SettingsPage({
         border: `1px solid ${s.contract ? C.blue + "40" : C.border}`,
         background: s.contract ? C.blueL : C.surface,
         color: s.contract ? C.blue : C.t4,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer"
       }
@@ -9939,7 +9926,7 @@ function SettingsPage({
     style: {
       textAlign: "center",
       color: C.t4,
-      fontSize: 12,
+      fontSize: 14,
       padding: 16
     }
   }, "학교가 없습니다.")))));
@@ -9962,6 +9949,159 @@ const doneAt = s => {
   // 완료로 볼 기준 날짜(완수일)
   return s && s.end ? s.end : "";
 };
+/* 보고서 현황 카드 — ReportsPage 안에 두면 검색어를 한 글자 칠 때마다
+   컴포넌트가 새로 만들어져 카드 전체가 다시 그려진다. 밖으로 빼서 고정. */
+function ReportCard({
+  s,
+  accent,
+  isUrgent,
+  isMobile,
+  setAllB,
+  setEditId
+}) {
+    const dd = calcDday(s.end);
+    const bs = s.buildings || [];
+    const cnt = f => bs.filter(b => f === "delivery" ? !!b.delivery : !!b[f]).length;
+    const tel = siteTel(s);
+    const done = siteDone(s);
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: C.surface,
+        border: BD,
+        borderLeft: `4px solid ${accent}`,
+        borderRadius: "0 11px 11px 0",
+        padding: isMobile ? "12px 13px" : "13px 16px",
+        marginBottom: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+        marginBottom: 7
+      }
+    }, isUrgent && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 17,
+        fontWeight: 900,
+        color: ddC(dd),
+        minWidth: 46
+      }
+    }, ddL(dd)), !isUrgent && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 16,
+        color: C.green
+      }
+    }, "✓"), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 16,
+        fontWeight: 800,
+        color: C.t1,
+        flex: 1,
+        minWidth: 90,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }
+    }, s.school), tel && /*#__PURE__*/React.createElement("a", {
+      href: `tel:${tel.replace(/[^0-9+]/g, "")}`,
+      style: {
+        padding: isMobile ? "9px 12px" : "3px 9px",
+        borderRadius: 5,
+        fontSize: 12,
+        fontWeight: 800,
+        textDecoration: "none",
+        border: `1px solid ${C.green}55`,
+        background: C.greenL,
+        color: C.green,
+        whiteSpace: "nowrap"
+      }
+    }, "📞 ", tel), /*#__PURE__*/React.createElement("button", {
+      onClick: () => openRoute(routeLinks(s, null).kakao),
+      style: {
+        padding: isMobile ? "9px 12px" : "3px 9px",
+        borderRadius: 5,
+        fontSize: 12,
+        fontWeight: 800,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        border: `1px solid ${C.purple}45`,
+        background: C.purpleL,
+        color: C.purple
+      }
+    }, "🧭"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setEditId(s.id),
+      style: {
+        padding: isMobile ? "9px 13px" : "3px 10px",
+        borderRadius: 5,
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        border: `1px solid ${C.blue}40`,
+        background: C.blueL,
+        color: C.blue
+      }
+    }, "✏ 수정")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: C.t3,
+        marginBottom: 8
+      }
+    }, s.region, " · ", isLH(s._year) ? "LH" : `${String(s._year).slice(2)}년 ${s._half === "상반기" ? "상" : "하"}`, " · ", bs.length, "동", s.end && ` · 완수 ${fd(s.end)}`, (s.assignees || []).length > 0 && ` · 👤 ${s.assignees.join("·")}`), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        alignItems: "center"
+      }
+    }, [{
+      f: "rep",
+      l: "보고서",
+      c: C.purple
+    }, {
+      f: "fmsD",
+      l: "FMS",
+      c: C.blue
+    }, {
+      f: "delivery",
+      l: "납품",
+      c: C.green
+    }].map(x => {
+      const n = cnt(x.f),
+        all = bs.length > 0 && n === bs.length;
+      return /*#__PURE__*/React.createElement("button", {
+        key: x.f,
+        onClick: () => setAllB(s, x.f),
+        style: {
+          padding: "7px 12px",
+          borderRadius: 7,
+          fontSize: 14,
+          fontWeight: 700,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+          border: `1.5px solid ${all ? x.c + "70" : C.border}`,
+          background: all ? x.c + "14" : C.surfaceL,
+          color: all ? x.c : C.t3
+        }
+      }, all ? "✓ " : "", x.l, " ", /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 12,
+          opacity: .75
+        }
+      }, n, "/", bs.length));
+    }), !isUrgent && done && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: C.t4
+      }
+    }, "← 눌러서 해제하면 다시 진행 중으로")), /*#__PURE__*/React.createElement(LastEdit, {
+      s: s,
+      size: 9
+    }));
+  }
+
 function ReportsPage({
   db,
   setDb,
@@ -10017,7 +10157,7 @@ function ReportsPage({
         ...prev
       };
       next[s._year] = {
-        ...prev[s._year]
+        ...(prev[s._year] || {})
       };
       next[s._year][s._half] = (prev[s._year][s._half] || []).map(x => x.id !== s.id ? x : stampEdit({
         ...x,
@@ -10106,152 +10246,6 @@ function ReportsPage({
   }, [pool, isUrgent, tab, buckets]);
   const totalShown = groups.reduce((a, g) => a + g.items.length, 0);
   const editing = editId ? pool.find(s => s.id === editId) : null;
-  const Card = ({
-    s,
-    accent
-  }) => {
-    const dd = calcDday(s.end);
-    const bs = s.buildings || [];
-    const cnt = f => bs.filter(b => f === "delivery" ? !!b.delivery : !!b[f]).length;
-    const tel = siteTel(s);
-    const done = siteDone(s);
-    return /*#__PURE__*/React.createElement("div", {
-      style: {
-        background: C.surface,
-        border: BD,
-        borderLeft: `4px solid ${accent}`,
-        borderRadius: "0 11px 11px 0",
-        padding: isMobile ? "12px 13px" : "13px 16px",
-        marginBottom: 8
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        flexWrap: "wrap",
-        marginBottom: 7
-      }
-    }, isUrgent && /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 16,
-        fontWeight: 900,
-        color: ddC(dd),
-        minWidth: 46
-      }
-    }, ddL(dd)), !isUrgent && /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 15,
-        color: C.green
-      }
-    }, "✓"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 14,
-        fontWeight: 800,
-        color: C.t1,
-        flex: 1,
-        minWidth: 90,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }
-    }, s.school), tel && /*#__PURE__*/React.createElement("a", {
-      href: `tel:${tel.replace(/[^0-9+]/g, "")}`,
-      style: {
-        padding: "3px 9px",
-        borderRadius: 5,
-        fontSize: 10,
-        fontWeight: 800,
-        textDecoration: "none",
-        border: `1px solid ${C.green}55`,
-        background: C.greenL,
-        color: C.green,
-        whiteSpace: "nowrap"
-      }
-    }, "📞 ", tel), /*#__PURE__*/React.createElement("button", {
-      onClick: () => openRoute(routeLinks(s, null).kakao),
-      style: {
-        padding: "3px 9px",
-        borderRadius: 5,
-        fontSize: 10,
-        fontWeight: 800,
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        border: `1px solid ${C.purple}45`,
-        background: C.purpleL,
-        color: C.purple
-      }
-    }, "🧭"), /*#__PURE__*/React.createElement("button", {
-      onClick: () => setEditId(s.id),
-      style: {
-        padding: "3px 10px",
-        borderRadius: 5,
-        fontSize: 10,
-        fontWeight: 700,
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        border: `1px solid ${C.blue}40`,
-        background: C.blueL,
-        color: C.blue
-      }
-    }, "✏ 수정")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 11,
-        color: C.t3,
-        marginBottom: 8
-      }
-    }, s.region, " · ", isLH(s._year) ? "LH" : `${String(s._year).slice(2)}년 ${s._half === "상반기" ? "상" : "하"}`, " · ", bs.length, "동", s.end && ` · 완수 ${fd(s.end)}`, (s.assignees || []).length > 0 && ` · 👤 ${s.assignees.join("·")}`), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        gap: 6,
-        flexWrap: "wrap",
-        alignItems: "center"
-      }
-    }, [{
-      f: "rep",
-      l: "보고서",
-      c: C.purple
-    }, {
-      f: "fmsD",
-      l: "FMS",
-      c: C.blue
-    }, {
-      f: "delivery",
-      l: "납품",
-      c: C.green
-    }].map(x => {
-      const n = cnt(x.f),
-        all = bs.length > 0 && n === bs.length;
-      return /*#__PURE__*/React.createElement("button", {
-        key: x.f,
-        onClick: () => setAllB(s, x.f),
-        style: {
-          padding: "7px 12px",
-          borderRadius: 7,
-          fontSize: 12,
-          fontWeight: 700,
-          cursor: "pointer",
-          whiteSpace: "nowrap",
-          border: `1.5px solid ${all ? x.c + "70" : C.border}`,
-          background: all ? x.c + "14" : C.surfaceL,
-          color: all ? x.c : C.t3
-        }
-      }, all ? "✓ " : "", x.l, " ", /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 10,
-          opacity: .75
-        }
-      }, n, "/", bs.length));
-    }), !isUrgent && done && /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 10,
-        color: C.t4
-      }
-    }, "← 눌러서 해제하면 다시 진행 중으로")), /*#__PURE__*/React.createElement(LastEdit, {
-      s: s,
-      size: 9
-    }));
-  };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", {
     style: {
       margin: "0 0 10px",
@@ -10285,7 +10279,7 @@ function ReportsPage({
         flex: 1,
         padding: "11px 0",
         borderRadius: 9,
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: 800,
         cursor: "pointer",
         border: `1.5px solid ${on ? x.c : C.border}`,
@@ -10295,12 +10289,12 @@ function ReportsPage({
     }, x.l, on && /*#__PURE__*/React.createElement("span", {
       style: {
         marginLeft: 6,
-        fontSize: 12
+        fontSize: 14
       }
     }, totalShown));
   })), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginBottom: 10
     }
@@ -10319,7 +10313,7 @@ function ReportsPage({
     style: {
       padding: "7px 13px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -10333,7 +10327,7 @@ function ReportsPage({
     style: {
       padding: "7px 12px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -10350,7 +10344,7 @@ function ReportsPage({
       style: {
         padding: "7px 12px",
         borderRadius: 20,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
         whiteSpace: "nowrap",
@@ -10372,7 +10366,7 @@ function ReportsPage({
       border: `1.5px solid ${search ? C.blue : C.border}`,
       borderRadius: 9,
       color: C.t1,
-      fontSize: 14,
+      fontSize: 16,
       outline: "none",
       marginBottom: 12
     }
@@ -10389,7 +10383,7 @@ function ReportsPage({
     }
   }, isUrgent ? "👍" : "—"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13
+      fontSize: 15
     }
   }, isUrgent ? "급한 현장이 없습니다." : "이 기간에 완료된 현장이 없습니다.")), groups.map(g => /*#__PURE__*/React.createElement("div", {
     key: g.key,
@@ -10409,26 +10403,30 @@ function ReportsPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: g.color
     }
   }, g.label), g.desc && /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3
     }
   }, g.desc), /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: "auto",
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 800,
       color: g.color
     }
-  }, g.items.length)), g.items.map(s => /*#__PURE__*/React.createElement(Card, {
+  }, g.items.length)), g.items.map(s => /*#__PURE__*/React.createElement(ReportCard, {
     key: `${s._year}-${s._half}-${s.id}`,
     s: s,
-    accent: g.color
+    accent: g.color,
+    isUrgent: isUrgent,
+    isMobile: isMobile,
+    setAllB: setAllB,
+    setEditId: setEditId
   })))), editing && /*#__PURE__*/React.createElement(EditPanel, {
     sc: editing,
     yr: editing._year,
@@ -10439,14 +10437,14 @@ function ReportsPage({
   }), toast && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
-      bottom: 24,
+      bottom: isMobile ? `calc(${TAB_H + 16}px + env(safe-area-inset-bottom))` : 24,
       left: "50%",
       transform: "translateX(-50%)",
       background: C.t1,
       color: "#fff",
       padding: "11px 18px",
       borderRadius: 22,
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 600,
       zIndex: 320,
       boxShadow: "0 8px 24px rgba(0,0,0,.25)"
@@ -10684,6 +10682,83 @@ function MapPage({
       remember: false
     });
     setStatus(`${top.school} 위치를 되돌렸어요.`);
+  };
+
+  /* 위치 자동 찾기 — 좌표가 없는 현장을 카카오 장소·주소 검색으로 채운다.
+     · 직접 지정(🟢)한 위치는 건드리지 않는다
+     · 지역 대표좌표에서 25km 넘게 떨어지면 엉뚱한 동명이 현장으로 보고 버린다
+     · '■ 중지'를 누르면 즉시 멈춘다 */
+  const runGeocode = (ids, opts = {}) => {
+    const kakao = kkRef.current;
+    if (!kakao || !kakao.maps || !kakao.maps.services) {
+      setStatus("지도가 아직 준비되지 않았어요. 잠시 후 다시 눌러 주세요.");
+      return;
+    }
+    const targets = sites.filter(s => {
+      if (ids) return ids.includes(s.id); // 콕 집어 지정한 건 무조건 다시 찾는다
+      const g = geo[normSchool(s.school)];
+      if (g && g.src === "manual") return false; // 손으로 맞춰둔 건 보존
+      if (g && g.lat) return false; // 이미 좌표 있음
+      if (!opts.includeFailed && autoRef.current[normSchool(s.school)]) return false; // 아까 실패한 건 건너뜀
+      return true;
+    });
+    if (!targets.length) {
+      setStatus("새로 찾을 현장이 없어요.");
+      return;
+    }
+    stopRef.current = false;
+    setBusy(true);
+    const places = new kakao.maps.services.Places();
+    const coder = new kakao.maps.services.Geocoder();
+    let done = 0,
+      ok = 0,
+      fail = 0;
+    const finish = () => {
+      setBusy(false);
+      setStatus(stopRef.current ? `중지했어요 — ${ok}곳 찾음 · ${fail}곳 실패` : `완료 — ${ok}곳 찾았어요.${fail ? ` ${fail}곳은 못 찾았으니 핀을 끌거나 이름·주소로 지정해 주세요.` : ""}`);
+    };
+    const step = () => {
+      if (stopRef.current || done >= targets.length) return finish();
+      const s = targets[done++];
+      setStatus(`위치 찾는 중… (${done}/${targets.length}) ${s.school}`);
+      const rx = regionXY(s.region);
+      const ok25 = (lat, lng) => !rx || distKm([lat, lng], rx) <= 25;
+      const keep = (lat, lng) => {
+        saveGeo(s.school, {
+          lat,
+          lng,
+          src: "auto",
+          at: Date.now()
+        }, {
+          remember: !!ids
+        });
+        ok++;
+      };
+      const next = () => setTimeout(step, 120); // 연속 호출이 막히지 않게 간격을 둔다
+      const q = `${s.region || ""} ${s.school}`.trim();
+      const byAddress = () => {
+        coder.addressSearch(q, (r, st) => {
+          const h = st === kakao.maps.services.Status.OK && r && r.find(x => ok25(+x.y, +x.x));
+          if (h) keep(+h.y, +h.x);else {
+            autoRef.current[normSchool(s.school)] = true;
+            fail++;
+          }
+          next();
+        });
+      };
+      const opt = rx ? {
+        location: new kakao.maps.LatLng(rx[0], rx[1]),
+        radius: 20000
+      } : {};
+      places.keywordSearch(q, (r, st) => {
+        const h = st === kakao.maps.services.Status.OK && r && r.find(x => ok25(+x.y, +x.x));
+        if (h) {
+          keep(+h.y, +h.x);
+          next();
+        } else byAddress();
+      }, opt);
+    };
+    step();
   };
   const posOf = useCallback(s => {
     const g = geo[normSchool(s.school)];
@@ -10972,7 +11047,7 @@ function MapPage({
     style: {
       padding: "6px 12px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -10982,7 +11057,7 @@ function MapPage({
     }
   }, "❓ 도움말")), helpOpen && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t2,
       background: C.blueL,
       border: `1px solid ${C.blue}25`,
@@ -11036,7 +11111,7 @@ function MapPage({
       border: `1.5px solid ${q ? C.blue : C.border}`,
       borderRadius: 9,
       color: C.t1,
-      fontSize: 14,
+      fontSize: 16,
       outline: "none"
     }
   }), q && /*#__PURE__*/React.createElement("button", {
@@ -11047,7 +11122,7 @@ function MapPage({
       border: `1px solid ${C.border}`,
       background: C.surface,
       color: C.t3,
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -11068,7 +11143,7 @@ function MapPage({
   }, matches.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "12px 14px",
-      fontSize: 12,
+      fontSize: 14,
       color: C.t4
     }
   }, "일치하는 현장이 없어요."), matches.map(m => {
@@ -11090,7 +11165,7 @@ function MapPage({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 13
+        fontSize: 15
       }
     }, has ? "🔵" : "⚪"), /*#__PURE__*/React.createElement("span", {
       style: {
@@ -11101,7 +11176,7 @@ function MapPage({
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         display: "block",
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 700,
         color: C.t1,
         overflow: "hidden",
@@ -11111,7 +11186,7 @@ function MapPage({
     }, m.s.school), /*#__PURE__*/React.createElement("span", {
       style: {
         display: "block",
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4,
         overflow: "hidden",
         textOverflow: "ellipsis",
@@ -11119,13 +11194,13 @@ function MapPage({
       }
     }, (m.s.buildings || []).map(b => b.b).filter(Boolean).slice(0, 3).join(" · ") || "동 정보 없음", m.s.end ? ` · 완수 ${fd(m.s.end)}` : "")), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t3,
         whiteSpace: "nowrap"
       }
     }, m.s.region), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4,
         whiteSpace: "nowrap"
       }
@@ -11152,7 +11227,7 @@ function MapPage({
       style: {
         padding: "7px 12px",
         borderRadius: 20,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
         whiteSpace: "nowrap",
@@ -11164,7 +11239,7 @@ function MapPage({
     }, isLH(b.y) ? "🏢 LH" : `${String(b.y).slice(2)}년 ${b.h === "상반기" ? "상" : "하"}`, /*#__PURE__*/React.createElement("span", {
       style: {
         marginLeft: 5,
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4
       }
     }, (db[b.y][b.h] || []).length));
@@ -11173,7 +11248,7 @@ function MapPage({
     style: {
       padding: "7px 12px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -11192,14 +11267,14 @@ function MapPage({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 800,
       color: C.t1,
       marginBottom: 6
     }
   }, "🗺 지도를 켜려면 카카오맵 키가 한 번 필요해요"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t2,
       lineHeight: 1.8,
       marginBottom: 10
@@ -11211,7 +11286,7 @@ function MapPage({
     }
   }, "(꼭 필요)"), /*#__PURE__*/React.createElement("br", null), "③ ", /*#__PURE__*/React.createElement("b", null, "앱 키 → JavaScript 키 → JavaScript SDK 도메인"), "에 이 사이트 주소 등록", /*#__PURE__*/React.createElement("br", null), "④ ", /*#__PURE__*/React.createElement("b", null, "JavaScript 키"), " 복사 → 설정에 붙여넣기"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       color: C.t1,
       marginBottom: 8
@@ -11234,7 +11309,7 @@ function MapPage({
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         width: 70,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         color: C.t1
       }
@@ -11257,14 +11332,14 @@ function MapPage({
       style: {
         width: 40,
         textAlign: "right",
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         color: C.t2
       }
     }, n, "개"));
   }), !byRegion.length && /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t4
     }
   }, "표시할 현장이 없습니다."))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -11284,7 +11359,7 @@ function MapPage({
       alignItems: "center",
       gap: 8,
       marginTop: 8,
-      fontSize: 11,
+      fontSize: 13,
       color: C.t2,
       background: C.blueL,
       border: `1px solid ${C.blue}25`,
@@ -11309,14 +11384,14 @@ function MapPage({
       border: `1px solid ${C.red}40`,
       background: C.redL,
       color: C.red,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700,
       cursor: "pointer",
       flexShrink: 0
     }
   }, "■ 중지")), !busy && status && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginTop: 8,
       padding: "0 2px",
@@ -11326,7 +11401,7 @@ function MapPage({
     }
   }, status), err && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.red,
       background: C.redL,
       border: `1px solid ${C.red}35`,
@@ -11349,7 +11424,7 @@ function MapPage({
     style: {
       padding: "7px 12px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -11365,7 +11440,7 @@ function MapPage({
     style: {
       padding: "7px 12px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -11380,7 +11455,7 @@ function MapPage({
     style: {
       padding: "7px 12px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -11393,7 +11468,7 @@ function MapPage({
     style: {
       padding: "7px 12px",
       borderRadius: 20,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer",
       whiteSpace: "nowrap",
@@ -11403,7 +11478,7 @@ function MapPage({
     }
   }, "↩ 되돌리기 ", undoStack.length), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4,
       marginLeft: "auto",
       whiteSpace: "nowrap"
@@ -11485,7 +11560,7 @@ function MapPage({
       }
     }), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 9,
+        fontSize: 12,
         color: C.t4
       }
     }, "아래로 쓸어내리면 닫혀요")), /*#__PURE__*/React.createElement("div", {
@@ -11498,7 +11573,7 @@ function MapPage({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: 800,
         color: C.t1,
         flex: 1,
@@ -11513,7 +11588,7 @@ function MapPage({
         border: `1px solid ${C.border}`,
         background: C.surfaceL,
         color: C.t3,
-        fontSize: 16,
+        fontSize: 17,
         cursor: "pointer",
         lineHeight: 1,
         flexShrink: 0
@@ -11523,7 +11598,7 @@ function MapPage({
       style: {
         padding: "6px 13px",
         borderRadius: 7,
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 800,
         textDecoration: "none",
         border: `1px solid ${C.green}55`,
@@ -11533,7 +11608,7 @@ function MapPage({
       }
     }, "📞 ", tel) : /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t4
       }
     }, "전화번호 없음"), /*#__PURE__*/React.createElement("button", {
@@ -11541,7 +11616,7 @@ function MapPage({
       style: {
         padding: "6px 13px",
         borderRadius: 7,
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 700,
         border: `1px solid ${C.blue}40`,
         background: C.blueL,
@@ -11561,7 +11636,7 @@ function MapPage({
         }
       }, /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: 800,
           color: C.t2
         }
@@ -11570,7 +11645,7 @@ function MapPage({
         style: {
           padding: "7px 13px",
           borderRadius: 7,
-          fontSize: 12,
+          fontSize: 14,
           fontWeight: 800,
           cursor: "pointer",
           whiteSpace: "nowrap",
@@ -11583,7 +11658,7 @@ function MapPage({
         style: {
           padding: "7px 13px",
           borderRadius: 7,
-          fontSize: 12,
+          fontSize: 14,
           fontWeight: 800,
           cursor: "pointer",
           whiteSpace: "nowrap",
@@ -11596,7 +11671,7 @@ function MapPage({
         style: {
           padding: "7px 13px",
           borderRadius: 7,
-          fontSize: 12,
+          fontSize: 14,
           fontWeight: 800,
           cursor: "pointer",
           whiteSpace: "nowrap",
@@ -11609,7 +11684,7 @@ function MapPage({
         style: {
           padding: "7px 13px",
           borderRadius: 7,
-          fontSize: 12,
+          fontSize: 14,
           fontWeight: 800,
           cursor: "pointer",
           whiteSpace: "nowrap",
@@ -11619,7 +11694,7 @@ function MapPage({
         }
       }, "애플지도")), !rl.exact && /*#__PURE__*/React.createElement("span", {
         style: {
-          fontSize: 10,
+          fontSize: 12,
           color: C.orange
         }
       }, "위치 미확정 — 이름으로 검색해서 열려요"));
@@ -11633,30 +11708,30 @@ function MapPage({
       }
     }, picked._manual ? /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.green,
         fontWeight: 700
       }
     }, "🟢 직접 지정한 위치") : picked._exact ? /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.blue,
         fontWeight: 700
       }
     }, "🔵 찾은 위치") : /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.orange,
         fontWeight: 700
       }
     }, "⚪ 위치 못 찾음 — 아래에서 지정해 주세요"), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         color: C.t2
       }
     }, picked.region || "지역 미지정", " · ", picked.buildings.length, "개 동", picked.field && ` · 현장조사 ${fd(picked.field)}`, picked.end && ` · 완수 ${fd(picked.end)} (${ddL(calcDday(picked.end))})`)), (picked.assignees || []).length > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         color: C.t3,
         marginBottom: 6
       }
@@ -11677,7 +11752,7 @@ function MapPage({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 800,
         color: needPos ? "#9A5B0A" : C.t2,
         marginBottom: 7
@@ -11704,7 +11779,7 @@ function MapPage({
         border: `1.5px solid ${C.border}`,
         borderRadius: 8,
         color: C.t1,
-        fontSize: 13,
+        fontSize: 15,
         outline: "none"
       }
     }), /*#__PURE__*/React.createElement("button", {
@@ -11715,7 +11790,7 @@ function MapPage({
         border: "none",
         background: C.blue,
         color: "#fff",
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 700,
         cursor: "pointer",
         whiteSpace: "nowrap"
@@ -11741,7 +11816,7 @@ function MapPage({
       style: {
         padding: "7px 13px",
         borderRadius: 7,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
         whiteSpace: "nowrap",
@@ -11759,7 +11834,7 @@ function MapPage({
       style: {
         padding: "7px 13px",
         borderRadius: 7,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         whiteSpace: "nowrap",
         border: `1px solid ${C.blue}40`,
@@ -11775,7 +11850,7 @@ function MapPage({
       style: {
         padding: "7px 13px",
         borderRadius: 7,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         whiteSpace: "nowrap",
         border: `1px solid ${C.red}40`,
@@ -11786,7 +11861,7 @@ function MapPage({
     }, "위치 지우기")), placeHits === "loading" && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 8,
-        fontSize: 11,
+        fontSize: 13,
         color: C.t3
       }
     }, "찾는 중…"), Array.isArray(placeHits) && /*#__PURE__*/React.createElement("div", {
@@ -11798,7 +11873,7 @@ function MapPage({
       }
     }, placeHits.length === 0 && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t4
       }
     }, "결과가 없어요. 주소로도 넣어 보세요."), placeHits.map((h, i) => /*#__PURE__*/React.createElement("button", {
@@ -11814,13 +11889,13 @@ function MapPage({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         color: C.t1
       }
     }, h.name), h.addr && /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t3,
         marginTop: 1
       }
@@ -11843,8 +11918,6 @@ function MapPage({
    팀 채팅 (방별 · 이미지 첨부 · 새 메시지 푸시)
 ══════════════════════════════════════════════════════════════ */
 /* 채팅 방: 전체 · 공지 + 팀별(설정의 팀 목록 자동 반영) */
-const chatRoomColor = r => r === "전체" ? C.blue : r === "공지사항" ? C.red : C.t2;
-const chatRoomIcon = r => r === "전체" ? "💬 " : r === "공지사항" ? "📢 " : "👥 ";
 function BoardPage({
   editor,
   isMobile
@@ -12021,6 +12094,7 @@ function BoardPage({
         files: files.length ? files : null
       }).catch(e => say("올리기 실패: " + (e && e.message || e), 5000));
       logAction("추가", "게시판", null, t);
+      sendPush("📋 새 게시글", `${me} · ${t}`); // 등록만 해두고 실제로는 아무도 안 보내던 알림
       setTitle("");
       setBody("");
       setFiles([]);
@@ -12071,7 +12145,7 @@ function BoardPage({
     }
   }, "📋 게시판"), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t3
     }
   }, posts.length, "개"), /*#__PURE__*/React.createElement("button", {
@@ -12087,19 +12161,19 @@ function BoardPage({
       border: "none",
       background: writing ? C.t3 : C.blue,
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
   }, writing ? "취소" : "✏ 글쓰기")), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginBottom: 10
     }
   }, "공지·인수인계·양식 공유용이에요. 한 파일 최대 200MB까지 올릴 수 있고, 누구나 내려받을 수 있습니다."), msg && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.blue,
       background: C.blueL,
       border: `1px solid ${C.blue}25`,
@@ -12127,7 +12201,7 @@ function BoardPage({
       border: BD,
       borderRadius: 8,
       color: C.t1,
-      fontSize: 15,
+      fontSize: 16,
       fontWeight: 700,
       outline: "none",
       marginBottom: 8
@@ -12145,7 +12219,7 @@ function BoardPage({
       border: BD,
       borderRadius: 8,
       color: C.t1,
-      fontSize: 14,
+      fontSize: 16,
       outline: "none",
       resize: "vertical",
       lineHeight: 1.7,
@@ -12179,7 +12253,7 @@ function BoardPage({
       border: `1.5px solid ${C.border}`,
       background: C.surface,
       color: C.t2,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -12188,7 +12262,7 @@ function BoardPage({
       display: "flex",
       alignItems: "center",
       gap: 5,
-      fontSize: 12,
+      fontSize: 14,
       color: C.t2,
       cursor: "pointer"
     }
@@ -12205,7 +12279,7 @@ function BoardPage({
       border: "none",
       background: C.blue,
       color: "#fff",
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       cursor: "pointer"
     }
@@ -12217,7 +12291,7 @@ function BoardPage({
     style: {
       display: "flex",
       justifyContent: "space-between",
-      fontSize: 11,
+      fontSize: 13,
       color: C.t2,
       marginBottom: 4
     }
@@ -12269,7 +12343,7 @@ function BoardPage({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t1,
       flex: 1,
       minWidth: 0,
@@ -12279,7 +12353,7 @@ function BoardPage({
     }
   }, "📎 ", f.name), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4
     }
   }, fmtSize(f.size)), /*#__PURE__*/React.createElement("button", {
@@ -12291,7 +12365,7 @@ function BoardPage({
       border: "none",
       background: "transparent",
       color: C.red,
-      fontSize: 14,
+      fontSize: 16,
       cursor: "pointer",
       lineHeight: 1
     }
@@ -12307,7 +12381,7 @@ function BoardPage({
       border: `1.5px solid ${q ? C.blue : C.border}`,
       borderRadius: 9,
       color: C.t1,
-      fontSize: 14,
+      fontSize: 16,
       outline: "none",
       marginBottom: 12
     }
@@ -12324,7 +12398,7 @@ function BoardPage({
     }
   }, "📋"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13
+      fontSize: 15
     }
   }, q ? "찾는 글이 없어요." : "아직 올라온 글이 없어요.")), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -12360,7 +12434,7 @@ function BoardPage({
       }
     }, p2.pin && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 800,
         color: C.orange,
         background: C.orangeL,
@@ -12370,7 +12444,7 @@ function BoardPage({
       }
     }, "고정"), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: 800,
         color: C.t1,
         flex: 1,
@@ -12381,20 +12455,20 @@ function BoardPage({
       }
     }, p2.title), (p2.files || []).length > 0 && /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.blue,
         fontWeight: 700
       }
     }, "📎 ", p2.files.length), /*#__PURE__*/React.createElement("span", {
       style: {
         color: C.t4,
-        fontSize: 12,
+        fontSize: 14,
         transform: isOpen ? "rotate(90deg)" : "none",
         transition: "transform .2s"
       }
     }, "›")), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         color: C.t3,
         marginTop: 5
       }
@@ -12411,7 +12485,7 @@ function BoardPage({
       }
     }, p2.body && /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 14,
+        fontSize: 16,
         color: C.t1,
         lineHeight: 1.85,
         whiteSpace: "pre-wrap",
@@ -12443,13 +12517,13 @@ function BoardPage({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 16
+        fontSize: 17
       }
     }, "📎"), /*#__PURE__*/React.createElement("span", {
       style: {
         flex: 1,
         minWidth: 0,
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 700,
         color: C.blue,
         overflow: "hidden",
@@ -12458,13 +12532,13 @@ function BoardPage({
       }
     }, f.name), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4,
         whiteSpace: "nowrap"
       }
     }, fmtSize(f.size)), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 800,
         color: C.green,
         whiteSpace: "nowrap"
@@ -12480,7 +12554,7 @@ function BoardPage({
       style: {
         padding: "8px 13px",
         borderRadius: 7,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
         border: `1px solid ${C.border}`,
@@ -12492,7 +12566,7 @@ function BoardPage({
       style: {
         padding: "8px 13px",
         borderRadius: 7,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
         border: `1px solid ${C.blue}40`,
@@ -12504,7 +12578,7 @@ function BoardPage({
       style: {
         padding: "8px 13px",
         borderRadius: 7,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
         border: `1px solid ${C.red}35`,
@@ -12519,7 +12593,7 @@ function BoardPage({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: 800,
         color: C.blue,
         marginBottom: 8
@@ -12536,7 +12610,7 @@ function BoardPage({
         border: BD,
         borderRadius: 8,
         color: C.t1,
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: 700,
         outline: "none",
         marginBottom: 8
@@ -12554,7 +12628,7 @@ function BoardPage({
         border: BD,
         borderRadius: 8,
         color: C.t1,
-        fontSize: 14,
+        fontSize: 16,
         outline: "none",
         resize: "vertical",
         lineHeight: 1.7,
@@ -12588,7 +12662,7 @@ function BoardPage({
         border: `1.5px solid ${C.border}`,
         background: C.surface,
         color: C.t2,
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 700,
         cursor: "pointer"
       }
@@ -12597,7 +12671,7 @@ function BoardPage({
         display: "flex",
         alignItems: "center",
         gap: 5,
-        fontSize: 12,
+        fontSize: 14,
         color: C.t2,
         cursor: "pointer"
       }
@@ -12625,7 +12699,7 @@ function BoardPage({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         color: C.t1,
         flex: 1,
         minWidth: 0,
@@ -12635,7 +12709,7 @@ function BoardPage({
       }
     }, "📎 ", f.name), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4
       }
     }, fmtSize(f.size)), /*#__PURE__*/React.createElement("button", {
@@ -12645,13 +12719,13 @@ function BoardPage({
         border: "none",
         background: "transparent",
         color: C.red,
-        fontSize: 14,
+        fontSize: 16,
         cursor: "pointer",
         lineHeight: 1
       }
     }, "×")))), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 10,
+        fontSize: 12,
         color: C.t4,
         marginTop: 8
       }
@@ -12669,7 +12743,7 @@ function BoardPage({
         border: `1.5px solid ${C.border}`,
         background: C.surface,
         color: C.t3,
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 700,
         cursor: "pointer"
       }
@@ -12683,7 +12757,7 @@ function BoardPage({
         border: "none",
         background: busy === "upload" ? C.t4 : C.blue,
         color: "#fff",
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: 700,
         cursor: busy === "upload" ? "default" : "pointer"
       }
@@ -12764,7 +12838,7 @@ function LoginScreen({
     }
   }, "◈"), " STON"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.t3,
       marginTop: 4,
       letterSpacing: 2,
@@ -12776,7 +12850,7 @@ function LoginScreen({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: 700,
       color: C.t1,
       marginBottom: 14
@@ -12789,7 +12863,7 @@ function LoginScreen({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700,
       display: "block",
@@ -12809,12 +12883,12 @@ function LoginScreen({
       border: BD,
       borderRadius: 9,
       color: C.t1,
-      fontSize: 14,
+      fontSize: 16,
       outline: "none"
     }
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3,
       fontWeight: 700,
       display: "block",
@@ -12834,12 +12908,12 @@ function LoginScreen({
       border: BD,
       borderRadius: 9,
       color: C.t1,
-      fontSize: 14,
+      fontSize: 16,
       outline: "none"
     }
   })), err && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       color: C.red,
       background: C.redL,
       padding: "8px 11px",
@@ -12856,19 +12930,132 @@ function LoginScreen({
       background: busy ? C.t4 : C.blue,
       border: "none",
       color: "#fff",
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 700,
       cursor: busy ? "default" : "pointer",
       boxShadow: `0 4px 14px ${C.blue}40`
     }
   }, busy ? "로그인 중…" : "로그인")), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t4,
       marginTop: 16,
       lineHeight: 1.6
     }
   }, "계정이 없으면 관리자에게 문의하세요. 계정은 Firebase 콘솔 → Authentication 에서 발급합니다."))));
+}
+
+/* ══════════════════════════════════════════════════════════════
+   하단 탭바 (휴대폰 전용)
+   · 자주 쓰는 4개를 화면 아래 고정 → 메뉴 이동이 두 번에서 한 번으로
+   · 나머지(게시판·엑셀·설정)와 상태 정보는 ☰ 더보기 서랍으로
+══════════════════════════════════════════════════════════════ */
+const TABS = [{
+  id: "schedule",
+  icon: "📅",
+  label: "일정"
+}, {
+  id: "sites",
+  icon: "🏫",
+  label: "현장"
+}, {
+  id: "map",
+  icon: "🗺",
+  label: "지도"
+}, {
+  id: "reports",
+  icon: "📑",
+  label: "보고서"
+}];
+const MORE_MENUS = ["board", "export", "settings"];
+const TAB_H = 54;
+function TabItem({
+  icon,
+  label,
+  on,
+  onClick,
+  badge
+}) {
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: TAB_H,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 3,
+      padding: "6px 0 5px",
+      border: "none",
+      background: "transparent",
+      color: on ? C.blue : C.t3,
+      position: "relative",
+      WebkitTapHighlightColor: "transparent"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 20,
+      lineHeight: 1,
+      filter: on ? "none" : "grayscale(.55)",
+      opacity: on ? 1 : .8
+    }
+  }, icon), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      fontWeight: on ? 800 : 600,
+      letterSpacing: -.2,
+      whiteSpace: "nowrap"
+    }
+  }, label), badge > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: "absolute",
+      top: 3,
+      left: "50%",
+      marginLeft: 6,
+      background: C.red,
+      color: "#fff",
+      fontSize: 12,
+      fontWeight: 800,
+      padding: "1px 5px",
+      borderRadius: 9,
+      lineHeight: 1.5
+    }
+  }, badge > 99 ? "99+" : badge));
+}
+function BottomTabs({
+  menu,
+  setMenu,
+  onMore,
+  urgentCount
+}) {
+  return /*#__PURE__*/React.createElement("nav", {
+    style: {
+      position: "fixed",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 90,
+      display: "flex",
+      background: C.surface,
+      borderTop: `1px solid ${C.borderD}`,
+      paddingBottom: "env(safe-area-inset-bottom)",
+      boxShadow: "0 -2px 14px rgba(20,30,50,.10)"
+    }
+  }, TABS.map(t => /*#__PURE__*/React.createElement(TabItem, {
+    key: t.id,
+    icon: t.icon,
+    label: t.label,
+    on: menu === t.id,
+    badge: t.id === "reports" ? urgentCount : 0,
+    onClick: () => setMenu(t.id)
+  })), /*#__PURE__*/React.createElement(TabItem, {
+    icon: "☰",
+    label: "더보기",
+    on: MORE_MENUS.includes(menu),
+    onClick: onMore
+  }));
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -13314,6 +13501,19 @@ function App() {
     }, 4000); // 첫 로딩이 끝난 뒤 조용히
     return () => clearTimeout(tid);
   }, [db]);
+  /* 자정을 넘기면 화면을 한 번 다시 그린다 — 앱을 켜둔 채로 날이 바뀌어도 D-day가 맞게 */
+  const [, setDayTick] = useState(0);
+  useEffect(() => {
+    let cur = todayStr();
+    const t = setInterval(() => {
+      const now = todayStr();
+      if (now !== cur) {
+        cur = now;
+        setDayTick(v => v + 1);
+      }
+    }, 60000);
+    return () => clearInterval(t);
+  }, []);
   const allSchools = useMemo(() => {
     const list = [];
     Object.entries(db).forEach(([yr, halves]) => Object.entries(halves).forEach(([half, schools]) => (schools || []).forEach(s => {
@@ -13415,7 +13615,7 @@ function App() {
       }
     }), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 12,
+        fontSize: 14,
         color: C.t3
       }
     }, "불러오는 중…"), /*#__PURE__*/React.createElement("style", null, `@keyframes spin{to{transform:rotate(360deg)}}`));
@@ -13428,9 +13628,16 @@ function App() {
       minHeight: "100vh",
       display: "flex",
       color: C.t1,
-      fontSize: 13
+      fontSize: 15
     }
-  }, /*#__PURE__*/React.createElement("style", null, `*{box-sizing:border-box}html,body{overflow-x:hidden;max-width:100%}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:${C.surfaceL}}::-webkit-scrollbar-thumb{background:${C.borderD};border-radius:4px}input::placeholder,textarea::placeholder{color:${C.t4}}button{cursor:pointer;transition:all .12s}button:hover{opacity:.85}input,textarea,select{max-width:100%}input[type="date"]{color-scheme:light}@keyframes spin{to{transform:rotate(360deg)}}`), !loaded && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("style", null, `*{box-sizing:border-box}html,body{overflow-x:hidden;max-width:100%}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:${C.surfaceL}}::-webkit-scrollbar-thumb{background:${C.borderD};border-radius:4px}input::placeholder,textarea::placeholder{color:${C.t4}}button{cursor:pointer;transition:all .12s}button:hover{opacity:.85}input,textarea,select{max-width:100%}input[type="date"]{color-scheme:light}@keyframes spin{to{transform:rotate(360deg)}}
+/* ── 휴대폰 ── iOS는 글자 16px 미만 입력칸을 누르면 화면을 확대해버린다 → 16px 고정으로 막는다 */
+@media(max-width:819px){
+  input,textarea,select{font-size:16px !important}
+  input[type="date"]{min-height:44px}
+  button,a,label,input,textarea,select{touch-action:manipulation}
+  button,a{-webkit-tap-highlight-color:rgba(29,111,242,.14)}
+}`), !loaded && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       inset: 0,
@@ -13463,7 +13670,7 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 14,
       color: C.t3
     }
   }, "Firebase 실시간 데이터 불러오는 중…")), isMobile && sideOpen && /*#__PURE__*/React.createElement("div", {
@@ -13504,6 +13711,7 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "20px 18px 14px",
+      paddingTop: "calc(20px + env(safe-area-inset-top))",
       borderBottom: BD,
       whiteSpace: "nowrap"
     }
@@ -13515,7 +13723,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 18,
+      fontSize: 19,
       fontWeight: 900,
       color: C.t1,
       letterSpacing: -.5
@@ -13526,7 +13734,7 @@ function App() {
     }
   }, "◈"), " STON"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t4,
       marginTop: 2,
       letterSpacing: 2,
@@ -13538,7 +13746,7 @@ function App() {
       background: "transparent",
       border: "none",
       color: C.t4,
-      fontSize: 18,
+      fontSize: 19,
       padding: "2px 4px"
     }
   }, "☰")), /*#__PURE__*/React.createElement("div", {
@@ -13553,7 +13761,7 @@ function App() {
       display: "flex",
       alignItems: "center",
       gap: 5,
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: 700,
       color: online ? C.green : fbStatus === "연결 중..." ? C.orange : C.t3
     }
@@ -13567,14 +13775,14 @@ function App() {
     }
   }), online ? "실시간 연결됨" : fbStatus), syncing && /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.blue,
       fontWeight: 600,
       marginLeft: "auto"
     }
   }, "저장 중…"), !syncing && online && /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t4,
       marginLeft: "auto"
     }
@@ -13591,7 +13799,7 @@ function App() {
       display: "flex",
       alignItems: "center",
       gap: 5,
-      fontSize: 9,
+      fontSize: 12,
       color: C.t2,
       fontWeight: 600
     }
@@ -13604,7 +13812,7 @@ function App() {
     }
   }), "동시 접속 ", users, "명"), meta?.at && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t3,
       marginTop: 4,
       whiteSpace: "normal",
@@ -13628,7 +13836,7 @@ function App() {
       border: BD,
       borderRadius: 6,
       color: editor ? C.t1 : C.t4,
-      fontSize: 11,
+      fontSize: 13,
       outline: "none",
       fontWeight: 600
     }
@@ -13647,7 +13855,7 @@ function App() {
       border: `1.5px solid ${C.blue}40`,
       background: C.blueL,
       color: C.blue,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700,
       cursor: "pointer",
       display: "flex",
@@ -13664,7 +13872,7 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "8px 16px 3px",
-      fontSize: 9,
+      fontSize: 12,
       color: C.t4,
       letterSpacing: 1.5,
       fontWeight: 700
@@ -13682,14 +13890,14 @@ function App() {
       borderLeft: `3px solid ${menu === m.id ? C.blue : "transparent"}`,
       border: "none",
       color: menu === m.id ? C.blue : C.t2,
-      fontSize: 13,
+      fontSize: 15,
       fontWeight: menu === m.id ? 700 : 500,
       textAlign: "left",
       whiteSpace: "nowrap"
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 15
+      fontSize: 16
     }
   }, m.icon), /*#__PURE__*/React.createElement("span", {
     style: {
@@ -13704,7 +13912,7 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "6px 16px 3px",
-      fontSize: 9,
+      fontSize: 12,
       color: C.t4,
       letterSpacing: 1.5,
       fontWeight: 700
@@ -13722,14 +13930,14 @@ function App() {
       borderLeft: `3px solid ${menu === m.id ? C.blue : "transparent"}`,
       border: "none",
       color: menu === m.id ? C.blue : C.t3,
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: menu === m.id ? 700 : 400,
       textAlign: "left",
       whiteSpace: "nowrap"
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13
+      fontSize: 15
     }
   }, m.icon), /*#__PURE__*/React.createElement("span", {
     style: {
@@ -13739,7 +13947,7 @@ function App() {
     style: {
       background: C.red,
       color: "#fff",
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: 700,
       padding: "1px 5px",
       borderRadius: 10
@@ -13751,7 +13959,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 9,
+      fontSize: 12,
       color: C.t4,
       marginBottom: 8,
       letterSpacing: 1,
@@ -13764,7 +13972,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700,
       color: C.t2,
       marginBottom: 3
@@ -13777,7 +13985,7 @@ function App() {
   }, Object.entries(hs).map(([h, ss]) => /*#__PURE__*/React.createElement("div", {
     key: h,
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: h === "상반기" ? C.blue : C.orange,
       background: h === "상반기" ? C.blueL : C.orangeL,
       padding: "2px 7px",
@@ -13795,19 +14003,22 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("header", {
     style: {
-      height: 52,
+      height: "auto",
+      minHeight: 52,
       background: C.surface,
       borderBottom: `1.5px solid ${C.borderD}`,
       display: "flex",
       alignItems: "center",
       padding: isMobile ? "0 14px" : "0 22px",
+      paddingTop: "env(safe-area-inset-top)",
+      boxSizing: "content-box",
       gap: 12,
       position: "sticky",
       top: 0,
       zIndex: 50,
       boxShadow: "0 1px 6px rgba(0,0,0,.06)"
     }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, !isMobile && /*#__PURE__*/React.createElement("button", {
     onClick: () => setSideOpen(v => !v),
     style: {
       width: 34,
@@ -13816,7 +14027,7 @@ function App() {
       background: C.surfaceL,
       border: BD,
       color: C.t2,
-      fontSize: 17,
+      fontSize: 18,
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -13830,14 +14041,14 @@ function App() {
       right: -4,
       background: C.red,
       color: "#fff",
-      fontSize: 8,
+      fontSize: 11,
       fontWeight: 700,
       padding: "1px 4px",
       borderRadius: 8
     }
   }, urgent.length)), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: 800,
       color: C.t1
     }
@@ -13847,10 +14058,10 @@ function App() {
     }
   }), !isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 10,
+      fontSize: 12,
       color: C.t3
     }
-  }, "기준일 ", BASE_DATE, " · 연도/반기별 분리"), !isMobile && /*#__PURE__*/React.createElement("button", {
+  }, "기준일 ", todayStr(), " · 연도/반기별 분리"), !isMobile && /*#__PURE__*/React.createElement("button", {
     onClick: () => setMenu("schedule"),
     style: {
       padding: "6px 13px",
@@ -13858,7 +14069,7 @@ function App() {
       border: `1.5px solid ${menu === "schedule" ? C.blue : C.border}`,
       borderRadius: 8,
       color: menu === "schedule" ? C.blue : C.t3,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700
     }
   }, "📅 현장일정"), !isMobile && /*#__PURE__*/React.createElement("button", {
@@ -13869,16 +14080,22 @@ function App() {
       border: `1.5px solid ${menu === "sites" ? C.green : C.border}`,
       borderRadius: 8,
       color: menu === "sites" ? C.green : C.t3,
-      fontSize: 11,
+      fontSize: 13,
       fontWeight: 700
     }
   }, "🏫 현장관리")), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: isMobile ? 14 : 22,
+      paddingBottom: isMobile ? `calc(${TAB_H + 22}px + env(safe-area-inset-bottom))` : 22,
       overflowY: "auto",
       flex: 1
     }
-  }, pages[menu])));
+  }, pages[menu])), isMobile && /*#__PURE__*/React.createElement(BottomTabs, {
+    menu: menu,
+    setMenu: setMenu,
+    urgentCount: urgent.length,
+    onMore: () => setSideOpen(true)
+  }));
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
