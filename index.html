@@ -8675,8 +8675,6 @@ function sendPush(title, body) {
   } catch {}
 }
 
-/* 관리자 비밀번호 (클라이언트 확인) — 운영 시 변경하세요 */
-const ADMIN_PW = "961211";
 
 /* 현재 로그인 사용자 (로그 기록용) */
 let CURRENT_USER = {
@@ -9689,13 +9687,6 @@ function SettingsPage({
   isAdmin,
   adminCount
 }) {
-  /* 관리자 판정은 계정 권한(ston/admins)으로 한다.
-     아직 관리자가 한 명도 없을 때만, 최초 1회 지정을 위해 임시 비밀번호를 받는다. */
-  const bootstrap = adminCount === 0;
-  const [boot, setBoot] = useState(false);
-  const admin = isAdmin || boot;
-  const [pw, setPw] = useState("");
-  const [pwErr, setPwErr] = useState("");
   const [newName, setNewName] = useState(""); // 새 인원 이름
   const [mapKey, setMapKey] = useState(""); // 지도 키 입력값
   const kkSeen = useRef(false);
@@ -9750,16 +9741,13 @@ function SettingsPage({
     setRevEdit(null);
     setRevVal("");
   };
-  const tryAdmin = () => {
-    if (pw === ADMIN_PW) {
-      setBoot(true);
-      setPwErr("");
-      setPw("");
-    } else setPwErr("비밀번호가 올바르지 않습니다.");
-  };
-
   /* 관리자 지정·해제 — ston/admins/<uid> */
   const setAdminFlag = (a, on) => {
+    /* 마지막 관리자를 해제하면 아무도 설정에 못 들어간다 → 막는다 */
+    if (!on && (adminCount || 0) <= 1) {
+      window.alert("마지막 관리자는 해제할 수 없습니다.\n다른 계정을 먼저 관리자로 지정하세요.");
+      return;
+    }
     if (on && !window.confirm(`${a.name || a.email} 님을 관리자로 지정할까요?\n설정·엑셀 관리·백업을 쓸 수 있게 됩니다.`)) return;
     if (!on && !window.confirm(`${a.name || a.email} 님의 관리자 권한을 해제할까요?`)) return;
     try {
@@ -9821,6 +9809,10 @@ function SettingsPage({
     setAccName("");
   };
   const delAccount = a => {
+    if (a.admin) {
+      window.alert("관리자로 지정된 계정입니다.\n먼저 '일반'으로 바꾼 뒤 삭제하세요.");
+      return;
+    }
     if (!window.confirm(`'${a.email} → ${a.name}' 연결을 지울까요?\n계정 자체는 남고 이름 연결만 없어집니다.`)) return;
     const next = {
       ...ACCOUNTS
@@ -10100,101 +10092,7 @@ function SettingsPage({
       fontWeight: 700,
       cursor: "pointer"
     }
-  }, "로그아웃") : null), !admin ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: C.surface,
-      border: BD,
-      borderRadius: 12,
-      padding: "18px",
-      marginBottom: 14
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 15,
-      fontWeight: 800,
-      color: C.t1,
-      marginBottom: 4
-    }
-  }, bootstrap ? "🔓 최초 관리자 지정" : "🔒 관리자 권한 필요"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      color: C.t3,
-      lineHeight: 1.7,
-      marginBottom: 12
-    }
-  }, bootstrap ? "아직 관리자로 지정된 계정이 없습니다. 아래 비밀번호로 한 번만 들어와 본인 계정을 관리자로 지정하세요. 지정하고 나면 이 비밀번호는 더 이상 쓰이지 않습니다." : "이 화면은 관리자 계정만 볼 수 있습니다. 관리자에게 권한을 요청하세요."), bootstrap && /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 8
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "password",
-    value: pw,
-    onChange: e => setPw(e.target.value),
-    onKeyDown: e => e.key === "Enter" && tryAdmin(),
-    placeholder: "관리자 비밀번호",
-    style: {
-      flex: 1,
-      padding: "10px 12px",
-      background: C.surfaceL,
-      border: BD,
-      borderRadius: 8,
-      color: C.t1,
-      fontSize: 15,
-      outline: "none"
-    }
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: tryAdmin,
-    style: {
-      padding: "10px 20px",
-      borderRadius: 8,
-      background: C.t1,
-      border: "none",
-      color: "#fff",
-      fontSize: 15,
-      fontWeight: 700,
-      cursor: "pointer"
-    }
-  }, "진입")), pwErr && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      color: C.red,
-      marginTop: 8
-    }
-  }, pwErr)) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      marginBottom: 12,
-      padding: "10px 14px",
-      background: C.t1,
-      borderRadius: 10,
-      color: "#fff"
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 16
-    }
-  }, "🔓"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 15,
-      fontWeight: 700
-    }
-  }, "관리자 모드"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setAdmin(false),
-    style: {
-      marginLeft: "auto",
-      padding: "5px 12px",
-      borderRadius: 7,
-      border: "1px solid rgba(255,255,255,.3)",
-      background: "transparent",
-      color: "#fff",
-      fontSize: 13,
-      fontWeight: 600,
-      cursor: "pointer"
-    }
-  }, "나가기")), /*#__PURE__*/React.createElement("div", {
+  }, "로그아웃") : null), /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.surface,
       border: BD,
@@ -14220,9 +14118,8 @@ function App() {
 
   /* 권한 없는 메뉴에 머물러 있으면 일정 화면으로 돌린다 */
   useEffect(() => {
-    if (menu === "export" && !isAdmin) setMenuRaw("schedule");
-    if (menu === "settings" && !(isAdmin || adminCount === 0)) setMenuRaw("schedule");
-  }, [isAdmin, adminCount, menu]);
+    if (!isAdmin && (menu === "export" || menu === "settings")) setMenuRaw("schedule");
+  }, [isAdmin, menu]);
 
   /* B) 로그인 후에만 데이터/메타/설정/로그/presence 구독 */
   useEffect(() => {
@@ -14587,8 +14484,7 @@ function App() {
   });
   /* 관리자만 엑셀 관리·설정을 볼 수 있다.
      단 관리자가 한 명도 없는 최초 상태에서는 설정만 열어둔다 — 첫 관리자를 지정해야 하므로. */
-  const canSettings = isAdmin || adminCount === 0;
-  const menus = MENUS.filter(m => m.id === "settings" ? canSettings : m.id === "export" ? isAdmin : true);
+  const menus = MENUS.filter(m => m.id === "settings" || m.id === "export" ? isAdmin : true);
   const pages = {
     schedule: /*#__PURE__*/React.createElement(Calendar, {
       allSchools: allSchools,
@@ -14621,7 +14517,7 @@ function App() {
       setDb: setDb,
       saveNow: saveNow
     }),
-    settings: canSettings && /*#__PURE__*/React.createElement(SettingsPage, {
+    settings: isAdmin && /*#__PURE__*/React.createElement(SettingsPage, {
       cfgVer: cfgVer,
       logs: logs,
       editor: editor,
