@@ -9955,7 +9955,7 @@ function SettingsPage({
       fontWeight: 700,
       color: authUser ? C.green : C.red
     }
-  }, authUser ? authUser.isAnonymous ? "익명 로그인됨 ✓" : `이메일 로그인 (${authUser.email})` : "❌ 인증 안 됨 — 저장 불가!"), /*#__PURE__*/React.createElement("span", {
+  }, authUser ? `이메일 로그인 (${authUser.email})` : "❌ 인증 안 됨 — 저장 불가!"), /*#__PURE__*/React.createElement("span", {
     style: {
       color: C.t3
     }
@@ -10065,7 +10065,7 @@ function SettingsPage({
       fontSize: 13,
       color: C.t3
     }
-  }, authUser?.email || (authUser?.isAnonymous ? "링크 접속 (로그인 없음)" : ""))), authUser?.email ? /*#__PURE__*/React.createElement("button", {
+  }, authUser?.email || "")), authUser?.email ? /*#__PURE__*/React.createElement("button", {
     onClick: onLogout,
     style: {
       padding: "8px 16px",
@@ -14094,6 +14094,20 @@ function App() {
       offConn = () => connRef.off("value", onConn);
       if (firebase.auth) {
         offAuth = firebase.auth().onAuthStateChanged(user => {
+          /* 익명 세션은 기기에 남아 있다가 다음 접속 때 그대로 되살아난다.
+             콘솔에서 익명 인증을 꺼도 이미 발급된 세션은 살아 있으므로
+             여기서 직접 걷어내고 로그인 화면으로 보낸다. */
+          if (user && user.isAnonymous) {
+            firebase.auth().signOut().catch(() => {});
+            setFbStatus("이전 익명 접속을 정리했습니다. 다시 로그인해 주세요.");
+            CURRENT_USER = {
+              uid: null,
+              email: null,
+              name: ""
+            };
+            setAuthUser(null);
+            return;
+          }
           if (user) {
             CURRENT_USER = {
               uid: user.uid,
