@@ -14414,6 +14414,10 @@ function App() {
   }, [editor]);
   const logout = () => {
     try {
+      localStorage.removeItem("ston_editor");
+    } catch {}
+    setEditor("");
+    try {
       firebase.auth().signOut();
     } catch {}
   };
@@ -14942,7 +14946,37 @@ function App() {
       justifyContent: "center",
       gap: 5
     }
-  }, "🔔 알림 켜기")), /*#__PURE__*/React.createElement("nav", {
+  }, "🔔 알림 켜기"), authUser && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 7,
+      paddingTop: 8,
+      borderTop: BD
+    }
+  }, authUser.email && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.t4,
+      marginBottom: 5,
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis"
+    }
+  }, authUser.email), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      if (window.confirm("로그아웃할까요?\n다시 쓰려면 이메일과 비밀번호로 로그인해야 합니다.")) logout();
+    },
+    style: {
+      width: "100%",
+      padding: "9px 8px",
+      borderRadius: 7,
+      border: `1.5px solid ${C.red}45`,
+      background: C.redL,
+      color: C.red,
+      fontSize: 13,
+      fontWeight: 800,
+      cursor: "pointer"
+    }
+  }, "🚪 로그아웃"))), /*#__PURE__*/React.createElement("nav", {
     style: {
       flex: 1,
       padding: "8px 0",
