@@ -8644,6 +8644,7 @@ const FB_BK_IDX = "ston/backup_index"; // 백업 목록(가벼움 — 목록만 
 const FB_BK_DAT = "ston/backup_data"; // 백업 본문(무거움 — 복원할 때만 읽음)
 const FB_UNDO = "ston/undo"; // 최근 변경 되돌리기용 기록
 const FB_BOARD = "ston/board"; // 게시판 글
+const FB_ADMINS = "ston/admins"; // 관리자 이메일 목록 — 규칙에서도 이 값을 본다
 
 /* 푸시 알림 — OneSignal (Cloudflare Worker 경유, 본인 제외 전송) */
 function registerOneSignal(userName) {
@@ -8775,8 +8776,10 @@ function logAction(action, target, before, after) {
 /* 계정(이메일) → 실명 매핑.
    Firebase 키에 . 을 쓸 수 없어 이메일을 안전한 문자로 바꿔 저장한다.
    화면에는 이름만 보이고 이메일·UID는 기록용으로만 남는다. */
-const emailKey = e => String(e || "").trim().toLowerCase().replace(/[.@#$\[\]\/]/g, "_");
+/* 이메일을 Firebase 키로 — 규칙에서도 email.lower().replace('.','_').replace('@','_') 로 같은 값을 만든다 */
+const emailKey = e => String(e || "").trim().toLowerCase().replace(/\./g, "_").replace(/@/g, "_");
 let ACCOUNTS = {};
+let ADMINS = {};
 const nameOfEmail = e => (ACCOUNTS[emailKey(e)] || {}).name || "";
 
 /* Firebase config → 인원 명단(MEMBERS) 갱신 */
@@ -9682,9 +9685,15 @@ function SettingsPage({
   fbStatus,
   lastSync,
   meta,
-  users
+  users,
+  isAdmin,
+  adminCount
 }) {
-  const [admin, setAdmin] = useState(false);
+  /* 관리자 판정은 계정 권한(ston/admins)으로 한다.
+     아직 관리자가 한 명도 없을 때만, 최초 1회 지정을 위해 임시 비밀번호를 받는다. */
+  const bootstrap = adminCount === 0;
+  const [boot, setBoot] = useState(false);
+  const admin = isAdmin || boot;
   const [pw, setPw] = useState("");
   const [pwErr, setPwErr] = useState("");
   const [newName, setNewName] = useState(""); // 새 인원 이름
@@ -9743,10 +9752,23 @@ function SettingsPage({
   };
   const tryAdmin = () => {
     if (pw === ADMIN_PW) {
-      setAdmin(true);
+      setBoot(true);
       setPwErr("");
       setPw("");
-    } else setPwErr("관리자 비밀번호가 올바르지 않습니다.");
+    } else setPwErr("비밀번호가 올바르지 않습니다.");
+  };
+
+  /* 관리자 지정·해제 — ston/admins/<uid> */
+  const setAdminFlag = (a, on) => {
+    if (on && !window.confirm(`${a.name || a.email} 님을 관리자로 지정할까요?\n설정·엑셀 관리·백업을 쓸 수 있게 됩니다.`)) return;
+    if (!on && !window.confirm(`${a.name || a.email} 님의 관리자 권한을 해제할까요?`)) return;
+    try {
+      const ref = firebase.database().ref(`${FB_ADMINS}/${a.k}`);
+      (on ? ref.set(true) : ref.remove()).catch(e => window.alert("변경 실패: " + (e && e.message || e)));
+      logAction(on ? "추가" : "삭제", "관리자 권한", null, `${a.email} ${on ? "→ 관리자" : "→ 일반"}`);
+    } catch (e) {
+      window.alert("변경 실패: " + (e && e.message || e));
+    }
   };
   const writeCfg = members => {
     try {
@@ -9764,8 +9786,9 @@ function SettingsPage({
   const accList = Object.entries(ACCOUNTS).map(([k, v]) => ({
     k,
     email: v && v.email || k,
-    name: v && v.name || ""
-  })).sort((a, b) => a.name.localeCompare(b.name));
+    name: v && v.name || "",
+    admin: ADMINS[k] === true
+  })).sort((a, b) => (b.admin ? 1 : 0) - (a.admin ? 1 : 0) || a.name.localeCompare(b.name));
   const writeAccounts = next => {
     try {
       firebase.database().ref(FB_CONFIG).update({
@@ -10092,13 +10115,14 @@ function SettingsPage({
       color: C.t1,
       marginBottom: 4
     }
-  }, "🔒 관리자 모드"), /*#__PURE__*/React.createElement("div", {
+  }, bootstrap ? "🔓 최초 관리자 지정" : "🔒 관리자 권한 필요"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
       color: C.t3,
+      lineHeight: 1.7,
       marginBottom: 12
     }
-  }, "팀·인원 관리와 수정 내역 조회는 관리자 비밀번호가 필요합니다."), /*#__PURE__*/React.createElement("div", {
+  }, bootstrap ? "아직 관리자로 지정된 계정이 없습니다. 아래 비밀번호로 한 번만 들어와 본인 계정을 관리자로 지정하세요. 지정하고 나면 이 비밀번호는 더 이상 쓰이지 않습니다." : "이 화면은 관리자 계정만 볼 수 있습니다. 관리자에게 권한을 요청하세요."), bootstrap && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8
@@ -10457,20 +10481,36 @@ function SettingsPage({
       fontWeight: 800,
       color: C.t1
     }
-  }, "🔗 계정 연결"), /*#__PURE__*/React.createElement("span", {
+  }, "👥 계정 관리"), /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 8,
       fontSize: 12,
       color: C.t4
     }
-  }, accList.length, "개")), /*#__PURE__*/React.createElement("div", {
+  }, accList.length, "명 · 관리자 ", adminCount == null ? "-" : adminCount, "명")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: C.t3,
       lineHeight: 1.7,
       marginBottom: 11
     }
-  }, "Firebase 콘솔 → Authentication 에서 만든 로그인 계정에 실명을 붙여둡니다. 연결해두면 그 사람이 로그인할 때 이름이 자동으로 채워지고, 수정 기록·게시판에 실명이 남습니다. 화면에는 ", /*#__PURE__*/React.createElement("b", null, "이름만"), " 보이고 이메일은 기록용으로만 저장됩니다."), accList.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Firebase 콘솔에서 만든 계정의 ", /*#__PURE__*/React.createElement("b", null, "이메일과 실명"), "을 여기 적어둡니다. 그 사람이 로그인하면 이름이 자동으로 채워지고, 수정 기록·게시판에 실명이 남습니다. ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.blue
+    }
+  }, "관리자"), "로 바꾼 계정만 설정·엑셀 관리를 볼 수 있습니다. 아직 로그인하지 않은 사람도 미리 지정해둘 수 있어요."), adminCount === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 700,
+      color: "#9A5B0A",
+      background: C.orangeL,
+      border: `1px solid ${C.orange}45`,
+      borderRadius: 8,
+      padding: "10px 12px",
+      marginBottom: 11,
+      lineHeight: 1.6
+    }
+  }, "⚠ 관리자가 아직 없습니다. 본인 계정을 등록하고 '관리자'로 바꿔 주세요."), accList.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
       color: C.t4,
@@ -10514,6 +10554,21 @@ function SettingsPage({
       whiteSpace: "nowrap"
     }
   }, a.email), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setAdminFlag(a, !a.admin),
+    title: "관리자로 지정하면 설정·엑셀 관리를 쓸 수 있습니다",
+    style: {
+      flexShrink: 0,
+      padding: "7px 13px",
+      borderRadius: 7,
+      border: `1.5px solid ${a.admin ? C.blue : C.border}`,
+      background: a.admin ? C.blue : C.surface,
+      color: a.admin ? "#fff" : C.t3,
+      fontSize: 12,
+      fontWeight: 800,
+      cursor: "pointer",
+      whiteSpace: "nowrap"
+    }
+  }, a.admin ? "관리자" : "일반"), /*#__PURE__*/React.createElement("button", {
     onClick: () => delAccount(a),
     style: {
       flexShrink: 0,
@@ -14141,6 +14196,34 @@ function App() {
     };
   }, []);
 
+  /* 관리자 여부 — ston/admins/<uid> 가 true 인 사람만.
+     이 값은 Firebase 규칙에서도 그대로 쓰이므로 화면을 숨기는 것에 그치지 않는다. */
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminCount, setAdminCount] = useState(null); // null=확인 전
+  useEffect(() => {
+    if (!authUser || typeof firebase === "undefined" || !firebase.apps.length) {
+      setIsAdmin(false);
+      return;
+    }
+    const aRef = firebase.database().ref(FB_ADMINS);
+    const onAdmins = sn => {
+      ADMINS = sn.val() || {};
+      setAdminCount(Object.values(ADMINS).filter(Boolean).length);
+      setIsAdmin(ADMINS[emailKey(authUser.email)] === true);
+    };
+    aRef.on("value", onAdmins, () => {
+      setAdminCount(0);
+      setIsAdmin(false);
+    });
+    return () => aRef.off("value", onAdmins);
+  }, [authUser]);
+
+  /* 권한 없는 메뉴에 머물러 있으면 일정 화면으로 돌린다 */
+  useEffect(() => {
+    if (menu === "export" && !isAdmin) setMenuRaw("schedule");
+    if (menu === "settings" && !(isAdmin || adminCount === 0)) setMenuRaw("schedule");
+  }, [isAdmin, adminCount, menu]);
+
   /* B) 로그인 후에만 데이터/메타/설정/로그/presence 구독 */
   useEffect(() => {
     if (!authUser || typeof firebase === "undefined" || !firebase.apps.length) return;
@@ -14498,6 +14581,10 @@ function App() {
     const d = calcDday(s.end);
     return d !== null && d < 0 && d >= -7;
   });
+  /* 관리자만 엑셀 관리·설정을 볼 수 있다.
+     단 관리자가 한 명도 없는 최초 상태에서는 설정만 열어둔다 — 첫 관리자를 지정해야 하므로. */
+  const canSettings = isAdmin || adminCount === 0;
+  const menus = MENUS.filter(m => m.id === "settings" ? canSettings : m.id === "export" ? isAdmin : true);
   const pages = {
     schedule: /*#__PURE__*/React.createElement(Calendar, {
       allSchools: allSchools,
@@ -14525,12 +14612,12 @@ function App() {
       setDb: setDb,
       isMobile: isMobile
     }),
-    export: /*#__PURE__*/React.createElement(ExportImportPage, {
+    export: isAdmin && /*#__PURE__*/React.createElement(ExportImportPage, {
       db: db,
       setDb: setDb,
       saveNow: saveNow
     }),
-    settings: /*#__PURE__*/React.createElement(SettingsPage, {
+    settings: canSettings && /*#__PURE__*/React.createElement(SettingsPage, {
       cfgVer: cfgVer,
       logs: logs,
       editor: editor,
@@ -14546,7 +14633,9 @@ function App() {
       fbStatus: fbStatus,
       lastSync: lastSync,
       meta: meta,
-      users: users
+      users: users,
+      isAdmin: isAdmin,
+      adminCount: adminCount
     })
   };
 
@@ -14867,7 +14956,7 @@ function App() {
       letterSpacing: 1.5,
       fontWeight: 700
     }
-  }, "MAIN"), MENUS.slice(0, 4).map(m => /*#__PURE__*/React.createElement("button", {
+  }, "MAIN"), menus.slice(0, 4).map(m => /*#__PURE__*/React.createElement("button", {
     key: m.id,
     onClick: () => setMenu(m.id),
     style: {
@@ -14907,7 +14996,7 @@ function App() {
       letterSpacing: 1.5,
       fontWeight: 700
     }
-  }, "REPORT"), MENUS.slice(4).map(m => /*#__PURE__*/React.createElement("button", {
+  }, "REPORT"), menus.slice(4).map(m => /*#__PURE__*/React.createElement("button", {
     key: m.id,
     onClick: () => setMenu(m.id),
     style: {
@@ -15042,7 +15131,7 @@ function App() {
       fontWeight: 800,
       color: C.t1
     }
-  }, MENUS.find(m => m.id === menu)?.icon, " ", MENUS.find(m => m.id === menu)?.label), /*#__PURE__*/React.createElement("div", {
+  }, menus.find(m => m.id === menu)?.icon, " ", menus.find(m => m.id === menu)?.label), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1
     }
