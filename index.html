@@ -3965,7 +3965,8 @@ function PeriodPicker({
   }, "닫기")));
 }
 
-/* 주·일 보기에서 쓰는 일정 한 줄 — 현장명과 담당 인원을 함께 보여준다 */
+/* 일정 한 줄 (주 세로 목록 · 일 보기) — 어디로 누가 가는지가 한눈에 들어오도록
+   현장명 → 지역 → 담당 인원 순으로 쌓는다 */
 function EvRow({
   e,
   compact,
@@ -3975,14 +3976,15 @@ function EvRow({
   const who = (e.assignees || []).join(" · ");
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
+    title: `${e.school}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
     style: {
       width: "100%",
       textAlign: "left",
       display: "flex",
-      alignItems: "center",
-      gap: 8,
-      padding: compact ? "7px 9px" : "10px 12px",
-      marginBottom: 4,
+      alignItems: "flex-start",
+      gap: 9,
+      padding: compact ? "9px 10px" : "11px 13px",
+      marginBottom: 5,
       borderRadius: 8,
       cursor: "pointer",
       border: `1px solid ${col}38`,
@@ -3992,9 +3994,9 @@ function EvRow({
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       flexShrink: 0,
-      minWidth: 38,
+      minWidth: 40,
       textAlign: "center",
-      padding: "3px 5px",
+      padding: "4px 5px",
       borderRadius: 5,
       fontSize: 12,
       fontWeight: 800,
@@ -4009,30 +4011,107 @@ function EvRow({
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       display: "block",
-      fontSize: compact ? 13 : 15,
-      fontWeight: 700,
+      fontSize: compact ? 14 : 16,
+      fontWeight: 800,
       color: C.t1,
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, e.school), /*#__PURE__*/React.createElement("span", {
+  }, e.region ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      color: col,
+      background: col + "18",
+      padding: "2px 6px",
+      borderRadius: 4,
+      marginRight: 6
+    }
+  }, e.region) : null, e.school), /*#__PURE__*/React.createElement("span", {
     style: {
       display: "block",
-      fontSize: 12,
-      color: who ? C.t2 : C.t4,
+      marginTop: 3,
+      fontSize: 13,
+      fontWeight: who ? 800 : 700,
+      color: who ? C.t1 : C.orange,
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, e.region ? `${e.region} · ` : "", who ? `👤 ${who}` : `인원 미배정 (${e.headcount}명 예정)`)));
+  }, who ? `👤 ${who}` : `⚠ 인원 미배정 (${e.headcount}명 예정)`)));
+}
+
+/* 일정 칸 (데스크탑 주 보기 7칸) — 좁으니 세 줄로 압축 */
+function WeekChip({
+  e,
+  onClick
+}) {
+  const col = evColor(e.field);
+  const who = (e.assignees || []).join("·");
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    title: `${e.school}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
+    style: {
+      width: "100%",
+      textAlign: "left",
+      display: "block",
+      padding: "6px 8px",
+      marginBottom: 5,
+      borderRadius: 7,
+      cursor: "pointer",
+      border: `1px solid ${col}3a`,
+      borderLeft: `4px solid ${col}`,
+      background: col + "0e"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 5,
+      marginBottom: 2
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      fontWeight: 800,
+      color: col
+    }
+  }, evLabel(e.field)), e.region && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: C.t3,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, e.region)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      color: C.t1,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, e.school), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 2,
+      fontSize: 12,
+      fontWeight: 800,
+      color: who ? C.t2 : C.orange,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, who || "인원 미배정"));
 }
 
 /* ══════════════════════════════════════════════════════════════
    현장 일정 — 일 / 주 / 월 보기
    · 제목을 누르면 연·월(·주) 선택 팝업
-   · 좌우로 밀면 이전/다음 기간
-   · 월 보기에서는 일정 카드를 끌어 날짜 변경
+   · 인원 칩을 누르면 그 사람 일정만 (누가 어디로 가는지 확인용)
+   · 주 보기는 폰에서 세로 목록, 데스크탑에서 7칸 가로
 ══════════════════════════════════════════════════════════════ */
 function Calendar({
   allSchools,
@@ -4041,6 +4120,7 @@ function Calendar({
 }) {
   const [view, setView] = useState("month"); // day | week | month
   const [cursor, setCursor] = useState(() => todayStr());
+  const [who, setWho] = useState(""); // "" 전체 · "__none" 미배정 · 이름
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dragging, setDragging] = useState(null);
   const [overDate, setOverDate] = useState(null);
@@ -4054,13 +4134,15 @@ function Calendar({
   const aY = cur.getFullYear(),
     aM = cur.getMonth() + 1;
   const tStr = todayStr();
+  const weekStart = startOfWeek(cur),
+    weekEnd = addDays(weekStart, 6);
 
   /* 날짜별 일정 — 보기 방식과 무관하게 한 번만 계산 */
   const evByDate = useMemo(() => {
     const map = {},
       seen = new Set();
     allSchools.forEach(s => {
-      [["field"], ["start"], ["end"]].forEach(([f]) => {
+      ["field", "start", "end"].forEach(f => {
         const ds = s[f];
         if (!ds) return;
         /* 같은 현장·같은 날·같은 종류는 한 번만 (이월본이 양쪽 반기에 있어도 중복 표시 안 됨) */
@@ -4085,6 +4167,43 @@ function Calendar({
     Object.values(map).forEach(a => a.sort((x, y2) => ord[x.field] - ord[y2.field]));
     return map;
   }, [allSchools]);
+
+  /* 지금 보고 있는 기간의 날짜 목록 */
+  const periodDates = useMemo(() => {
+    if (view === "day") return [cursor];
+    if (view === "week") return Array.from({
+      length: 7
+    }, (_, i) => dstr(addDays(weekStart, i)));
+    const n = new Date(aY, aM, 0).getDate();
+    return Array.from({
+      length: n
+    }, (_, i) => `${aY}-${pad2(aM)}-${pad2(i + 1)}`);
+  }, [view, cursor, aY, aM]);
+
+  /* 이 기간에 누가 몇 건 배정됐는지 — 인원 칩에 쓴다 */
+  const roster = useMemo(() => {
+    const m = new Map();
+    let none = 0,
+      all = 0;
+    periodDates.forEach(d => (evByDate[d] || []).forEach(e => {
+      all++;
+      const as = e.assignees || [];
+      if (!as.length) none++;else as.forEach(n => m.set(n, (m.get(n) || 0) + 1));
+    }));
+    return {
+      all,
+      none,
+      people: [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    };
+  }, [periodDates, evByDate]);
+
+  /* 인원 필터를 적용한 그 날의 일정 */
+  const evOf = useCallback(ds => {
+    const list = evByDate[ds] || [];
+    if (!who) return list;
+    if (who === "__none") return list.filter(e => !(e.assignees || []).length);
+    return list.filter(e => (e.assignees || []).includes(who));
+  }, [evByDate, who]);
 
   /* 기간 이동 */
   const shift = n => {
@@ -4142,6 +4261,12 @@ function Calendar({
   const onTEnd = () => {
     swipeStart.current = null;
   };
+  const swipeProps = {
+    onWheel: onWheel,
+    onTouchStart: onTStart,
+    onTouchMove: onTMove,
+    onTouchEnd: onTEnd
+  };
 
   /* 일정 끌어서 날짜 변경 (월 보기) */
   const handleDrop = useCallback(targetDate => {
@@ -4180,13 +4305,11 @@ function Calendar({
   }, [dragging, allSchools, setDb]);
 
   /* ── 제목 ── */
-  const weekStart = startOfWeek(cur),
-    weekEnd = addDays(weekStart, 6);
   const title = view === "month" ? `${aY}년 ${aM}월` : view === "week" ? `${weekStart.getMonth() + 1}/${weekStart.getDate()} ~ ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}` : `${aM}월 ${cur.getDate()}일 (${DOW[cur.getDay()]})`;
   const subtitle = view === "week" ? `${aY}년 ${aM}월` : view === "day" ? `${aY}년` : null;
 
-  /* ── 보기 전환 (일 / 주 / 월) ── */
-  const ViewToggle = /*#__PURE__*/React.createElement("div", {
+  /* ── 보기 전환 ── */
+  const viewToggle = /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       background: C.surfaceD,
@@ -4212,6 +4335,97 @@ function Calendar({
     }
   }, l)));
 
+  /* ── 인원 필터 ── 누가 어디로 가는지 걸러 보기 */
+  const rosterBar = /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: BD,
+      borderRadius: 10,
+      padding: "9px 11px",
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 7,
+      marginBottom: roster.people.length || roster.none ? 8 : 0
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      color: C.t2
+    }
+  }, "👤 담당 인원"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: C.t3
+    }
+  }, roster.people.length, "명 · ", roster.all, "건"), who && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setWho(""),
+    style: {
+      marginLeft: "auto",
+      padding: "5px 11px",
+      borderRadius: 7,
+      border: `1px solid ${C.blue}45`,
+      background: C.blueL,
+      color: C.blue,
+      fontSize: 12,
+      fontWeight: 800,
+      cursor: "pointer",
+      whiteSpace: "nowrap"
+    }
+  }, "필터 해제")), (roster.people.length > 0 || roster.none > 0) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexWrap: isMobile ? "nowrap" : "wrap",
+      overflowX: isMobile ? "auto" : "visible",
+      paddingBottom: isMobile ? 3 : 0,
+      WebkitOverflowScrolling: "touch"
+    }
+  }, [{
+    k: "",
+    l: "전체",
+    n: roster.all,
+    c: C.t2
+  }, ...(roster.none > 0 ? [{
+    k: "__none",
+    l: "미배정",
+    n: roster.none,
+    c: C.orange
+  }] : []), ...roster.people.map(([n, c]) => ({
+    k: n,
+    l: n,
+    n: c,
+    c: C.t1
+  }))].map(x => {
+    const on = who === x.k;
+    return /*#__PURE__*/React.createElement("button", {
+      key: x.k || "all",
+      onClick: () => setWho(x.k),
+      style: {
+        flexShrink: 0,
+        padding: "7px 12px",
+        borderRadius: 20,
+        fontSize: 13,
+        fontWeight: on ? 800 : 700,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        border: `1.5px solid ${on ? x.c : C.border}`,
+        background: on ? x.c : C.surface,
+        color: on ? "#fff" : x.c
+      }
+    }, x.l, /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 5,
+        fontSize: 12,
+        opacity: .8
+      }
+    }, x.n));
+  })));
+
   /* ── 월 보기 ── */
   const monthGrid = () => {
     const daysIn = new Date(aY, aM, 0).getDate();
@@ -4225,10 +4439,7 @@ function Calendar({
     }, (_, i) => cells.slice(i * 7, i * 7 + 7));
     const cap = isMobile ? 3 : 99;
     return /*#__PURE__*/React.createElement("div", {
-      onWheel: onWheel,
-      onTouchStart: onTStart,
-      onTouchMove: onTMove,
-      onTouchEnd: onTEnd,
+      ...swipeProps,
       style: {
         background: C.surface,
         border: BD,
@@ -4265,7 +4476,7 @@ function Calendar({
       }
     }, wk.map((day, di) => {
       const ds = day ? `${aY}-${pad2(aM)}-${pad2(day)}` : null;
-      const evs = ds ? evByDate[ds] || [] : [];
+      const evs = ds ? evOf(ds) : [];
       const over = !!ds && overDate === ds;
       const sel = !!ds && selDate === ds;
       const isT = ds === tStr;
@@ -4323,7 +4534,7 @@ function Calendar({
           setDragging(null);
           setOverDate(null);
         },
-        title: `${e.school} · ${evLabel(e.field)} · ${e.assignees.length ? e.assignees.join(",") : e.headcount + "명"}`,
+        title: `${e.school} · ${evLabel(e.field)} · ${e.assignees.length ? e.assignees.join(",") : "인원 미배정"}`,
         style: {
           padding: isMobile ? "3px 5px" : "3px 7px",
           borderRadius: 4,
@@ -4349,17 +4560,95 @@ function Calendar({
     }))))));
   };
 
-  /* ── 주 보기 ── 날짜별로 한 줄, 그 날의 현장과 인원을 함께 */
+  /* ── 주 보기 (데스크탑) ── 7칸 가로. 칸마다 현장 + 지역 + 인원 */
+  const weekGrid = () => {
+    const days = Array.from({
+      length: 7
+    }, (_, i) => addDays(weekStart, i));
+    return /*#__PURE__*/React.createElement("div", {
+      ...swipeProps,
+      style: {
+        display: "grid",
+        gridTemplateColumns: "repeat(7,minmax(0,1fr))",
+        gap: 8,
+        background: C.surface,
+        border: BD,
+        borderRadius: 12,
+        padding: 11,
+        boxShadow: "0 2px 12px rgba(0,0,0,.06)"
+      }
+    }, days.map(d => {
+      const ds = dstr(d);
+      const evs = evOf(ds);
+      const isT = ds === tStr;
+      const dow = d.getDay();
+      return /*#__PURE__*/React.createElement("div", {
+        key: ds,
+        style: {
+          minWidth: 0,
+          borderRadius: 9,
+          padding: isT ? "6px 7px" : 0,
+          background: isT ? C.blueL : "transparent"
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        onClick: () => setSelDate(ds),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          paddingBottom: 8,
+          marginBottom: 8,
+          borderBottom: `1px solid ${isT ? C.blue + "44" : C.border}`,
+          cursor: "pointer"
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          minWidth: 27,
+          height: 27,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: "50%",
+          background: isT ? C.blue : "transparent",
+          color: isT ? "#fff" : dow === 0 ? C.red : dow === 6 ? C.blue : C.t1,
+          fontSize: 16,
+          fontWeight: 900
+        }
+      }, d.getDate()), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 13,
+          fontWeight: 700,
+          color: dow === 0 ? C.red : dow === 6 ? C.blue : C.t2
+        }
+      }, DOW[dow]), evs.length > 0 && /*#__PURE__*/React.createElement("span", {
+        style: {
+          marginLeft: "auto",
+          fontSize: 12,
+          fontWeight: 700,
+          color: C.t3
+        }
+      }, evs.length)), evs.length === 0 ? /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 12,
+          color: C.t4,
+          padding: "3px 2px"
+        }
+      }, "일정 없음") : evs.map((e, i) => /*#__PURE__*/React.createElement(WeekChip, {
+        key: i,
+        e: e,
+        onClick: () => setSelDate(ds)
+      })));
+    }));
+  };
+
+  /* ── 주 보기 (폰) ── 날짜별 한 줄 세로 목록 */
   const weekList = () => {
     const days = Array.from({
       length: 7
     }, (_, i) => addDays(weekStart, i));
-    const total = days.reduce((a, d) => a + (evByDate[dstr(d)] || []).length, 0);
+    const total = days.reduce((a, d) => a + evOf(dstr(d)).length, 0);
     return /*#__PURE__*/React.createElement("div", {
-      onWheel: onWheel,
-      onTouchStart: onTStart,
-      onTouchMove: onTMove,
-      onTouchEnd: onTEnd,
+      ...swipeProps,
       style: {
         touchAction: "pan-y"
       }
@@ -4373,9 +4662,9 @@ function Calendar({
         borderRadius: 12,
         fontSize: 15
       }
-    }, "이 주에 등록된 일정이 없습니다."), days.map(d => {
+    }, who ? "이 주에 해당하는 일정이 없습니다." : "이 주에 등록된 일정이 없습니다."), days.map(d => {
       const ds = dstr(d);
-      const evs = evByDate[ds] || [];
+      const evs = evOf(ds);
       const isT = ds === tStr;
       const dow = d.getDay();
       return /*#__PURE__*/React.createElement("div", {
@@ -4395,7 +4684,7 @@ function Calendar({
           alignItems: "center",
           gap: 8,
           cursor: "pointer",
-          marginBottom: evs.length ? 8 : 0
+          marginBottom: evs.length ? 9 : 0
         }
       }, /*#__PURE__*/React.createElement("span", {
         style: {
@@ -4443,19 +4732,15 @@ function Calendar({
 
   /* ── 일 보기 ── */
   const dayList = () => {
-    const evs = evByDate[cursor] || [];
+    const evs = evOf(cursor);
     const byKind = EV_KINDS.map(([f, l, c]) => ({
       f,
       l,
       c,
       items: evs.filter(e => e.field === f)
     })).filter(g => g.items.length);
-    const people = [...new Set(evs.flatMap(e => e.assignees || []))];
     return /*#__PURE__*/React.createElement("div", {
-      onWheel: onWheel,
-      onTouchStart: onTStart,
-      onTouchMove: onTMove,
-      onTouchEnd: onTEnd,
+      ...swipeProps,
       style: {
         touchAction: "pan-y"
       }
@@ -4489,38 +4774,7 @@ function Calendar({
         color: C.t3,
         marginTop: 2
       }
-    }, l)))), people.length > 0 && /*#__PURE__*/React.createElement("div", {
-      style: {
-        background: C.surface,
-        border: BD,
-        borderRadius: 11,
-        padding: "11px 13px",
-        marginBottom: 12
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 13,
-        fontWeight: 800,
-        color: C.t2,
-        marginBottom: 7
-      }
-    }, "👤 이 날 배정된 인원 ", people.length, "명"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 5
-      }
-    }, people.map(n => /*#__PURE__*/React.createElement("span", {
-      key: n,
-      style: {
-        fontSize: 13,
-        fontWeight: 700,
-        color: "#fff",
-        background: C.t1,
-        padding: "5px 11px",
-        borderRadius: 20
-      }
-    }, n)))), evs.length === 0 && /*#__PURE__*/React.createElement("div", {
+    }, l)))), evs.length === 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "center",
         padding: "50px 20px",
@@ -4530,7 +4784,7 @@ function Calendar({
         borderRadius: 12,
         fontSize: 15
       }
-    }, "이 날 등록된 일정이 없습니다."), byKind.map(g => /*#__PURE__*/React.createElement("div", {
+    }, who ? "이 날 해당하는 일정이 없습니다." : "이 날 등록된 일정이 없습니다."), byKind.map(g => /*#__PURE__*/React.createElement("div", {
       key: g.f,
       style: {
         marginBottom: 14
@@ -4593,7 +4847,7 @@ function Calendar({
       fontWeight: 900,
       color: C.t1
     }
-  }, "현장 일정")), ViewToggle), /*#__PURE__*/React.createElement("div", {
+  }, "현장 일정")), viewToggle), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -4673,18 +4927,29 @@ function Calendar({
       cursor: "pointer",
       flexShrink: 0
     }
-  }, "오늘")), /*#__PURE__*/React.createElement("div", {
+  }, "오늘")), rosterBar, who && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "9px 13px",
-      background: C.blueL,
-      border: `1px solid ${C.blue}30`,
+      background: who === "__none" ? C.orangeL : C.blueL,
+      border: `1px solid ${who === "__none" ? C.orange : C.blue}35`,
       borderRadius: 8,
       fontSize: 13,
-      color: C.blue,
+      fontWeight: 700,
+      color: who === "__none" ? "#9A5B0A" : C.blue,
+      marginBottom: 12
+    }
+  }, who === "__none" ? `인원이 배정되지 않은 일정만 보고 있습니다 · ${roster.none}건` : `${who} 님 일정만 보고 있습니다 · ${roster.people.find(p => p[0] === who)?.[1] || 0}건`), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "9px 13px",
+      background: C.surfaceL,
+      border: BD,
+      borderRadius: 8,
+      fontSize: 13,
+      color: C.t2,
       fontWeight: 600,
       marginBottom: 12
     }
-  }, view === "month" ? "제목을 눌러 연·월 이동 · 일정 카드를 끌어 날짜 변경 · 좌우로 밀면 달 이동" : view === "week" ? "제목을 눌러 주 선택 · 날짜를 누르면 그날 상세 · 좌우로 밀면 주 이동" : "제목을 눌러 날짜 이동 · 좌우로 밀면 하루씩 이동"), view === "month" ? monthGrid() : view === "week" ? weekList() : dayList(), view === "month" && /*#__PURE__*/React.createElement("div", {
+  }, view === "month" ? "제목을 눌러 연·월 이동 · 일정을 끌어 날짜 변경 · 좌우로 밀면 달 이동" : view === "week" ? "제목을 눌러 주 선택 · 날짜를 누르면 그날 상세 · 좌우로 밀면 주 이동" : "제목을 눌러 날짜 이동 · 좌우로 밀면 하루씩 이동"), view === "month" ? monthGrid() : view === "week" ? isMobile ? weekList() : weekGrid() : dayList(), view === "month" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 14,
