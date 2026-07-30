@@ -8779,22 +8779,27 @@ const emailKey = e => String(e || "").trim().toLowerCase().replace(/\./g, "_").r
 let ACCOUNTS = {};
 let ADMINS = {};
 const nameOfEmail = e => (ACCOUNTS[emailKey(e)] || {}).name || "";
+/* 로그인 계정이 없는 현장 인원도 등록할 수 있게 — 이메일이 없으면 이름으로 키를 만든다 */
+const entryKey = (email, name) => String(email || "").trim() ? emailKey(email) : "n_" + String(name || "").trim().replace(/[.@#$\[\]\/\s]/g, "_");
 
 /* Firebase config → 인원 명단(MEMBERS) 갱신 */
 function applyConfig(cfg) {
   if (!cfg) return;
   ACCOUNTS = cfg.accounts || {};
-  if (!cfg.members) return;
-  /* members 는 배열이거나, 예전 형식({팀:[이름]})일 수 있음 — 모두 평탄화 */
   const flat = [];
   const push = n => {
     const nm = String(n || "").trim();
     if (nm && !flat.includes(nm)) flat.push(nm);
   };
-  if (Array.isArray(cfg.members)) cfg.members.forEach(push);else if (typeof cfg.members === "object") Object.values(cfg.members).forEach(v => toArr(v).forEach(push));
+  /* 인원 명단 = 등록된 사람 목록. 아직 등록이 하나도 없으면 예전 members 를 그대로 쓴다
+     (등록을 마치기 전에 담당자 배정이 막히지 않도록) */
+  Object.values(ACCOUNTS).forEach(a => push(a && a.name));
+  if (!flat.length && cfg.members) {
+    if (Array.isArray(cfg.members)) cfg.members.forEach(push);else if (typeof cfg.members === "object") Object.values(cfg.members).forEach(v => toArr(v).forEach(push));
+  }
   if (flat.length) {
     MEMBERS.length = 0;
-    flat.forEach(n => MEMBERS.push(n));
+    flat.sort((a, b) => a.localeCompare(b)).forEach(n => MEMBERS.push(n));
   }
 }
 
@@ -9687,7 +9692,6 @@ function SettingsPage({
   isAdmin,
   adminCount
 }) {
-  const [newName, setNewName] = useState(""); // 새 인원 이름
   const [mapKey, setMapKey] = useState(""); // 지도 키 입력값
   const kkSeen = useRef(false);
   useEffect(() => {
@@ -9696,51 +9700,8 @@ function SettingsPage({
       setMapKey(kakaoKey);
     }
   }, [kakaoKey]);
-  const [revEdit, setRevEdit] = useState(null); // 매출 편집중 학교 id
-  const [revVal, setRevVal] = useState("");
   const [diag, setDiag] = useState(null); // Firebase 직접 확인 결과
   const [diagBusy, setDiagBusy] = useState(false);
-  const won = n => n ? `${Number(n).toLocaleString()}원` : "-";
-
-  /* 모든 학교 평면화 (매출용) */
-  const allSchools = [];
-  Object.entries(db || {}).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => (arr || []).forEach(s => {
-    if (s.deleted) return; // 휴지통 현장은 매출에서 뺀다
-    allSchools.push({
-      ...s,
-      _year: yr,
-      _half: half
-    });
-  })));
-  const revTotal = allSchools.reduce((a, s) => a + (Number(s.contract) || 0), 0);
-  const revDone = allSchools.filter(s => getProgress(s).done === STEPS.length).reduce((a, s) => a + (Number(s.contract) || 0), 0);
-  const revIng = allSchools.filter(s => {
-    const d = getProgress(s).done;
-    return d > 0 && d < STEPS.length;
-  }).reduce((a, s) => a + (Number(s.contract) || 0), 0);
-  const revNone = allSchools.filter(s => getProgress(s).done === 0).reduce((a, s) => a + (Number(s.contract) || 0), 0);
-  const saveRev = sid => {
-    const n = parseInt(String(revVal).replace(/,/g, "")) || 0;
-    const sc = allSchools.find(s => s.id === sid);
-    if (sc && setDb) {
-      setDb(prev => {
-        const next = {
-          ...prev
-        };
-        next[sc._year] = {
-          ...(prev[sc._year] || {})
-        };
-        next[sc._year][sc._half] = (prev[sc._year]?.[sc._half] || []).map(s => s.id !== sid ? s : {
-          ...s,
-          contract: n
-        });
-        return next;
-      });
-      logAction("수정", `계약금액 · ${sc.school}`, won(sc.contract), won(n));
-    }
-    setRevEdit(null);
-    setRevVal("");
-  };
   /* 관리자 지정·해제 — ston/admins/<uid> */
   const setAdminFlag = (a, on) => {
     /* 마지막 관리자를 해제하면 아무도 설정에 못 들어간다 → 막는다 */
@@ -9757,13 +9718,6 @@ function SettingsPage({
     } catch (e) {
       window.alert("변경 실패: " + (e && e.message || e));
     }
-  };
-  const writeCfg = members => {
-    try {
-      firebase.database().ref(FB_CONFIG).set({
-        members
-      }).catch(() => {});
-    } catch {}
   };
   /* ── 계정 ↔ 실명 연결 ──
      Firebase 콘솔에서 만든 로그인 계정(이메일)에 실명을 붙여둔다.
@@ -9789,52 +9743,58 @@ function SettingsPage({
   const addAccount = () => {
     const em = (accEmail || "").trim().toLowerCase();
     const nm = (accName || "").trim();
-    if (!em || !nm) {
-      window.alert("이메일과 이름을 모두 입력하세요.");
+    if (!nm) {
+      window.alert("이름을 입력하세요.");
       return;
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
-      window.alert("이메일 형식이 올바르지 않습니다.");
+    if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      window.alert("이메일 형식이 올바르지 않습니다.\n로그인하지 않는 인원이면 이메일은 비워 두세요.");
+      return;
+    }
+    if (accList.some(a => a.name === nm)) {
+      window.alert(`'${nm}' 은(는) 이미 등록돼 있습니다.`);
       return;
     }
     writeAccounts({
       ...ACCOUNTS,
-      [emailKey(em)]: {
+      [entryKey(em, nm)]: {
         email: em,
         name: nm
       }
     });
-    logAction("추가", "계정 연결", null, `${em} → ${nm}`);
+    logAction("추가", "인원 등록", null, `${nm}${em ? ` (${em})` : " (로그인 없음)"}`);
     setAccEmail("");
     setAccName("");
+  };
+  /* 예전 인원 명단 중 아직 등록되지 않은 사람 — 한 번에 옮길 수 있게 */
+  const notRegistered = MEMBERS.filter(n => !accList.some(a => a.name === n));
+  const importMembers = () => {
+    if (!notRegistered.length) return;
+    if (!window.confirm(`아직 등록되지 않은 ${notRegistered.length}명을 명단에 추가할까요?\n(${notRegistered.join(", ")})\n\n이메일 없이 추가되며, 나중에 이메일을 넣으면 로그인할 수 있습니다.`)) return;
+    const next = {
+      ...ACCOUNTS
+    };
+    notRegistered.forEach(n => {
+      next[entryKey("", n)] = {
+        email: "",
+        name: n
+      };
+    });
+    writeAccounts(next);
+    logAction("추가", "인원 등록", null, `기존 명단 ${notRegistered.length}명 가져오기`);
   };
   const delAccount = a => {
     if (a.admin) {
       window.alert("관리자로 지정된 계정입니다.\n먼저 '일반'으로 바꾼 뒤 삭제하세요.");
       return;
     }
-    if (!window.confirm(`'${a.email} → ${a.name}' 연결을 지울까요?\n계정 자체는 남고 이름 연결만 없어집니다.`)) return;
+    if (!window.confirm(`'${a.name}' 을(를) 명단에서 지울까요?\n담당자 목록에서 사라집니다. 이미 배정된 일정은 그대로 남습니다.`)) return;
     const next = {
       ...ACCOUNTS
     };
     delete next[a.k];
     writeAccounts(next);
     logAction("삭제", "계정 연결", `${a.email} → ${a.name}`, null);
-  };
-  const addMember = () => {
-    const nm = (newName || "").trim();
-    if (!nm) return;
-    if (MEMBERS.includes(nm)) {
-      setNewName("");
-      return;
-    }
-    writeCfg([...MEMBERS, nm]);
-    logAction("추가", "인원", null, nm);
-    setNewName("");
-  };
-  const delMember = nm => {
-    writeCfg(MEMBERS.filter(x => x !== nm));
-    logAction("삭제", "인원", nm, null);
   };
   const fmtTs = ts => {
     if (!ts) return "";
@@ -10267,110 +10227,6 @@ function SettingsPage({
     style: {
       display: "flex",
       alignItems: "center",
-      marginBottom: 12
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 15,
-      fontWeight: 800,
-      color: C.t1
-    }
-  }, "👥 인원 관리"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      marginLeft: 8,
-      fontSize: 12,
-      color: C.t4
-    }
-  }, MEMBERS.length, "명")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 6,
-      marginBottom: 10
-    }
-  }, MEMBERS.map(nm => {
-    const mc = memberColor(nm);
-    return /*#__PURE__*/React.createElement("span", {
-      key: nm,
-      style: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        fontSize: 14,
-        fontWeight: 700,
-        color: mc,
-        background: mc + "14",
-        padding: "6px 11px",
-        borderRadius: 20,
-        border: `1px solid ${mc}35`
-      }
-    }, nm, /*#__PURE__*/React.createElement("button", {
-      onClick: () => {
-        if (confirm(`'${nm}' 님을 명단에서 뺄까요?`)) delMember(nm);
-      },
-      style: {
-        width: 19,
-        height: 19,
-        borderRadius: "50%",
-        border: "none",
-        background: mc,
-        color: "#fff",
-        fontSize: 12,
-        fontWeight: 900,
-        cursor: "pointer",
-        lineHeight: 1,
-        padding: 0
-      }
-    }, "×"));
-  }), MEMBERS.length === 0 && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 13,
-      color: C.t4
-    }
-  }, "등록된 인원이 없습니다.")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    value: newName,
-    onChange: e => setNewName(e.target.value),
-    onKeyDown: e => e.key === "Enter" && addMember(),
-    placeholder: "새 인원 이름",
-    style: {
-      flex: 1,
-      padding: "9px 11px",
-      background: C.surfaceL,
-      border: `1.5px dashed ${C.border}`,
-      borderRadius: 8,
-      color: C.t1,
-      fontSize: 15,
-      outline: "none"
-    }
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: addMember,
-    style: {
-      padding: "9px 18px",
-      borderRadius: 8,
-      background: C.blue,
-      border: "none",
-      color: "#fff",
-      fontSize: 15,
-      fontWeight: 700,
-      cursor: "pointer"
-    }
-  }, "+ 추가"))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: C.surface,
-      border: BD,
-      borderRadius: 12,
-      padding: "16px 18px",
-      marginBottom: 14
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
       marginBottom: 6
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -10379,24 +10235,38 @@ function SettingsPage({
       fontWeight: 800,
       color: C.t1
     }
-  }, "👥 계정 관리"), /*#__PURE__*/React.createElement("span", {
+  }, "👥 인원 · 계정 관리"), /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 8,
       fontSize: 12,
       color: C.t4
     }
-  }, accList.length, "명 · 관리자 ", adminCount == null ? "-" : adminCount, "명")), /*#__PURE__*/React.createElement("div", {
+  }, accList.length, "명 · 관리자 ", adminCount == null ? "-" : adminCount, "명")), notRegistered.length > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: importMembers,
+    style: {
+      width: "100%",
+      padding: "11px 0",
+      borderRadius: 9,
+      marginBottom: 11,
+      border: `1.5px solid ${C.blue}45`,
+      background: C.blueL,
+      color: C.blue,
+      fontSize: 14,
+      fontWeight: 800,
+      cursor: "pointer"
+    }
+  }, `📥 기존 명단 ${notRegistered.length}명 가져오기`), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: C.t3,
       lineHeight: 1.7,
       marginBottom: 11
     }
-  }, "Firebase 콘솔에서 만든 계정의 ", /*#__PURE__*/React.createElement("b", null, "이메일과 실명"), "을 여기 적어둡니다. 그 사람이 로그인하면 이름이 자동으로 채워지고, 수정 기록·게시판에 실명이 남습니다. ", /*#__PURE__*/React.createElement("b", {
+  }, "여기 등록된 사람만 ", /*#__PURE__*/React.createElement("b", null, "일정의 담당자로 배정"), "할 수 있습니다.", /*#__PURE__*/React.createElement("br", null), "· 이메일을 넣으면 그 주소로 ", /*#__PURE__*/React.createElement("b", null, "로그인"), "할 수 있고, 로그인 시 이름이 자동으로 채워집니다 (계정은 Firebase 콘솔에서 먼저 생성).", /*#__PURE__*/React.createElement("br", null), "· 현장만 나가고 로그인은 안 하는 사람은 ", /*#__PURE__*/React.createElement("b", null, "이메일을 비워두고"), " 이름만 등록하세요.", /*#__PURE__*/React.createElement("br", null), "· ", /*#__PURE__*/React.createElement("b", {
     style: {
       color: C.blue
     }
-  }, "관리자"), "로 바꾼 계정만 설정·엑셀 관리를 볼 수 있습니다. 아직 로그인하지 않은 사람도 미리 지정해둘 수 있어요."), adminCount === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "관리자"), "로 바꾼 계정만 설정·엑셀 관리를 볼 수 있습니다."), adminCount === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
       fontWeight: 700,
@@ -10451,7 +10321,7 @@ function SettingsPage({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, a.email), /*#__PURE__*/React.createElement("button", {
+  }, a.email || "로그인 없음 · 현장 인원"), a.email ? /*#__PURE__*/React.createElement("button", {
     onClick: () => setAdminFlag(a, !a.admin),
     title: "관리자로 지정하면 설정·엑셀 관리를 쓸 수 있습니다",
     style: {
@@ -10466,7 +10336,14 @@ function SettingsPage({
       cursor: "pointer",
       whiteSpace: "nowrap"
     }
-  }, a.admin ? "관리자" : "일반"), /*#__PURE__*/React.createElement("button", {
+  }, a.admin ? "관리자" : "일반") : /*#__PURE__*/React.createElement("span", {
+    style: {
+      flexShrink: 0,
+      fontSize: 12,
+      color: C.t4,
+      padding: "7px 4px"
+    }
+  }, "—"), /*#__PURE__*/React.createElement("button", {
     onClick: () => delAccount(a),
     style: {
       flexShrink: 0,
@@ -10488,7 +10365,7 @@ function SettingsPage({
   }, /*#__PURE__*/React.createElement("input", {
     value: accEmail,
     onChange: e => setAccEmail(e.target.value),
-    placeholder: "name@stoneng.co.kr",
+    placeholder: "이메일 (로그인 안 하면 비워 두기)",
     style: {
       flex: 2,
       minWidth: 170,
@@ -10504,7 +10381,7 @@ function SettingsPage({
     value: accName,
     onChange: e => setAccName(e.target.value),
     onKeyDown: e => e.key === "Enter" && addAccount(),
-    placeholder: "실명",
+    placeholder: "이름 (필수)",
     style: {
       flex: 1,
       minWidth: 90,
@@ -10528,7 +10405,7 @@ function SettingsPage({
       fontWeight: 700,
       cursor: "pointer"
     }
-  }, "+ 연결"))), /*#__PURE__*/React.createElement("div", {
+  }, "+ 추가"))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.surface,
       border: BD,
@@ -10633,159 +10510,7 @@ function SettingsPage({
       color: C.t4,
       marginTop: 10
     }
-  }, "* 로그는 표시 전용이며 일반 사용자는 수정·삭제할 수 없습니다.")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: C.surface,
-      border: BD,
-      borderRadius: 12,
-      padding: "16px 18px",
-      marginTop: 14
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 15,
-      fontWeight: 800,
-      color: C.t1,
-      marginBottom: 4
-    }
-  }, "💰 매출 관리"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      color: C.t3,
-      marginBottom: 12
-    }
-  }, "학교별 계약금액을 입력하면 자동 집계됩니다. (관리자 전용)"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(2,1fr)",
-      gap: 10,
-      marginBottom: 14
-    }
-  }, [{
-    l: "총 계약금액",
-    v: revTotal,
-    c: C.blue
-  }, {
-    l: "완료 금액",
-    v: revDone,
-    c: C.green
-  }, {
-    l: "진행중",
-    v: revIng,
-    c: C.purple
-  }, {
-    l: "미착수",
-    v: revNone,
-    c: C.t3
-  }].map(k => /*#__PURE__*/React.createElement("div", {
-    key: k.l,
-    style: {
-      background: C.surfaceL,
-      borderRadius: 10,
-      padding: "12px 14px",
-      borderTop: `3px solid ${k.c}`
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: C.t3,
-      marginBottom: 5
-    }
-  }, k.l), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 17,
-      fontWeight: 800,
-      color: k.c
-    }
-  }, won(k.v))))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      maxHeight: 340,
-      overflowY: "auto",
-      display: "flex",
-      flexDirection: "column",
-      gap: 5
-    }
-  }, allSchools.map(s => {
-    return /*#__PURE__*/React.createElement("div", {
-      key: s.id,
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "8px 11px",
-        background: C.surfaceL,
-        borderRadius: 8,
-        border: BD
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 14,
-        fontWeight: 700,
-        color: C.t1,
-        flex: 1,
-        minWidth: 0,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }
-    }, s.school), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 12,
-        color: C.t4
-      }
-    }, s._year, " ", s._half), revEdit === s.id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("input", {
-      autoFocus: true,
-      value: revVal,
-      onChange: e => setRevVal(e.target.value),
-      onKeyDown: e => e.key === "Enter" && saveRev(s.id),
-      placeholder: "금액",
-      style: {
-        width: 110,
-        padding: "5px 8px",
-        border: BD,
-        borderRadius: 6,
-        fontSize: 14,
-        textAlign: "right",
-        outline: "none"
-      }
-    }), /*#__PURE__*/React.createElement("button", {
-      onClick: () => saveRev(s.id),
-      style: {
-        padding: "5px 10px",
-        borderRadius: 6,
-        background: C.green,
-        border: "none",
-        color: "#fff",
-        fontSize: 13,
-        fontWeight: 700,
-        cursor: "pointer"
-      }
-    }, "저장")) : /*#__PURE__*/React.createElement("button", {
-      onClick: () => {
-        setRevEdit(s.id);
-        setRevVal(s.contract || "");
-      },
-      style: {
-        minWidth: 96,
-        textAlign: "right",
-        padding: "5px 10px",
-        borderRadius: 6,
-        border: `1px solid ${s.contract ? C.blue + "40" : C.border}`,
-        background: s.contract ? C.blueL : C.surface,
-        color: s.contract ? C.blue : C.t4,
-        fontSize: 14,
-        fontWeight: 700,
-        cursor: "pointer"
-      }
-    }, won(s.contract)));
-  }), allSchools.length === 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center",
-      color: C.t4,
-      fontSize: 14,
-      padding: 16
-    }
-  }, "학교가 없습니다.")))));
+  }, "* 로그는 표시 전용이며 일반 사용자는 수정·삭제할 수 없습니다."))));
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -10978,11 +10703,20 @@ function ReportsPage({
     return out.sort((a, b) => rank(b) - rank(a));
   }, [db]);
 
-  /* 긴급은 전체가 기본(어느 반기든 급한 건 봐야 함), 완료는 최근 반기가 기본 */
+  /* 기본은 지금 시기(연도+반기). 옛날 반기는 탭을 눌러야 보인다. */
+  const nowBucket = useMemo(() => {
+    const d = new Date();
+    const y = String(d.getFullYear());
+    const h = d.getMonth() + 1 <= 6 ? "상반기" : "하반기";
+    return buckets.find(b => b.y === y && b.h === h) || buckets[0] || null;
+  }, [buckets]);
   const [tab, setTab] = useState(null);
+  const didInit = useRef(false);
   useEffect(() => {
-    setTab(isUrgent ? null : buckets[0] || null);
-  }, [mode]); // 긴급=전체, 완료=최근 반기
+    if (didInit.current || !buckets.length) return;
+    didInit.current = true;
+    setTab(nowBucket);
+  }, [buckets, nowBucket]);
   const [search, setSearch] = useState("");
   const [editId, setEditId] = useState(null);
   const [toast, setToast] = useState(null);
