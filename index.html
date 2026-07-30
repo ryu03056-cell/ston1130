@@ -3758,59 +3758,59 @@ const EV_KINDS = [["field", "조사", "#1D6FF2"], ["start", "착수", "#0D9B6C"]
 const evColor = f => f === "field" ? C.blue : f === "start" ? C.green : C.yellow;
 const evLabel = f => f === "field" ? "조사" : f === "start" ? "착수" : "완수";
 
-/* 기간 선택 팝업 — 년·월(주 보기일 땐 주까지)을 눌러서 고른다 */
-function PeriodPicker({
-  view,
-  cursor,
+/* 연도·월·주 선택 버튼 — 눌러서 목록을 띄운다 */
+function SelBtn({
+  main,
+  sub,
+  onClick,
+  isMobile
+}) {
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: {
+      flex: 1,
+      minWidth: 0,
+      padding: sub ? "6px 6px" : "10px 6px",
+      borderRadius: 10,
+      border: `1.5px solid ${C.border}`,
+      background: C.surface,
+      cursor: "pointer",
+      textAlign: "center",
+      lineHeight: 1.25
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: isMobile ? 17 : 21,
+      fontWeight: 900,
+      color: C.t1,
+      whiteSpace: "nowrap"
+    }
+  }, main, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: C.t3,
+      marginLeft: 3
+    }
+  }, "▾")), sub && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.t3,
+      fontWeight: 700,
+      whiteSpace: "nowrap"
+    }
+  }, sub));
+}
+
+/* 하나만 고르는 선택창 — 연도·월·주·일을 각각 따로 띄운다 */
+function ListPicker({
+  title,
+  items,
+  value,
+  cols,
   onPick,
   onClose,
   isMobile
 }) {
-  const cur = parseD(cursor);
-  const [y, setY] = useState(cur.getFullYear());
-  const [m, setM] = useState(cur.getMonth() + 1);
-  const nowY = new Date().getFullYear();
-  const years = [];
-  for (let i = nowY - 3; i <= nowY + 2; i++) years.push(i);
-
-  /* 고른 달에 걸친 주 목록 */
-  const weeks = useMemo(() => {
-    const out = [];
-    const last = new Date(y, m, 0).getDate();
-    let ws = startOfWeek(new Date(y, m - 1, 1, 12));
-    let n = 1;
-    while (ws <= new Date(y, m - 1, last, 12)) {
-      const we = addDays(ws, 6);
-      out.push({
-        n: n++,
-        s: new Date(ws),
-        e: we
-      });
-      ws = addDays(ws, 7);
-    }
-    return out;
-  }, [y, m]);
-  const Chip = ({
-    on,
-    onClick,
-    children,
-    w
-  }) => /*#__PURE__*/React.createElement("button", {
-    onClick: onClick,
-    style: {
-      minWidth: w || 0,
-      flex: w ? "0 0 auto" : 1,
-      padding: "11px 10px",
-      borderRadius: 9,
-      fontSize: 15,
-      fontWeight: on ? 800 : 600,
-      cursor: "pointer",
-      whiteSpace: "nowrap",
-      border: `1.5px solid ${on ? C.blue : C.border}`,
-      background: on ? C.blueL : C.surface,
-      color: on ? C.blue : C.t2
-    }
-  }, children);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     onClick: onClose,
     style: {
@@ -3828,9 +3828,9 @@ function PeriodPicker({
       top: isMobile ? "auto" : "50%",
       transform: isMobile ? "translateX(-50%)" : "translate(-50%,-50%)",
       zIndex: 401,
-      width: isMobile ? "100%" : 420,
+      width: isMobile ? "100%" : 400,
       maxWidth: "100vw",
-      maxHeight: "88vh",
+      maxHeight: "84vh",
       overflowY: "auto",
       background: C.surface,
       borderRadius: isMobile ? "18px 18px 0 0" : 16,
@@ -3841,7 +3841,7 @@ function PeriodPicker({
     style: {
       display: "flex",
       alignItems: "center",
-      marginBottom: 14
+      marginBottom: 13
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -3850,119 +3850,46 @@ function PeriodPicker({
       color: C.t1,
       flex: 1
     }
-  }, "기간 선택"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      onPick(todayStr());
-      onClose();
-    },
-    style: {
-      padding: "8px 15px",
-      borderRadius: 9,
-      border: `1.5px solid ${C.blue}`,
-      background: C.blueL,
-      color: C.blue,
-      fontSize: 14,
-      fontWeight: 800,
-      cursor: "pointer"
-    }
-  }, "오늘로")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      fontWeight: 800,
-      color: C.t3,
-      marginBottom: 7
-    }
-  }, "연도"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6,
-      overflowX: "auto",
-      paddingBottom: 4,
-      marginBottom: 14,
-      WebkitOverflowScrolling: "touch"
-    }
-  }, years.map(v => /*#__PURE__*/React.createElement(Chip, {
-    key: v,
-    on: y === v,
-    w: 74,
-    onClick: () => setY(v)
-  }, v, "년"))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      fontWeight: 800,
-      color: C.t3,
-      marginBottom: 7
-    }
-  }, "월"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(4,1fr)",
-      gap: 6,
-      marginBottom: view === "week" ? 14 : 4
-    }
-  }, Array.from({
-    length: 12
-  }, (_, i) => i + 1).map(v => /*#__PURE__*/React.createElement(Chip, {
-    key: v,
-    on: m === v,
-    onClick: () => {
-      setM(v);
-      if (view !== "week") {
-        onPick(dstr(new Date(y, v - 1, 1, 12)));
-        onClose();
-      }
-    }
-  }, v, "월"))), view === "week" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      fontWeight: 800,
-      color: C.t3,
-      marginBottom: 7
-    }
-  }, "주"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 6
-    }
-  }, weeks.map(w => /*#__PURE__*/React.createElement("button", {
-    key: w.n,
-    onClick: () => {
-      onPick(dstr(w.s));
-      onClose();
-    },
-    style: {
-      padding: "12px 13px",
-      borderRadius: 9,
-      textAlign: "left",
-      cursor: "pointer",
-      border: `1.5px solid ${C.border}`,
-      background: C.surface,
-      color: C.t1,
-      fontSize: 15,
-      fontWeight: 700
-    }
-  }, `${w.n}주 · ${w.s.getMonth() + 1}/${w.s.getDate()} ~ ${w.e.getMonth() + 1}/${w.e.getDate()}`)))), view !== "week" && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: C.t4,
-      marginTop: 8
-    }
-  }, "월을 누르면 바로 이동합니다."), /*#__PURE__*/React.createElement("button", {
+  }, title), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
-      width: "100%",
-      marginTop: 14,
-      padding: "13px 0",
-      borderRadius: 10,
+      width: 34,
+      height: 34,
+      borderRadius: "50%",
       border: `1px solid ${C.border}`,
-      background: "transparent",
+      background: C.surfaceL,
       color: C.t3,
-      fontSize: 14,
-      fontWeight: 700,
-      cursor: "pointer"
+      fontSize: 19,
+      cursor: "pointer",
+      lineHeight: 1
     }
-  }, "닫기")));
+  }, "×")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: `repeat(${cols},minmax(0,1fr))`,
+      gap: 7
+    }
+  }, items.map(it => {
+    const on = String(it.k) === String(value);
+    return /*#__PURE__*/React.createElement("button", {
+      key: it.k,
+      onClick: () => {
+        onPick(it.k);
+        onClose();
+      },
+      style: {
+        padding: cols >= 7 ? "12px 0" : "13px 8px",
+        borderRadius: 9,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        border: `1.5px solid ${on ? C.blue : C.border}`,
+        background: on ? C.blueL : C.surface,
+        color: on ? C.blue : C.t2,
+        fontSize: 15,
+        fontWeight: on ? 800 : 600
+      }
+    }, it.label);
+  }))));
 }
 
 /* 일정 한 줄 (주 세로 목록 · 일 보기) — 어디로 누가 가는지가 한눈에 들어오도록
@@ -4136,7 +4063,7 @@ function Calendar({
     }
     return [...prev, k];
   });
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [picker, setPicker] = useState(null); // "year" | "month" | "sub"
   const [dragging, setDragging] = useState(null);
   const [overDate, setOverDate] = useState(null);
   const [selDate, setSelDate] = useState(null);
@@ -4284,9 +4211,29 @@ function Calendar({
     setOverDate(null);
   }, [dragging, allSchools, setDb]);
 
-  /* ── 제목 ── */
-  const title = view === "month" ? `${aY}년 ${aM}월` : view === "week" ? `${weekStart.getMonth() + 1}/${weekStart.getDate()} ~ ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}` : `${aM}월 ${cur.getDate()}일 (${DOW[cur.getDay()]})`;
-  const subtitle = view === "week" ? `${aY}년 ${aM}월` : view === "day" ? `${aY}년` : null;
+  /* 연·월·일을 따로 지정 — 말일을 넘기면 그 달 마지막 날로 맞춘다 */
+  const setYMD = (y, m, d) => {
+    const last = new Date(y, m, 0).getDate();
+    setCursor(dstr(new Date(y, m - 1, Math.min(d, last), 12)));
+    setSelDate(null);
+  };
+
+  /* 그 달에 걸친 주 목록 */
+  const weeksOfMonth = useMemo(() => {
+    const out = [];
+    const last = new Date(aY, aM, 0).getDate();
+    let ws = startOfWeek(new Date(aY, aM - 1, 1, 12));
+    let n = 1;
+    while (ws <= new Date(aY, aM - 1, last, 12)) {
+      out.push({
+        n: n++,
+        s: new Date(ws)
+      });
+      ws = addDays(ws, 7);
+    }
+    return out;
+  }, [aY, aM]);
+  const curWeekNo = (weeksOfMonth.find(w => dstr(w.s) === dstr(weekStart)) || {}).n || 1;
 
   /* ── 보기 전환 ── */
   const viewToggle = /*#__PURE__*/React.createElement("div", {
@@ -4768,38 +4715,32 @@ function Calendar({
       cursor: "pointer",
       flexShrink: 0
     }
-  }, "‹"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setPickerOpen(true),
+  }, "‹"), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
-      minWidth: 130,
-      padding: "9px 12px",
-      borderRadius: 10,
-      border: `1.5px solid ${C.border}`,
-      background: C.surface,
-      cursor: "pointer",
-      textAlign: "center"
+      minWidth: 140,
+      display: "flex",
+      gap: 6
     }
-  }, subtitle && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: C.t3,
-      fontWeight: 700
-    }
-  }, subtitle), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: isMobile ? 19 : 24,
-      fontWeight: 900,
-      color: C.t1,
-      letterSpacing: -.5
-    }
-  }, title, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 14,
-      color: C.t3,
-      marginLeft: 6
-    }
-  }, "▾"))), /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement(SelBtn, {
+    main: `${aY}년`,
+    isMobile: isMobile,
+    onClick: () => setPicker("year")
+  }), /*#__PURE__*/React.createElement(SelBtn, {
+    main: `${aM}월`,
+    isMobile: isMobile,
+    onClick: () => setPicker("month")
+  }), view === "week" && /*#__PURE__*/React.createElement(SelBtn, {
+    main: `${curWeekNo}주`,
+    sub: `${weekStart.getMonth() + 1}/${weekStart.getDate()}~${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`,
+    isMobile: isMobile,
+    onClick: () => setPicker("sub")
+  }), view === "day" && /*#__PURE__*/React.createElement(SelBtn, {
+    main: `${cur.getDate()}일`,
+    sub: `${DOW[cur.getDay()]}요일`,
+    isMobile: isMobile,
+    onClick: () => setPicker("sub")
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => shift(1),
     style: {
       width: 42,
@@ -4847,12 +4788,55 @@ function Calendar({
     setDb: setDb,
     onClose: () => setSelDate(null),
     isMobile: isMobile
-  }), pickerOpen && /*#__PURE__*/React.createElement(PeriodPicker, {
-    view: view,
-    cursor: cursor,
+  }), picker && /*#__PURE__*/React.createElement(ListPicker, {
     isMobile: isMobile,
-    onPick: setCursor,
-    onClose: () => setPickerOpen(false)
+    onClose: () => setPicker(null),
+    ...(picker === "year" ? {
+      title: "연도 선택",
+      cols: 3,
+      value: aY,
+      items: Array.from({
+        length: 6
+      }, (_, i) => new Date().getFullYear() - 3 + i).map(y => ({
+        k: y,
+        label: `${y}년`
+      })),
+      onPick: y => setYMD(y, aM, cur.getDate())
+    } : picker === "month" ? {
+      title: `${aY}년 · 월 선택`,
+      cols: 4,
+      value: aM,
+      items: Array.from({
+        length: 12
+      }, (_, i) => i + 1).map(m => ({
+        k: m,
+        label: `${m}월`
+      })),
+      onPick: m => setYMD(aY, m, cur.getDate())
+    } : view === "week" ? {
+      title: `${aY}년 ${aM}월 · 주 선택`,
+      cols: 1,
+      value: dstr(weekStart),
+      items: weeksOfMonth.map(w => ({
+        k: dstr(w.s),
+        label: `${w.n}주 · ${w.s.getMonth() + 1}/${w.s.getDate()} ~ ${addDays(w.s, 6).getMonth() + 1}/${addDays(w.s, 6).getDate()}`
+      })),
+      onPick: ds => {
+        setCursor(ds);
+        setSelDate(null);
+      }
+    } : {
+      title: `${aY}년 ${aM}월 · 날짜 선택`,
+      cols: 7,
+      value: cur.getDate(),
+      items: Array.from({
+        length: new Date(aY, aM, 0).getDate()
+      }, (_, i) => i + 1).map(d => ({
+        k: d,
+        label: String(d)
+      })),
+      onPick: d => setYMD(aY, aM, d)
+    })
   }), /*#__PURE__*/React.createElement(Toast, {
     msg: toast
   }));
@@ -8788,9 +8772,18 @@ function logAction(action, target, before, after) {
 
 /* 항상 존재해야 하는 기본 5개 팀 */
 
+/* 계정(이메일) → 실명 매핑.
+   Firebase 키에 . 을 쓸 수 없어 이메일을 안전한 문자로 바꿔 저장한다.
+   화면에는 이름만 보이고 이메일·UID는 기록용으로만 남는다. */
+const emailKey = e => String(e || "").trim().toLowerCase().replace(/[.@#$\[\]\/]/g, "_");
+let ACCOUNTS = {};
+const nameOfEmail = e => (ACCOUNTS[emailKey(e)] || {}).name || "";
+
 /* Firebase config → 인원 명단(MEMBERS) 갱신 */
 function applyConfig(cfg) {
-  if (!cfg || !cfg.members) return;
+  if (!cfg) return;
+  ACCOUNTS = cfg.accounts || {};
+  if (!cfg.members) return;
   /* members 는 배열이거나, 예전 형식({팀:[이름]})일 수 있음 — 모두 평탄화 */
   const flat = [];
   const push = n => {
@@ -9762,6 +9755,57 @@ function SettingsPage({
       }).catch(() => {});
     } catch {}
   };
+  /* ── 계정 ↔ 실명 연결 ──
+     Firebase 콘솔에서 만든 로그인 계정(이메일)에 실명을 붙여둔다.
+     연결해두면 그 사람이 로그인할 때 이름이 자동으로 채워지고,
+     수정 기록·게시판에 실명이 남는다. 화면에는 이름만 보인다. */
+  const [accEmail, setAccEmail] = useState("");
+  const [accName, setAccName] = useState("");
+  const accList = Object.entries(ACCOUNTS).map(([k, v]) => ({
+    k,
+    email: v && v.email || k,
+    name: v && v.name || ""
+  })).sort((a, b) => a.name.localeCompare(b.name));
+  const writeAccounts = next => {
+    try {
+      firebase.database().ref(FB_CONFIG).update({
+        accounts: next
+      }).catch(e => window.alert("저장 실패: " + (e && e.message || e)));
+    } catch (e) {
+      window.alert("저장 실패: " + (e && e.message || e));
+    }
+  };
+  const addAccount = () => {
+    const em = (accEmail || "").trim().toLowerCase();
+    const nm = (accName || "").trim();
+    if (!em || !nm) {
+      window.alert("이메일과 이름을 모두 입력하세요.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      window.alert("이메일 형식이 올바르지 않습니다.");
+      return;
+    }
+    writeAccounts({
+      ...ACCOUNTS,
+      [emailKey(em)]: {
+        email: em,
+        name: nm
+      }
+    });
+    logAction("추가", "계정 연결", null, `${em} → ${nm}`);
+    setAccEmail("");
+    setAccName("");
+  };
+  const delAccount = a => {
+    if (!window.confirm(`'${a.email} → ${a.name}' 연결을 지울까요?\n계정 자체는 남고 이름 연결만 없어집니다.`)) return;
+    const next = {
+      ...ACCOUNTS
+    };
+    delete next[a.k];
+    writeAccounts(next);
+    logAction("삭제", "계정 연결", `${a.email} → ${a.name}`, null);
+  };
   const addMember = () => {
     const nm = (newName || "").trim();
     if (!nm) return;
@@ -10394,6 +10438,144 @@ function SettingsPage({
       cursor: "pointer"
     }
   }, "+ 추가"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: BD,
+      borderRadius: 12,
+      padding: "16px 18px",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 800,
+      color: C.t1
+    }
+  }, "🔗 계정 연결"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 8,
+      fontSize: 12,
+      color: C.t4
+    }
+  }, accList.length, "개")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.t3,
+      lineHeight: 1.7,
+      marginBottom: 11
+    }
+  }, "Firebase 콘솔 → Authentication 에서 만든 로그인 계정에 실명을 붙여둡니다. 연결해두면 그 사람이 로그인할 때 이름이 자동으로 채워지고, 수정 기록·게시판에 실명이 남습니다. 화면에는 ", /*#__PURE__*/React.createElement("b", null, "이름만"), " 보이고 이메일은 기록용으로만 저장됩니다."), accList.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: C.t4,
+      padding: "10px 0"
+    }
+  }, "연결된 계정이 없습니다."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 6,
+      marginBottom: 11,
+      maxHeight: 260,
+      overflowY: "auto"
+    }
+  }, accList.map(a => /*#__PURE__*/React.createElement("div", {
+    key: a.k,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 9,
+      padding: "9px 11px",
+      background: C.surfaceL,
+      border: BD,
+      borderRadius: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 14,
+      fontWeight: 800,
+      color: C.t1,
+      flexShrink: 0
+    }
+  }, a.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 12,
+      color: C.t3,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, a.email), /*#__PURE__*/React.createElement("button", {
+    onClick: () => delAccount(a),
+    style: {
+      flexShrink: 0,
+      padding: "6px 11px",
+      borderRadius: 7,
+      border: `1px solid ${C.red}35`,
+      background: "transparent",
+      color: C.red,
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "연결 해제")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: accEmail,
+    onChange: e => setAccEmail(e.target.value),
+    placeholder: "name@stoneng.co.kr",
+    style: {
+      flex: 2,
+      minWidth: 170,
+      padding: "9px 11px",
+      background: C.surfaceL,
+      border: `1.5px dashed ${C.border}`,
+      borderRadius: 8,
+      color: C.t1,
+      fontSize: 14,
+      outline: "none"
+    }
+  }), /*#__PURE__*/React.createElement("input", {
+    value: accName,
+    onChange: e => setAccName(e.target.value),
+    onKeyDown: e => e.key === "Enter" && addAccount(),
+    placeholder: "실명",
+    style: {
+      flex: 1,
+      minWidth: 90,
+      padding: "9px 11px",
+      background: C.surfaceL,
+      border: `1.5px dashed ${C.border}`,
+      borderRadius: 8,
+      color: C.t1,
+      fontSize: 14,
+      outline: "none"
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: addAccount,
+    style: {
+      padding: "9px 18px",
+      borderRadius: 8,
+      background: C.blue,
+      border: "none",
+      color: "#fff",
+      fontSize: 14,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "+ 연결"))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.surface,
       border: BD,
@@ -13506,6 +13688,17 @@ function LoginScreen({
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState("");
+  /* 비밀번호를 잊었을 때 — 재설정 메일을 보낸다 (관리자 손 안 빌리고 해결) */
+  const reset = () => {
+    const em = (email || "").trim();
+    if (!em) {
+      setErr("이메일을 먼저 입력하세요.");
+      return;
+    }
+    setErr("");
+    firebase.auth().sendPasswordResetEmail(em).then(() => setSent(`${em} 으로 재설정 메일을 보냈어요. 메일함을 확인하세요.`)).catch(e => setErr("재설정 메일 발송 실패: " + (e.message || e.code)));
+  };
   const submit = () => {
     if (!email || !pw) {
       setErr("이메일과 비밀번호를 입력하세요.");
@@ -13651,7 +13844,17 @@ function LoginScreen({
       borderRadius: 8,
       border: `1px solid ${C.red}30`
     }
-  }, err), /*#__PURE__*/React.createElement("button", {
+  }, err), sent && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.green,
+      background: C.greenL,
+      padding: "9px 11px",
+      borderRadius: 8,
+      border: `1px solid ${C.green}30`,
+      lineHeight: 1.6
+    }
+  }, sent), /*#__PURE__*/React.createElement("button", {
     onClick: submit,
     disabled: busy,
     style: {
@@ -13673,7 +13876,21 @@ function LoginScreen({
       marginTop: 16,
       lineHeight: 1.6
     }
-  }, "계정이 없으면 관리자에게 문의하세요. 계정은 Firebase 콘솔 → Authentication 에서 발급합니다."))));
+  }, "계정이 없으면 관리자에게 문의하세요."), /*#__PURE__*/React.createElement("button", {
+    onClick: reset,
+    style: {
+      width: "100%",
+      marginTop: 10,
+      padding: "11px 0",
+      borderRadius: 9,
+      border: `1px solid ${C.border}`,
+      background: "transparent",
+      color: C.t3,
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "비밀번호를 잊으셨나요?"))));
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -13885,12 +14102,13 @@ function App() {
             };
             setAuthUser(user);
           } else {
-            /* 로그인 화면 없이 자동 익명 로그인 → 링크만 있으면 누구나 접속 */
-            firebase.auth().signInAnonymously().catch(e => {
-              console.error("[Firebase] 익명 로그인 실패:", e);
-              setFbStatus("익명 로그인 실패 (Firebase에서 익명 인증을 켜세요)");
-              setAuthUser(null); // 실패 시에만 로그인 화면
-            });
+            /* 로그인하지 않은 상태 → 로그인 화면. (익명 자동 로그인은 폐지) */
+            CURRENT_USER = {
+              uid: null,
+              email: null,
+              name: ""
+            };
+            setAuthUser(null);
           }
         });
       } else {
@@ -14083,6 +14301,12 @@ function App() {
     if (keys.length > 5) doSave(); // 큰 변경(가져오기 등) → 즉시 저장
     else saveTimer.current = setTimeout(doSave, 400); // 작은 편집 → 디바운스
   }, [db]);
+
+  /* 로그인한 계정에 연결된 실명을 자동으로 가져온다 (설정에서 관리자가 연결) */
+  const mappedName = authUser && authUser.email ? nameOfEmail(authUser.email) : "";
+  useEffect(() => {
+    if (mappedName && mappedName !== editor) saveName(mappedName);
+  }, [mappedName]);
 
   /* 내 이름 변경 시 로그 기록용 사용자명 갱신 + 푸시 등록 */
   useEffect(() => {
@@ -14557,7 +14781,20 @@ function App() {
     style: {
       marginTop: 8
     }
-  }, /*#__PURE__*/React.createElement("select", {
+  }, mappedName ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "8px 10px",
+      background: C.blueL,
+      border: `1px solid ${C.blue}30`,
+      borderRadius: 7,
+      fontSize: 13,
+      fontWeight: 800,
+      color: C.blue,
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis"
+    }
+  }, "👤 ", mappedName) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
     value: editor,
     onChange: e => saveName(e.target.value),
     style: {
@@ -14576,7 +14813,15 @@ function App() {
   }, "내 이름 선택 (수정 기록용)"), allMembers().map(n => /*#__PURE__*/React.createElement("option", {
     key: n,
     value: n
-  }, n)))), /*#__PURE__*/React.createElement("button", {
+  }, n))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.t4,
+      marginTop: 4,
+      whiteSpace: "normal",
+      lineHeight: 1.5
+    }
+  }, "이 계정에 연결된 이름이 없어요. 관리자가 설정 → 계정 연결에서 등록하면 자동으로 채워집니다."))), /*#__PURE__*/React.createElement("button", {
     onClick: enablePush,
     style: {
       width: "100%",
