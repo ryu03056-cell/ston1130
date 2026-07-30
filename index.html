@@ -3017,6 +3017,7 @@ function DayPanel({
   const [dragY, setDragY] = useState(0); // 아래로 쓸어내려 닫기
   const dragStart = useRef(null);
   const [routeFor, setRouteFor] = useState(null); // 길찾기 앱 선택
+  const [draft, setDraft] = useState(null); // 아직 저장 안 한 새 현장
   const geoAll = useGeoCache();
 
   /* 같은 현장이 상·하반기 양쪽에 있으면(1년 계약 이월) 한 번만 표시.
@@ -3041,7 +3042,42 @@ function DayPanel({
   const startSchools = dedup(allSchools.filter(s => s.start === dateStr));
   const endSchools = dedup(allSchools.filter(s => s.end === dateStr));
   const total = fieldSchools.length + startSchools.length + endSchools.length;
-  const editSc = editId ? allSchools.find(s => s.id === editId) : null;
+  const isDraft = !!(draft && draft.id === editId);
+  const editSc = isDraft ? draft : editId ? allSchools.find(s => s.id === editId) : null;
+
+  /* 이 날짜로 새 현장 만들기 — 클릭한 날짜가 현장조사일로 들어가고,
+     그 날짜가 속한 연도·반기에 저장되므로 현장 관리 탭에도 그대로 나타난다.
+     저장을 누를 때까지는 아무것도 기록되지 않는다. */
+  const addSiteHere = () => {
+    const id = `new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    setDraft({
+      id,
+      school: "",
+      no: "",
+      region: "",
+      kind: "정기점검",
+      field: dateStr,
+      start: "",
+      end: "",
+      headcount: 1,
+      assignees: [],
+      progress: {},
+      buildings: [{
+        b: "본관",
+        floor: null,
+        area: null,
+        fms: null,
+        flag: null,
+        note: null,
+        rep: false,
+        fmsD: false,
+        delivery: null
+      }],
+      _year: dYear,
+      _half: dHalf
+    });
+    setEditId(id);
+  };
   const toggleAssignee = (sid, name) => {
     if (!setDb) return;
     const sc = allSchools.find(s => s.id === sid);
@@ -3537,7 +3573,30 @@ function DayPanel({
       overflowY: "auto",
       padding: "16px 18px"
     }
-  }, total === 0 && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: addSiteHere,
+    style: {
+      width: "100%",
+      padding: "13px 0",
+      borderRadius: 10,
+      border: "none",
+      background: C.blue,
+      color: "#fff",
+      fontSize: 15,
+      fontWeight: 800,
+      cursor: "pointer",
+      marginBottom: 6,
+      boxShadow: `0 3px 12px ${C.blue}38`
+    }
+  }, "+ 이 날짜로 현장 추가"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.t4,
+      textAlign: "center",
+      marginBottom: 16,
+      lineHeight: 1.6
+    }
+  }, `현장조사일 ${dateStr.slice(5).replace("-", "/")} · ${isLH(dYear) ? "LH" : `${dYear}년 ${dHalf}`}에 등록됩니다`, /*#__PURE__*/React.createElement("br", null), "현장 관리 탭에도 함께 나타납니다"), total === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "60px 0",
@@ -3664,7 +3723,12 @@ function DayPanel({
     yr: editSc._year,
     half: editSc._half,
     setDb: setDb,
-    onClose: () => setEditId(null)
+    isNew: isDraft,
+    isMobile: isMobile,
+    onClose: () => {
+      setEditId(null);
+      setDraft(null);
+    }
   }), /*#__PURE__*/React.createElement(RouteChooser, {
     site: routeFor,
     geo: geoAll,
