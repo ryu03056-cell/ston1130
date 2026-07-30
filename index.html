@@ -41,6 +41,18 @@
 const { useState, useMemo, useCallback, useRef, useEffect } = React;
 
 /* ══════════════════════════════════════════════════════════════
+   ★ 총관리자 이메일 ★  ← 여기 한 줄만 본인 이메일로 바꾸면 됩니다
+
+   이 계정만 '설정'에 들어갈 수 있고, 다른 누구도 이 계정의 권한을
+   해제하거나 명단에서 지울 수 없습니다.
+   같은 값을 Firebase 규칙에도 넣어야 서버에서도 실제로 막힙니다.
+   비워 두면 기존처럼 '관리자'면 누구나 설정에 들어갑니다.
+══════════════════════════════════════════════════════════════ */
+const OWNER_EMAIL = "ryu03056@naver.com";
+
+const isOwnerEmail = e => !!OWNER_EMAIL && String(e || "").trim().toLowerCase() === OWNER_EMAIL.trim().toLowerCase();
+
+/* ══════════════════════════════════════════════════════════════
    STON — 시설물 정밀안전점검 현장 일정·관리 대시보드
    · 연도/반기별 현장 분리
    · 영구 캘린더 (드래그로 일정 변경 → 현장관리 자동 반영)
@@ -9704,6 +9716,10 @@ function SettingsPage({
   const [diagBusy, setDiagBusy] = useState(false);
   /* 관리자 지정·해제 — ston/admins/<uid> */
   const setAdminFlag = (a, on) => {
+    if (isOwnerEmail(a.email)) {
+      window.alert("총관리자 계정입니다.\n권한을 바꿀 수 없습니다.");
+      return;
+    }
     /* 마지막 관리자를 해제하면 아무도 설정에 못 들어간다 → 막는다 */
     if (!on && (adminCount || 0) <= 1) {
       window.alert("마지막 관리자는 해제할 수 없습니다.\n다른 계정을 먼저 관리자로 지정하세요.");
@@ -9730,7 +9746,7 @@ function SettingsPage({
     email: v && v.email || k,
     name: v && v.name || "",
     admin: ADMINS[k] === true
-  })).sort((a, b) => (b.admin ? 1 : 0) - (a.admin ? 1 : 0) || a.name.localeCompare(b.name));
+  })).sort((a, b) => (isOwnerEmail(b.email) ? 1 : 0) - (isOwnerEmail(a.email) ? 1 : 0) || (b.admin ? 1 : 0) - (a.admin ? 1 : 0) || a.name.localeCompare(b.name));
   const writeAccounts = next => {
     try {
       firebase.database().ref(FB_CONFIG).update({
@@ -9784,6 +9800,10 @@ function SettingsPage({
     logAction("추가", "인원 등록", null, `기존 명단 ${notRegistered.length}명 가져오기`);
   };
   const delAccount = a => {
+    if (isOwnerEmail(a.email)) {
+      window.alert("총관리자 계정입니다.\n명단에서 지울 수 없습니다.");
+      return;
+    }
     if (a.admin) {
       window.alert("관리자로 지정된 계정입니다.\n먼저 '일반'으로 바꾼 뒤 삭제하세요.");
       return;
@@ -10266,7 +10286,11 @@ function SettingsPage({
     style: {
       color: C.blue
     }
-  }, "관리자"), "로 바꾼 계정만 설정·엑셀 관리를 볼 수 있습니다."), adminCount === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "관리자"), "로 바꾼 계정은 엑셀 관리를 쓸 수 있습니다.", OWNER_EMAIL ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), "· ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.purple
+    }
+  }, "총관리자"), "만 이 설정 화면에 들어올 수 있고, 총관리자 권한은 누구도 바꿀 수 없습니다.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), "· 총관리자가 지정되지 않아 지금은 관리자면 설정도 볼 수 있습니다.")), adminCount === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
       fontWeight: 700,
@@ -10328,15 +10352,15 @@ function SettingsPage({
       flexShrink: 0,
       padding: "7px 13px",
       borderRadius: 7,
-      border: `1.5px solid ${a.admin ? C.blue : C.border}`,
-      background: a.admin ? C.blue : C.surface,
-      color: a.admin ? "#fff" : C.t3,
+      border: `1.5px solid ${isOwnerEmail(a.email) ? C.purple : a.admin ? C.blue : C.border}`,
+      background: isOwnerEmail(a.email) ? C.purple : a.admin ? C.blue : C.surface,
+      color: isOwnerEmail(a.email) || a.admin ? "#fff" : C.t3,
       fontSize: 12,
       fontWeight: 800,
       cursor: "pointer",
       whiteSpace: "nowrap"
     }
-  }, a.admin ? "관리자" : "일반") : /*#__PURE__*/React.createElement("span", {
+  }, isOwnerEmail(a.email) ? "총관리자" : a.admin ? "관리자" : "일반") : /*#__PURE__*/React.createElement("span", {
     style: {
       flexShrink: 0,
       fontSize: 12,
@@ -13841,7 +13865,7 @@ function App() {
     const onAdmins = sn => {
       ADMINS = sn.val() || {};
       setAdminCount(Object.values(ADMINS).filter(Boolean).length);
-      setIsAdmin(ADMINS[emailKey(authUser.email)] === true);
+      setIsAdmin(ADMINS[emailKey(authUser.email)] === true || isOwnerEmail(authUser.email));
     };
     aRef.on("value", onAdmins, () => {
       setAdminCount(0);
@@ -13852,8 +13876,9 @@ function App() {
 
   /* 권한 없는 메뉴에 머물러 있으면 일정 화면으로 돌린다 */
   useEffect(() => {
-    if (!isAdmin && (menu === "export" || menu === "settings")) setMenuRaw("schedule");
-  }, [isAdmin, menu]);
+    if (menu === "export" && !isAdmin) setMenuRaw("schedule");
+    if (menu === "settings" && !(OWNER_EMAIL ? isOwnerEmail(authUser && authUser.email) : isAdmin)) setMenuRaw("schedule");
+  }, [isAdmin, authUser, menu]);
 
   /* B) 로그인 후에만 데이터/메타/설정/로그/presence 구독 */
   useEffect(() => {
@@ -14218,7 +14243,9 @@ function App() {
   });
   /* 관리자만 엑셀 관리·설정을 볼 수 있다.
      단 관리자가 한 명도 없는 최초 상태에서는 설정만 열어둔다 — 첫 관리자를 지정해야 하므로. */
-  const menus = MENUS.filter(m => m.id === "settings" || m.id === "export" ? isAdmin : true);
+  const isOwner = !!authUser && isOwnerEmail(authUser.email);
+  const canSettings = OWNER_EMAIL ? isOwner : isAdmin; // 총관리자 미지정이면 기존 동작
+  const menus = MENUS.filter(m => m.id === "settings" ? canSettings : m.id === "export" ? isAdmin : true);
   const pages = {
     schedule: /*#__PURE__*/React.createElement(Calendar, {
       allSchools: allSchools,
@@ -14251,7 +14278,7 @@ function App() {
       setDb: setDb,
       saveNow: saveNow
     }),
-    settings: isAdmin && /*#__PURE__*/React.createElement(SettingsPage, {
+    settings: canSettings && /*#__PURE__*/React.createElement(SettingsPage, {
       cfgVer: cfgVer,
       logs: logs,
       editor: editor,
