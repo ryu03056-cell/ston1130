@@ -3676,139 +3676,424 @@ function DayPanel({
 /* ══════════════════════════════════════════════════════════════
    현장 일정 — 영구 캘린더 (드래그로 일정 변경)
 ══════════════════════════════════════════════════════════════ */
+/* ── 날짜 계산 도우미 ── */
+const pad2 = n => String(n).padStart(2, "0");
+const dstr = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const parseD = s => {
+  const [y, m, d] = String(s).split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, 12);
+};
+const addDays = (d, n) => {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+};
+const startOfWeek = d => addDays(d, -d.getDay()); // 일요일 시작
+const DOW = ["일", "월", "화", "수", "목", "금", "토"];
+const EV_KINDS = [["field", "조사", "#1D6FF2"], ["start", "착수", "#0D9B6C"], ["end", "완수", "#B58A00"]];
+const evColor = f => f === "field" ? C.blue : f === "start" ? C.green : C.yellow;
+const evLabel = f => f === "field" ? "조사" : f === "start" ? "착수" : "완수";
+
+/* 기간 선택 팝업 — 년·월(주 보기일 땐 주까지)을 눌러서 고른다 */
+function PeriodPicker({
+  view,
+  cursor,
+  onPick,
+  onClose,
+  isMobile
+}) {
+  const cur = parseD(cursor);
+  const [y, setY] = useState(cur.getFullYear());
+  const [m, setM] = useState(cur.getMonth() + 1);
+  const nowY = new Date().getFullYear();
+  const years = [];
+  for (let i = nowY - 3; i <= nowY + 2; i++) years.push(i);
+
+  /* 고른 달에 걸친 주 목록 */
+  const weeks = useMemo(() => {
+    const out = [];
+    const last = new Date(y, m, 0).getDate();
+    let ws = startOfWeek(new Date(y, m - 1, 1, 12));
+    let n = 1;
+    while (ws <= new Date(y, m - 1, last, 12)) {
+      const we = addDays(ws, 6);
+      out.push({
+        n: n++,
+        s: new Date(ws),
+        e: we
+      });
+      ws = addDays(ws, 7);
+    }
+    return out;
+  }, [y, m]);
+  const Chip = ({
+    on,
+    onClick,
+    children,
+    w
+  }) => /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: {
+      minWidth: w || 0,
+      flex: w ? "0 0 auto" : 1,
+      padding: "11px 10px",
+      borderRadius: 9,
+      fontSize: 15,
+      fontWeight: on ? 800 : 600,
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+      border: `1.5px solid ${on ? C.blue : C.border}`,
+      background: on ? C.blueL : C.surface,
+      color: on ? C.blue : C.t2
+    }
+  }, children);
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(20,25,40,.5)",
+      backdropFilter: "blur(2px)",
+      zIndex: 400
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      left: "50%",
+      bottom: isMobile ? 0 : "auto",
+      top: isMobile ? "auto" : "50%",
+      transform: isMobile ? "translateX(-50%)" : "translate(-50%,-50%)",
+      zIndex: 401,
+      width: isMobile ? "100%" : 420,
+      maxWidth: "100vw",
+      maxHeight: "88vh",
+      overflowY: "auto",
+      background: C.surface,
+      borderRadius: isMobile ? "18px 18px 0 0" : 16,
+      padding: isMobile ? "16px 16px calc(20px + env(safe-area-inset-bottom))" : "20px",
+      boxShadow: "0 -8px 40px rgba(20,30,50,.3)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 17,
+      fontWeight: 900,
+      color: C.t1,
+      flex: 1
+    }
+  }, "기간 선택"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      onPick(todayStr());
+      onClose();
+    },
+    style: {
+      padding: "8px 15px",
+      borderRadius: 9,
+      border: `1.5px solid ${C.blue}`,
+      background: C.blueL,
+      color: C.blue,
+      fontSize: 14,
+      fontWeight: 800,
+      cursor: "pointer"
+    }
+  }, "오늘로")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      color: C.t3,
+      marginBottom: 7
+    }
+  }, "연도"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      overflowX: "auto",
+      paddingBottom: 4,
+      marginBottom: 14,
+      WebkitOverflowScrolling: "touch"
+    }
+  }, years.map(v => /*#__PURE__*/React.createElement(Chip, {
+    key: v,
+    on: y === v,
+    w: 74,
+    onClick: () => setY(v)
+  }, v, "년"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      color: C.t3,
+      marginBottom: 7
+    }
+  }, "월"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(4,1fr)",
+      gap: 6,
+      marginBottom: view === "week" ? 14 : 4
+    }
+  }, Array.from({
+    length: 12
+  }, (_, i) => i + 1).map(v => /*#__PURE__*/React.createElement(Chip, {
+    key: v,
+    on: m === v,
+    onClick: () => {
+      setM(v);
+      if (view !== "week") {
+        onPick(dstr(new Date(y, v - 1, 1, 12)));
+        onClose();
+      }
+    }
+  }, v, "월"))), view === "week" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      color: C.t3,
+      marginBottom: 7
+    }
+  }, "주"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 6
+    }
+  }, weeks.map(w => /*#__PURE__*/React.createElement("button", {
+    key: w.n,
+    onClick: () => {
+      onPick(dstr(w.s));
+      onClose();
+    },
+    style: {
+      padding: "12px 13px",
+      borderRadius: 9,
+      textAlign: "left",
+      cursor: "pointer",
+      border: `1.5px solid ${C.border}`,
+      background: C.surface,
+      color: C.t1,
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, `${w.n}주 · ${w.s.getMonth() + 1}/${w.s.getDate()} ~ ${w.e.getMonth() + 1}/${w.e.getDate()}`)))), view !== "week" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.t4,
+      marginTop: 8
+    }
+  }, "월을 누르면 바로 이동합니다."), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      width: "100%",
+      marginTop: 14,
+      padding: "13px 0",
+      borderRadius: 10,
+      border: `1px solid ${C.border}`,
+      background: "transparent",
+      color: C.t3,
+      fontSize: 14,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "닫기")));
+}
+
+/* 주·일 보기에서 쓰는 일정 한 줄 — 현장명과 담당 인원을 함께 보여준다 */
+function EvRow({
+  e,
+  compact,
+  onClick
+}) {
+  const col = evColor(e.field);
+  const who = (e.assignees || []).join(" · ");
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: {
+      width: "100%",
+      textAlign: "left",
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      padding: compact ? "7px 9px" : "10px 12px",
+      marginBottom: 4,
+      borderRadius: 8,
+      cursor: "pointer",
+      border: `1px solid ${col}38`,
+      borderLeft: `4px solid ${col}`,
+      background: col + "0e"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flexShrink: 0,
+      minWidth: 38,
+      textAlign: "center",
+      padding: "3px 5px",
+      borderRadius: 5,
+      fontSize: 12,
+      fontWeight: 800,
+      color: "#fff",
+      background: col
+    }
+  }, evLabel(e.field)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "block",
+      fontSize: compact ? 13 : 15,
+      fontWeight: 700,
+      color: C.t1,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, e.school), /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "block",
+      fontSize: 12,
+      color: who ? C.t2 : C.t4,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, e.region ? `${e.region} · ` : "", who ? `👤 ${who}` : `인원 미배정 (${e.headcount}명 예정)`)));
+}
+
+/* ══════════════════════════════════════════════════════════════
+   현장 일정 — 일 / 주 / 월 보기
+   · 제목을 누르면 연·월(·주) 선택 팝업
+   · 좌우로 밀면 이전/다음 기간
+   · 월 보기에서는 일정 카드를 끌어 날짜 변경
+══════════════════════════════════════════════════════════════ */
 function Calendar({
   allSchools,
   setDb,
   isMobile
 }) {
-  const today = new Date();
-  const [yr, setYr] = useState(today.getFullYear());
-  const [mo, setMo] = useState(today.getMonth() + 1);
+  const [view, setView] = useState("month"); // day | week | month
+  const [cursor, setCursor] = useState(() => todayStr());
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [dragging, setDragging] = useState(null);
-  const [overDay, setOverDay] = useState(null);
-  const [selDay, setSelDay] = useState(null);
+  const [overDate, setOverDate] = useState(null);
+  const [selDate, setSelDate] = useState(null);
   const [toast, setToast] = useState(null);
   const showToast = m => {
     setToast(m);
     setTimeout(() => setToast(null), 2200);
   };
-  const pad = n => String(n).padStart(2, "0");
-  const toStr = day => `${yr}-${pad(mo)}-${pad(day)}`;
-  const prevMonth = () => {
-    if (mo === 1) {
-      setYr(y => y - 1);
-      setMo(12);
-    } else setMo(m => m - 1);
-    setSelDay(null);
-  };
-  const nextMonth = () => {
-    if (mo === 12) {
-      setYr(y => y + 1);
-      setMo(1);
-    } else setMo(m => m + 1);
-    setSelDay(null);
+  const cur = parseD(cursor);
+  const aY = cur.getFullYear(),
+    aM = cur.getMonth() + 1;
+  const tStr = todayStr();
+
+  /* 날짜별 일정 — 보기 방식과 무관하게 한 번만 계산 */
+  const evByDate = useMemo(() => {
+    const map = {},
+      seen = new Set();
+    allSchools.forEach(s => {
+      [["field"], ["start"], ["end"]].forEach(([f]) => {
+        const ds = s[f];
+        if (!ds) return;
+        /* 같은 현장·같은 날·같은 종류는 한 번만 (이월본이 양쪽 반기에 있어도 중복 표시 안 됨) */
+        const k = `${ds}|${f}|${(s.school || "").trim()}|${(s.no || "").toString().trim()}`;
+        if (seen.has(k)) return;
+        seen.add(k);
+        (map[ds] = map[ds] || []).push({
+          schoolId: s.id,
+          school: s.school,
+          field: f,
+          region: s.region || "",
+          headcount: s.headcount || 2,
+          assignees: s.assignees || []
+        });
+      });
+    });
+    const ord = {
+      field: 0,
+      start: 1,
+      end: 2
+    };
+    Object.values(map).forEach(a => a.sort((x, y2) => ord[x.field] - ord[y2.field]));
+    return map;
+  }, [allSchools]);
+
+  /* 기간 이동 */
+  const shift = n => {
+    if (view === "month") setCursor(dstr(new Date(aY, aM - 1 + n, 1, 12)));else setCursor(dstr(addDays(cur, view === "week" ? 7 * n : n)));
+    setSelDate(null);
   };
   const goToday = () => {
-    setYr(today.getFullYear());
-    setMo(today.getMonth() + 1);
-    setSelDay(today.getDate());
+    setCursor(tStr);
+    setSelDate(view === "month" ? tStr : null);
+  };
+  const changeView = v => {
+    setView(v);
+    setSelDate(null);
+    /* 보기를 바꿀 때 지금 보고 있는 달 안에 오늘이 있으면 오늘로 맞춘다 */
+    const t = new Date();
+    if (t.getFullYear() === aY && t.getMonth() + 1 === aM) setCursor(tStr);
   };
 
-  /* 달력 위에서 스크롤(휠)·위아래 스와이프 → 다음/이전 달 */
+  /* 좌우 스와이프 · 가로 휠 */
   const wheelAcc = useRef(0),
     moveLock = useRef(0),
     swipeStart = useRef(null);
-  const shiftMonth = dir => {
+  const guard = dir => {
     const now = Date.now();
-    if (now - moveLock.current < 320) return; // 너무 빨리 여러 달 넘어가지 않게
+    if (now - moveLock.current < 320) return;
     moveLock.current = now;
-    if (dir > 0) nextMonth();else prevMonth();
+    shift(dir);
   };
-  /* 좌우로만 반응 — 위아래는 페이지 스크롤 그대로 두기 위해 건드리지 않음 */
-  const onCalWheel = e => {
+  const onWheel = e => {
     if (Math.abs(e.deltaX) < 2 || Math.abs(e.deltaX) < Math.abs(e.deltaY)) return;
     e.preventDefault();
     wheelAcc.current += e.deltaX;
     if (Math.abs(wheelAcc.current) >= 60) {
-      shiftMonth(wheelAcc.current > 0 ? 1 : -1);
+      guard(wheelAcc.current > 0 ? 1 : -1);
       wheelAcc.current = 0;
     }
   };
-  const onCalTouchStart = e => {
+  const onTStart = e => {
     swipeStart.current = {
       y: e.touches[0].clientY,
       x: e.touches[0].clientX,
       moved: false
     };
   };
-  const onCalTouchMove = e => {
+  const onTMove = e => {
     const st = swipeStart.current;
     if (!st || st.moved) return;
     const dy = e.touches[0].clientY - st.y,
       dx = e.touches[0].clientX - st.x;
     if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) {
       st.moved = true;
-      shiftMonth(dx < 0 ? 1 : -1); // 왼쪽으로 밀면 다음 달
+      guard(dx < 0 ? 1 : -1);
     }
   };
-  const onCalTouchEnd = () => {
+  const onTEnd = () => {
     swipeStart.current = null;
   };
-  const daysInMonth = new Date(yr, mo, 0).getDate();
-  const firstDow = new Date(yr, mo - 1, 1).getDay();
-  const cells = [...Array(firstDow).fill(null), ...Array.from({
-    length: daysInMonth
-  }, (_, i) => i + 1)];
-  while (cells.length % 7) cells.push(null);
-  const weeks = Array.from({
-    length: cells.length / 7
-  }, (_, i) => cells.slice(i * 7, i * 7 + 7));
-  const isToday = d => yr === today.getFullYear() && mo === today.getMonth() + 1 && d === today.getDate();
-  const eventsByDay = useMemo(() => {
-    const map = {};
-    const seen = new Set(); // 같은 현장·같은 날·같은 종류 중복 제거 (1년 계약 이월본이 양쪽 반기에 있어도 1번만)
-    allSchools.forEach(s => {
-      [["field", "현장"], ["start", "착수"], ["end", "완수"]].forEach(([f, lbl]) => {
-        const ds = s[f];
-        if (!ds) return;
-        const [y, m, d] = ds.split("-").map(Number);
-        if (y !== yr || m !== mo) return;
-        const k = `${ds}|${f}|${(s.school || "").trim()}|${(s.no || "").toString().trim()}`;
-        if (seen.has(k)) return;
-        seen.add(k);
-        (map[d] = map[d] || []).push({
-          schoolId: s.id,
-          school: s.school,
-          field: f,
-          label: lbl,
-          headcount: s.headcount || 2,
-          assignees: s.assignees || []
-        });
-      });
-    });
-    // 같은 날 정렬: 현장 → 착수 → 완수
-    const ord = {
-      field: 0,
-      start: 1,
-      end: 2
-    };
-    Object.values(map).forEach(arr => arr.sort((a, b) => ord[a.field] - ord[b.field]));
-    return map;
-  }, [allSchools, yr, mo]);
-  const handleDrop = useCallback(targetDay => {
-    if (!dragging || !targetDay) return;
+
+  /* 일정 끌어서 날짜 변경 (월 보기) */
+  const handleDrop = useCallback(targetDate => {
+    if (!dragging || !targetDate) return;
     const {
       schoolId,
       field,
-      fromDay
+      from
     } = dragging;
-    if (fromDay === targetDay) {
+    if (from === targetDate) {
       setDragging(null);
-      setOverDay(null);
+      setOverDate(null);
       return;
     }
-    const nd = toStr(targetDay);
     const sc = allSchools.find(s => s.id === schoolId);
+    const lb = field === "field" ? "현장조사일" : field === "start" ? "착수일" : "완수일";
     if (sc?._year && sc?._half) {
       setDb(prev => {
         const next = {
@@ -3817,36 +4102,421 @@ function Calendar({
         next[sc._year] = {
           ...(prev[sc._year] || {})
         };
-        const lb = field === "field" ? "현장조사일" : field === "start" ? "착수일" : "완수일";
         next[sc._year][sc._half] = (prev[sc._year]?.[sc._half] || []).map(s => s.id !== schoolId ? s : stampEdit({
           ...s,
-          [field]: nd
+          [field]: targetDate
         }, `${lb} 변경`));
         return next;
       });
     }
-    const lbl = field === "field" ? "현장조사일" : field === "start" ? "착수일" : "완수일";
-    logAction("수정", `${sc?.school} · ${lbl}`, sc?.[field] || "-", nd);
-    showToast(`${sc?.school} ${lbl} → ${mo}/${targetDay} · 현장관리 반영`);
+    logAction("수정", `${sc?.school} · ${lb}`, from || "-", targetDate);
+    showToast(`${sc?.school} ${lb} → ${targetDate.slice(5).replace("-", "/")}`);
     setDragging(null);
-    setOverDay(null);
-  }, [dragging, allSchools, yr, mo, setDb]);
+    setOverDate(null);
+  }, [dragging, allSchools, setDb]);
 
-  /* 현장=파랑, 착수=초록, 완수=노랑 */
-  const evColor = f => f === "field" ? C.blue : f === "start" ? C.green : C.yellow;
-  const evMark = f => f === "start" ? " ▶" : f === "end" ? " 📦" : "";
-  const DOW = ["일", "월", "화", "수", "목", "금", "토"];
-  const selLabel = selDay ? `${mo}월 ${selDay}일 (${DOW[new Date(yr, mo - 1, selDay).getDay()]})` : "";
+  /* ── 제목 ── */
+  const weekStart = startOfWeek(cur),
+    weekEnd = addDays(weekStart, 6);
+  const title = view === "month" ? `${aY}년 ${aM}월` : view === "week" ? `${weekStart.getMonth() + 1}/${weekStart.getDate()} ~ ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}` : `${aM}월 ${cur.getDate()}일 (${DOW[cur.getDay()]})`;
+  const subtitle = view === "week" ? `${aY}년 ${aM}월` : view === "day" ? `${aY}년` : null;
+
+  /* ── 보기 전환 (일 / 주 / 월) ── */
+  const ViewToggle = /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      background: C.surfaceD,
+      borderRadius: 10,
+      padding: 3,
+      gap: 2,
+      flexShrink: 0
+    }
+  }, [["day", "일"], ["week", "주"], ["month", "월"]].map(([v, l]) => /*#__PURE__*/React.createElement("button", {
+    key: v,
+    onClick: () => changeView(v),
+    style: {
+      minWidth: isMobile ? 44 : 52,
+      padding: "8px 0",
+      borderRadius: 8,
+      border: "none",
+      cursor: "pointer",
+      fontSize: 15,
+      fontWeight: view === v ? 800 : 600,
+      background: view === v ? C.surface : "transparent",
+      color: view === v ? C.blue : C.t3,
+      boxShadow: view === v ? "0 1px 4px rgba(20,30,50,.14)" : "none"
+    }
+  }, l)));
+
+  /* ── 월 보기 ── */
+  const monthGrid = () => {
+    const daysIn = new Date(aY, aM, 0).getDate();
+    const firstDow = new Date(aY, aM - 1, 1).getDay();
+    const cells = [...Array(firstDow).fill(null), ...Array.from({
+      length: daysIn
+    }, (_, i) => i + 1)];
+    while (cells.length % 7) cells.push(null);
+    const weeks = Array.from({
+      length: cells.length / 7
+    }, (_, i) => cells.slice(i * 7, i * 7 + 7));
+    const cap = isMobile ? 3 : 99;
+    return /*#__PURE__*/React.createElement("div", {
+      onWheel: onWheel,
+      onTouchStart: onTStart,
+      onTouchMove: onTMove,
+      onTouchEnd: onTEnd,
+      style: {
+        background: C.surface,
+        border: BD,
+        borderRadius: 12,
+        overflow: "hidden",
+        boxShadow: "0 2px 12px rgba(0,0,0,.06)",
+        touchAction: "pan-y"
+      }
+    }, /*#__PURE__*/React.createElement("table", {
+      style: {
+        width: "100%",
+        borderCollapse: "collapse",
+        tableLayout: "fixed"
+      }
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+      style: {
+        background: C.surfaceL,
+        borderBottom: `1.5px solid ${C.borderD}`
+      }
+    }, DOW.map((d, i) => /*#__PURE__*/React.createElement("th", {
+      key: d,
+      style: {
+        padding: isMobile ? "9px 0" : "12px 0",
+        textAlign: "center",
+        fontSize: isMobile ? 14 : 16,
+        fontWeight: 800,
+        color: i === 0 ? C.red : i === 6 ? C.blue : C.t2,
+        borderRight: i < 6 ? BD : "none"
+      }
+    }, d)))), /*#__PURE__*/React.createElement("tbody", null, weeks.map((wk, wi) => /*#__PURE__*/React.createElement("tr", {
+      key: wi,
+      style: {
+        borderBottom: wi < weeks.length - 1 ? BD : "none"
+      }
+    }, wk.map((day, di) => {
+      const ds = day ? `${aY}-${pad2(aM)}-${pad2(day)}` : null;
+      const evs = ds ? evByDate[ds] || [] : [];
+      const over = !!ds && overDate === ds;
+      const sel = !!ds && selDate === ds;
+      const isT = ds === tStr;
+      return /*#__PURE__*/React.createElement("td", {
+        key: di,
+        onClick: () => ds && setSelDate(sel ? null : ds),
+        onDragOver: e => {
+          e.preventDefault();
+          setOverDate(ds);
+        },
+        onDragLeave: () => setOverDate(null),
+        onDrop: () => handleDrop(ds),
+        style: {
+          padding: isMobile ? "6px 5px" : "7px 8px",
+          verticalAlign: "top",
+          height: isMobile ? 112 : 138,
+          width: "14.285%",
+          borderRight: di < 6 ? BD : "none",
+          cursor: ds ? "pointer" : "default",
+          background: sel ? "rgba(29,111,242,.11)" : over ? "rgba(29,111,242,.09)" : isT ? "rgba(29,111,242,.05)" : "transparent",
+          outline: sel ? `2px solid ${C.blue}` : over ? `2px dashed ${C.blue}` : "none",
+          outlineOffset: -2,
+          position: "relative"
+        }
+      }, ds && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+        style: {
+          width: isMobile ? 30 : 38,
+          height: isMobile ? 30 : 38,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: "50%",
+          background: isT ? C.blue : "transparent",
+          color: isT ? "#fff" : di === 0 ? C.red : di === 6 ? C.blue : C.t1,
+          fontSize: isMobile ? 16 : 19,
+          fontWeight: isT ? 900 : 700,
+          marginBottom: 4,
+          boxShadow: isT ? `0 2px 8px ${C.blue}55` : "none"
+        }
+      }, day), /*#__PURE__*/React.createElement("div", {
+        style: {
+          display: "flex",
+          flexDirection: "column",
+          gap: 3
+        }
+      }, evs.slice(0, cap).map((e, ei) => /*#__PURE__*/React.createElement("div", {
+        key: ei,
+        draggable: true,
+        onDragStart: () => setDragging({
+          schoolId: e.schoolId,
+          field: e.field,
+          from: ds
+        }),
+        onDragEnd: () => {
+          setDragging(null);
+          setOverDate(null);
+        },
+        title: `${e.school} · ${evLabel(e.field)} · ${e.assignees.length ? e.assignees.join(",") : e.headcount + "명"}`,
+        style: {
+          padding: isMobile ? "3px 5px" : "3px 7px",
+          borderRadius: 4,
+          background: `${evColor(e.field)}15`,
+          borderLeft: `3px solid ${evColor(e.field)}`,
+          fontSize: isMobile ? 12 : 14,
+          color: evColor(e.field),
+          fontWeight: 700,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          cursor: "grab",
+          opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
+        }
+      }, e.school.length > (isMobile ? 5 : 11) ? e.school.slice(0, isMobile ? 5 : 11) + "…" : e.school, e.field === "end" ? " 📦" : e.field === "start" ? " ▶" : "")), evs.length > cap && /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 12,
+          color: C.t4,
+          paddingLeft: 4,
+          fontWeight: 700
+        }
+      }, "+", evs.length - cap, "건"))));
+    }))))));
+  };
+
+  /* ── 주 보기 ── 날짜별로 한 줄, 그 날의 현장과 인원을 함께 */
+  const weekList = () => {
+    const days = Array.from({
+      length: 7
+    }, (_, i) => addDays(weekStart, i));
+    const total = days.reduce((a, d) => a + (evByDate[dstr(d)] || []).length, 0);
+    return /*#__PURE__*/React.createElement("div", {
+      onWheel: onWheel,
+      onTouchStart: onTStart,
+      onTouchMove: onTMove,
+      onTouchEnd: onTEnd,
+      style: {
+        touchAction: "pan-y"
+      }
+    }, total === 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        textAlign: "center",
+        padding: "40px 20px",
+        color: C.t4,
+        background: C.surface,
+        border: BD,
+        borderRadius: 12,
+        fontSize: 15
+      }
+    }, "이 주에 등록된 일정이 없습니다."), days.map(d => {
+      const ds = dstr(d);
+      const evs = evByDate[ds] || [];
+      const isT = ds === tStr;
+      const dow = d.getDay();
+      return /*#__PURE__*/React.createElement("div", {
+        key: ds,
+        style: {
+          background: C.surface,
+          border: `1px solid ${isT ? C.blue + "66" : C.border}`,
+          borderLeft: `4px solid ${isT ? C.blue : evs.length ? C.borderD : C.border}`,
+          borderRadius: "0 11px 11px 0",
+          padding: "10px 12px",
+          marginBottom: 8
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        onClick: () => setSelDate(ds),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          cursor: "pointer",
+          marginBottom: evs.length ? 8 : 0
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          minWidth: 30,
+          height: 30,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: "50%",
+          background: isT ? C.blue : "transparent",
+          color: isT ? "#fff" : dow === 0 ? C.red : dow === 6 ? C.blue : C.t1,
+          fontSize: 16,
+          fontWeight: 900
+        }
+      }, d.getDate()), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 14,
+          fontWeight: 700,
+          color: dow === 0 ? C.red : dow === 6 ? C.blue : C.t2
+        }
+      }, DOW[dow], "요일"), isT && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 12,
+          fontWeight: 800,
+          color: C.blue,
+          background: C.blueL,
+          padding: "2px 7px",
+          borderRadius: 5
+        }
+      }, "오늘"), /*#__PURE__*/React.createElement("span", {
+        style: {
+          marginLeft: "auto",
+          fontSize: 13,
+          fontWeight: 700,
+          color: evs.length ? C.t2 : C.t4
+        }
+      }, evs.length ? `${evs.length}건` : "일정 없음")), evs.map((e, i) => /*#__PURE__*/React.createElement(EvRow, {
+        key: i,
+        e: e,
+        compact: true,
+        onClick: () => setSelDate(ds)
+      })));
+    }));
+  };
+
+  /* ── 일 보기 ── */
+  const dayList = () => {
+    const evs = evByDate[cursor] || [];
+    const byKind = EV_KINDS.map(([f, l, c]) => ({
+      f,
+      l,
+      c,
+      items: evs.filter(e => e.field === f)
+    })).filter(g => g.items.length);
+    const people = [...new Set(evs.flatMap(e => e.assignees || []))];
+    return /*#__PURE__*/React.createElement("div", {
+      onWheel: onWheel,
+      onTouchStart: onTStart,
+      onTouchMove: onTMove,
+      onTouchEnd: onTEnd,
+      style: {
+        touchAction: "pan-y"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        marginBottom: 12,
+        flexWrap: "wrap"
+      }
+    }, [["전체", evs.length, C.t2], ["조사", evs.filter(e => e.field === "field").length, C.blue], ["착수", evs.filter(e => e.field === "start").length, C.green], ["완수", evs.filter(e => e.field === "end").length, C.yellow]].map(([l, n, c]) => /*#__PURE__*/React.createElement("div", {
+      key: l,
+      style: {
+        flex: 1,
+        minWidth: 70,
+        padding: "10px 12px",
+        background: C.surface,
+        border: BD,
+        borderTop: `3px solid ${c}`,
+        borderRadius: 10
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 19,
+        fontWeight: 900,
+        color: c
+      }
+    }, n), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: C.t3,
+        marginTop: 2
+      }
+    }, l)))), people.length > 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: C.surface,
+        border: BD,
+        borderRadius: 11,
+        padding: "11px 13px",
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        fontWeight: 800,
+        color: C.t2,
+        marginBottom: 7
+      }
+    }, "👤 이 날 배정된 인원 ", people.length, "명"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 5
+      }
+    }, people.map(n => /*#__PURE__*/React.createElement("span", {
+      key: n,
+      style: {
+        fontSize: 13,
+        fontWeight: 700,
+        color: "#fff",
+        background: C.t1,
+        padding: "5px 11px",
+        borderRadius: 20
+      }
+    }, n)))), evs.length === 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        textAlign: "center",
+        padding: "50px 20px",
+        color: C.t4,
+        background: C.surface,
+        border: BD,
+        borderRadius: 12,
+        fontSize: 15
+      }
+    }, "이 날 등록된 일정이 없습니다."), byKind.map(g => /*#__PURE__*/React.createElement("div", {
+      key: g.f,
+      style: {
+        marginBottom: 14
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px",
+        borderRadius: 8,
+        background: g.c + "14",
+        border: `1px solid ${g.c}30`,
+        marginBottom: 8
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 14,
+        fontWeight: 800,
+        color: g.c
+      }
+    }, g.l), /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: "auto",
+        fontSize: 14,
+        fontWeight: 800,
+        color: g.c
+      }
+    }, g.items.length)), g.items.map((e, i) => /*#__PURE__*/React.createElement(EvRow, {
+      key: i,
+      e: e,
+      onClick: () => setSelDate(cursor)
+    })))));
+  };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      marginBottom: 14
+      alignItems: "flex-end",
+      gap: 10,
+      marginBottom: 12,
+      flexWrap: "wrap"
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      flex: 1,
+      minWidth: 120
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
       color: C.t3,
       letterSpacing: 2,
       fontWeight: 600,
@@ -3855,285 +4525,102 @@ function Calendar({
   }, "SCHEDULE"), /*#__PURE__*/React.createElement("h1", {
     style: {
       margin: 0,
-      fontSize: 22,
+      fontSize: isMobile ? 19 : 22,
       fontWeight: 900,
       color: C.t1
     }
-  }, "현장 일정"))), /*#__PURE__*/React.createElement("div", {
+  }, "현장 일정")), ViewToggle), /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "9px 14px",
+      display: "flex",
+      alignItems: "center",
+      gap: 7,
+      marginBottom: 12,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => shift(-1),
+    style: {
+      width: 42,
+      height: 42,
+      borderRadius: 9,
+      border: BD,
+      background: C.surface,
+      color: C.t2,
+      fontSize: 21,
+      fontWeight: 700,
+      cursor: "pointer",
+      flexShrink: 0
+    }
+  }, "‹"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setPickerOpen(true),
+    style: {
+      flex: 1,
+      minWidth: 130,
+      padding: "9px 12px",
+      borderRadius: 10,
+      border: `1.5px solid ${C.border}`,
+      background: C.surface,
+      cursor: "pointer",
+      textAlign: "center"
+    }
+  }, subtitle && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.t3,
+      fontWeight: 700
+    }
+  }, subtitle), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: isMobile ? 19 : 24,
+      fontWeight: 900,
+      color: C.t1,
+      letterSpacing: -.5
+    }
+  }, title, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 14,
+      color: C.t3,
+      marginLeft: 6
+    }
+  }, "▾"))), /*#__PURE__*/React.createElement("button", {
+    onClick: () => shift(1),
+    style: {
+      width: 42,
+      height: 42,
+      borderRadius: 9,
+      border: BD,
+      background: C.surface,
+      color: C.t2,
+      fontSize: 21,
+      fontWeight: 700,
+      cursor: "pointer",
+      flexShrink: 0
+    }
+  }, "›"), /*#__PURE__*/React.createElement("button", {
+    onClick: goToday,
+    style: {
+      padding: "11px 16px",
+      borderRadius: 9,
+      border: `1.5px solid ${C.blue}`,
+      background: C.blueL,
+      color: C.blue,
+      fontSize: 14,
+      fontWeight: 800,
+      cursor: "pointer",
+      flexShrink: 0
+    }
+  }, "오늘")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "9px 13px",
       background: C.blueL,
       border: `1px solid ${C.blue}30`,
       borderRadius: 8,
       fontSize: 13,
       color: C.blue,
       fontWeight: 600,
-      marginBottom: 14,
-      display: "flex",
-      alignItems: "center",
-      gap: 8
+      marginBottom: 12
     }
-  }, "🖱 일정 카드를 드래그해 날짜 변경 · 날짜 클릭 시 우측에 상세 표시"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 16,
-      flexDirection: isMobile ? "column" : "row"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1,
-      minWidth: 0
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      marginBottom: 10,
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: prevMonth,
-    style: {
-      width: isMobile ? 40 : 44,
-      height: isMobile ? 40 : 44,
-      borderRadius: 8,
-      border: BD,
-      background: C.surface,
-      color: C.t2,
-      fontSize: 20,
-      fontWeight: 700,
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      lineHeight: 1
-    }
-  }, "‹"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: isMobile ? 22 : 30,
-      fontWeight: 900,
-      color: C.t1,
-      minWidth: isMobile ? 140 : 180,
-      textAlign: "center",
-      letterSpacing: -0.5
-    }
-  }, yr, "년 ", mo, "월"), /*#__PURE__*/React.createElement("button", {
-    onClick: nextMonth,
-    style: {
-      width: isMobile ? 40 : 44,
-      height: isMobile ? 40 : 44,
-      borderRadius: 8,
-      border: BD,
-      background: C.surface,
-      color: C.t2,
-      fontSize: 20,
-      fontWeight: 700,
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      lineHeight: 1
-    }
-  }, "›"), /*#__PURE__*/React.createElement("button", {
-    onClick: goToday,
-    style: {
-      padding: isMobile ? "7px 14px" : "8px 16px",
-      borderRadius: 8,
-      border: `1.5px solid ${C.blue}`,
-      background: C.blueL,
-      color: C.blue,
-      fontSize: isMobile ? 12 : 14,
-      fontWeight: 800,
-      cursor: "pointer"
-    }
-  }, "오늘"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: isMobile ? "none" : "flex",
-      gap: 4,
-      marginLeft: 6
-    }
-  }, [2024, 2025, 2026, 2027].map(y => /*#__PURE__*/React.createElement("button", {
-    key: y,
-    onClick: () => setYr(y),
-    style: {
-      padding: "4px 9px",
-      borderRadius: 6,
-      border: `1px solid ${yr === y ? C.blue : C.border}`,
-      background: yr === y ? C.blueL : "transparent",
-      color: yr === y ? C.blue : C.t3,
-      fontSize: 13,
-      fontWeight: 600,
-      cursor: "pointer"
-    }
-  }, y))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: isMobile ? "none" : "flex",
-      gap: 3
-    }
-  }, Array.from({
-    length: 12
-  }, (_, i) => i + 1).map(m => /*#__PURE__*/React.createElement("button", {
-    key: m,
-    onClick: () => setMo(m),
-    style: {
-      width: 24,
-      height: 24,
-      borderRadius: 5,
-      border: `1px solid ${mo === m ? C.blue : C.border}`,
-      background: mo === m ? C.blueL : "transparent",
-      color: mo === m ? C.blue : C.t3,
-      fontSize: 12,
-      fontWeight: 600,
-      cursor: "pointer"
-    }
-  }, m)))), /*#__PURE__*/React.createElement("div", {
-    onWheel: onCalWheel,
-    onTouchStart: onCalTouchStart,
-    onTouchMove: onCalTouchMove,
-    onTouchEnd: onCalTouchEnd,
-    style: {
-      background: C.surface,
-      border: BD,
-      borderRadius: 12,
-      overflow: "hidden",
-      boxShadow: "0 2px 12px rgba(0,0,0,.06)",
-      touchAction: "pan-y"
-    }
-  }, /*#__PURE__*/React.createElement("table", {
-    style: {
-      width: "100%",
-      borderCollapse: "collapse",
-      tableLayout: "fixed"
-    }
-  }, /*#__PURE__*/React.createElement("colgroup", null, [0, 1, 2, 3, 4, 5, 6].map(i => /*#__PURE__*/React.createElement("col", {
-    key: i
-  }))), /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
-    style: {
-      background: C.surfaceL,
-      borderBottom: `1.5px solid ${C.borderD}`
-    }
-  }, DOW.map((d, i) => /*#__PURE__*/React.createElement("th", {
-    key: d,
-    style: {
-      padding: isMobile ? "9px 0" : "12px 0",
-      textAlign: "center",
-      fontSize: isMobile ? 12 : 15,
-      fontWeight: 800,
-      color: i === 0 ? C.red : i === 6 ? C.blue : C.t2,
-      letterSpacing: 1,
-      borderRight: i < 6 ? BD : "none",
-      fontFamily: F
-    }
-  }, d)))), /*#__PURE__*/React.createElement("tbody", null, weeks.map((week, wi) => /*#__PURE__*/React.createElement("tr", {
-    key: wi,
-    style: {
-      borderBottom: wi < weeks.length - 1 ? BD : "none"
-    }
-  }, week.map((day, di) => {
-    const evs = day ? eventsByDay[day] || [] : [];
-    const over = overDay === day && !!day;
-    const sel = selDay === day && !!day;
-    return /*#__PURE__*/React.createElement("td", {
-      key: di,
-      onClick: () => day && setSelDay(sel ? null : day),
-      onDragOver: e => {
-        e.preventDefault();
-        setOverDay(day);
-      },
-      onDragLeave: () => setOverDay(null),
-      onDrop: () => handleDrop(day),
-      style: {
-        padding: isMobile ? "6px 6px 5px" : "7px 8px 7px",
-        verticalAlign: "top",
-        height: isMobile ? 112 : 138,
-        width: "14.285%",
-        borderRight: di < 6 ? BD : "none",
-        cursor: day ? "pointer" : "default",
-        background: sel ? "rgba(29,111,242,.11)" : over ? "rgba(29,111,242,.09)" : isToday(day) ? "rgba(29,111,242,.05)" : "transparent",
-        outline: sel ? `2px solid ${C.blue}` : over ? `2px dashed ${C.blue}` : "none",
-        outlineOffset: -2,
-        transition: "background .1s",
-        position: "relative"
-      }
-    }, day && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: isMobile ? 30 : 38,
-        height: isMobile ? 30 : 38,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: "50%",
-        background: isToday(day) ? C.blue : "transparent",
-        color: isToday(day) ? "#fff" : di === 0 ? C.red : di === 6 ? C.blue : C.t1,
-        fontSize: isMobile ? 14 : 18,
-        fontWeight: isToday(day) ? 900 : 700,
-        marginBottom: isMobile ? 4 : 5,
-        boxShadow: isToday(day) ? `0 2px 8px ${C.blue}55` : "none"
-      }
-    }, day), over && /*#__PURE__*/React.createElement("div", {
-      style: {
-        position: "absolute",
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%,-60%)",
-        fontSize: 12,
-        color: C.blue,
-        fontWeight: 700,
-        pointerEvents: "none",
-        zIndex: 2,
-        background: C.blueL,
-        padding: "2px 7px",
-        borderRadius: 4,
-        border: `1px solid ${C.blue}30`
-      }
-    }, "놓기"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: isMobile ? 2 : 3
-      }
-    }, evs.slice(0, isMobile ? 3 : 99).map((e, ei) => /*#__PURE__*/React.createElement("div", {
-      key: ei,
-      draggable: true,
-      onDragStart: () => setDragging({
-        schoolId: e.schoolId,
-        field: e.field,
-        fromDay: day
-      }),
-      onDragEnd: () => {
-        setDragging(null);
-        setOverDay(null);
-      },
-      title: `${e.school} · ${e.label} · ${e.assignees.length > 0 ? e.assignees.join(",") : e.headcount + "명"}`,
-      style: {
-        padding: isMobile ? "2px 5px" : "3px 7px",
-        borderRadius: 4,
-        background: `${evColor(e.field)}15`,
-        borderLeft: `3px solid ${evColor(e.field)}`,
-        fontSize: isMobile ? 9 : 12,
-        color: evColor(e.field),
-        fontWeight: 700,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        cursor: "grab",
-        boxShadow: "0 1px 3px rgba(0,0,0,.07)",
-        opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? 0.4 : 1
-      }
-    }, /*#__PURE__*/React.createElement("span", null, e.school.length > (isMobile ? 4 : 11) ? e.school.slice(0, isMobile ? 4 : 11) + "…" : e.school), e.field === "end" && /*#__PURE__*/React.createElement("span", null, " 📦"), e.field === "start" && /*#__PURE__*/React.createElement("span", null, " ▶"), e.field === "field" && /*#__PURE__*/React.createElement("span", {
-      style: {
-        opacity: .85,
-        fontSize: isMobile ? 8 : 10
-      }
-    }, e.assignees.length > 0 ? ` (${e.assignees.map(n => n[0]).join("·")})` : ` ${e.headcount}명`))), evs.length > (isMobile ? 3 : 99) && /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: isMobile ? 9 : 11,
-        color: C.t4,
-        paddingLeft: 4
-      }
-    }, "+", evs.length - (isMobile ? 3 : 99), "건"))));
-  })))))), /*#__PURE__*/React.createElement("div", {
+  }, view === "month" ? "제목을 눌러 연·월 이동 · 일정 카드를 끌어 날짜 변경 · 좌우로 밀면 달 이동" : view === "week" ? "제목을 눌러 주 선택 · 날짜를 누르면 그날 상세 · 좌우로 밀면 주 이동" : "제목을 눌러 날짜 이동 · 좌우로 밀면 하루씩 이동"), view === "month" ? monthGrid() : view === "week" ? weekList() : dayList(), view === "month" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 14,
@@ -4154,8 +4641,8 @@ function Calendar({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      width: 10,
-      height: 10,
+      width: 11,
+      height: 11,
       borderRadius: 2,
       background: v
     }
@@ -4164,19 +4651,23 @@ function Calendar({
       fontSize: 12,
       color: C.t3
     }
-  }, k))), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: C.t4
-    }
-  }, "날짜를 누르면 그날 현장이 열려요 · 달력을 좌우로 밀면 달이 넘어갑니다"))), selDay && /*#__PURE__*/React.createElement(DayPanel, {
-    dateStr: toStr(selDay),
-    label: selLabel,
+  }, k)))), selDate && /*#__PURE__*/React.createElement(DayPanel, {
+    dateStr: selDate,
+    label: (() => {
+      const d = parseD(selDate);
+      return `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`;
+    })(),
     allSchools: allSchools,
     setDb: setDb,
-    onClose: () => setSelDay(null),
+    onClose: () => setSelDate(null),
     isMobile: isMobile
-  })), /*#__PURE__*/React.createElement(Toast, {
+  }), pickerOpen && /*#__PURE__*/React.createElement(PeriodPicker, {
+    view: view,
+    cursor: cursor,
+    isMobile: isMobile,
+    onPick: setCursor,
+    onClose: () => setPickerOpen(false)
+  }), /*#__PURE__*/React.createElement(Toast, {
     msg: toast
   }));
 }
