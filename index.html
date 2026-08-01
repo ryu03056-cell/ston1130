@@ -663,6 +663,11 @@ function LastEdit({
   }, "🕘 ", le.by, " · ", agoText(le.at), le.what ? ` · ${le.what}` : "");
 }
 const STEPS = ["착수계", "현장조사", "기타자료", "보고서", "검토", "제본", "납품", "완수"];
+/* 진행 단계 이름과 일정(날짜) 이름이 겹쳐 헷갈리지 않도록, 화면에 쓰는 표기를 따로 둔다 */
+const STEP_DESC = {
+  납품: "납품 완료",
+  완수: "완수(용역 종료)"
+};
 const STEP_ICON = {
   착수계: "📝",
   현장조사: "📍",
@@ -1972,29 +1977,54 @@ function xlDate(v) {
    · A~Z 는 원본 양식, AB~AF 는 앱 전용 정보(담당자·진행 등)
 ══════════════════════════════════════════════════════════════ */
 const XL_FONT = "맑은 고딕";
-const xlBorder = st => ({
+/* 원본 파일에서 직접 추출한 색 (테마색 + tint 를 실제 RGB 로 환산) */
+const XLC = {
+  /* 26년(하) 1행 범례 — 테마색을 실제 RGB 로 환산한 값 */
+  legendContract: "FFFEE9D8",
+  // 계약완료 (연주황)
+  legendField: "FFE7EAEA",
+  // 현장조사완료 (연회색)
+  legendDeliver: "FFA6A6A6",
+  // 납품완료 (회색)
+  /* 달력 시트에서 실제로 칠해진 색 (원본에 rgb 로 직접 지정돼 있음) */
+  calDone: "FFFEF3FF",
+  // 완수 (연보라)
+  calField: "FFE7EAEA",
+  // 현장조사 (연회색)
+  calDeliver: "FFEBF7FF",
+  // 납품 (연하늘)
+  header: "FFD9D9D9",
+  // 날짜(구분) 행 배경
+  line: "FF000000",
+  sat: "FF0070C0",
+  sun: "FFFF0000"
+};
+/* 달력 시트 글꼴 — 원본과 동일 (없는 PC 에서는 맑은 고딕으로 대체된다) */
+const CAL_FONT = "KoddiUD 온고딕 ExtraBold";
+const CAL_FONT_B = "KoddiUD 온고딕 Bold";
+const xlBorder = (top, bottom) => ({
   top: {
-    style: st,
+    style: top,
     color: {
-      rgb: "FFBFBFBF"
+      rgb: XLC.line
     }
   },
   bottom: {
-    style: st,
+    style: bottom || top,
     color: {
-      rgb: "FFBFBFBF"
+      rgb: XLC.line
     }
   },
   left: {
     style: "thin",
     color: {
-      rgb: "FF808080"
+      rgb: XLC.line
     }
   },
   right: {
     style: "thin",
     color: {
-      rgb: "FF808080"
+      rgb: XLC.line
     }
   }
 });
@@ -2074,6 +2104,8 @@ function buildSheet(schools) {
     schoolRow[24] = notes;
     schoolRow[25] = s.memo || "";
     /* 앱 전용 (AB~AF) */
+    /* AA열 — 달력 시트가 FILTER 로 끌어가는 표시 문자열 (원본과 동일한 수식) */
+    schoolRow[26] = null; // 수식은 아래에서 직접 넣는다
     schoolRow[27] = (s.assignees || []).join(", ");
     schoolRow[28] = s.tel || "";
     schoolRow[29] = getFlags(s).join(",");
@@ -2110,11 +2142,19 @@ function buildSheet(schools) {
   });
   /* 열 너비 — 원본 값 */
   ws["!cols"] = [4.6, 4.6, 12.6, 5.6, 29.5, 29, 6.6, 6.6, 6.6, 10.6, 8.6, 8.6, 8.6, 8.6, 10.6, 10.6, 10.6, 10.6, 4.6, 5.6, 5.6, 12.6, 12.6, 4.6, 45.6, 12, 2, 16, 13, 10, 22, 6, 8].map(w => ({
-    wch: w
+    wch: Math.max(1, w - 0.8)
   }));
-  ws["!rows"] = aoa.map(() => ({
-    hpt: 20.1
-  }));
+  /* 시설물 행은 접어 둔다 — 왼쪽 [+] 버튼으로 펼쳐 볼 수 있게 (원본과 동일) */
+  ws["!rows"] = aoa.map((_, i) => {
+    const row = rows.find(x => x.r === i);
+    return row && row.kind === "bld" ? {
+      hpt: 20.1,
+      level: 1,
+      hidden: true
+    } : {
+      hpt: 20.1
+    };
+  });
   /* 2단 헤더 병합 (원본과 동일) */
   const M = (r1, c1, r2, c2) => ({
     s: {
@@ -2154,6 +2194,20 @@ function buildSheet(schools) {
       }
     })
   };
+  /* AA열 수식 — 학교행마다 "No. 지역 학교명 (건축/토목종/토목소) - 완수/납품" 을 만든다.
+     달력 시트가 이 값을 날짜로 걸러서 가져간다. */
+  rows.forEach(row => {
+    if (row.kind !== "school") return;
+    const n = row.r + 1; // 엑셀 행번호(1-based)
+    const a = XLSX.utils.encode_cell({
+      r: row.r,
+      c: 26
+    });
+    ws[a] = {
+      t: "s",
+      f: `B${n}&". "&D${n}&" "&E${n}&" ("&G${n}&"/"&H${n}&"/"&I${n}&")"&" - "&S${n}&"/"&T${n}`
+    };
+  });
   const put = (r, c, st) => {
     const a = XLSX.utils.encode_cell({
       r,
@@ -2167,9 +2221,9 @@ function buildSheet(schools) {
   };
   /* 1행 범례 — 원본의 세 가지 색 */
   const LEGEND = {
-    3: "FFFEF3FF",
-    4: "FFEBF7FF",
-    5: "FFE8F7F2"
+    3: XLC.legendContract,
+    4: XLC.legendField,
+    5: XLC.legendDeliver
   };
   for (let c = 0; c < nC; c++) put(0, c, LEGEND[c] ? {
     font: {
@@ -2185,8 +2239,7 @@ function buildSheet(schools) {
       fgColor: {
         rgb: LEGEND[c]
       }
-    },
-    border: xlBorder("thin")
+    }
   } : {
     font: {
       name: XL_FONT,
@@ -2197,7 +2250,8 @@ function buildSheet(schools) {
   for (let r = 1; r <= 2; r++) for (let c = 0; c < nC; c++) put(r, c, {
     font: {
       name: XL_FONT,
-      sz: 10,
+      sz: r === 2 ? 8 : 10,
+      // 3행(세부 항목)은 8pt
       bold: true,
       color: {
         rgb: "FF000000"
@@ -2212,7 +2266,7 @@ function buildSheet(schools) {
     fill: {
       patternType: "solid",
       fgColor: {
-        rgb: c >= 27 ? "FFF2F2F2" : "FFFFFFFF"
+        rgb: XLC.header
       }
     }
   });
@@ -2244,17 +2298,7 @@ function buildSheet(schools) {
           vertical: "center",
           wrapText: c === 24
         },
-        border: {
-          ...xlBorder("hair"),
-          ...(row.last ? {
-            bottom: {
-              style: "thin",
-              color: {
-                rgb: "FF808080"
-              }
-            }
-          } : {})
-        }
+        border: xlBorder(row.kind === "school" ? "thin" : "hair", row.last ? "thin" : "hair")
       };
       if (DATE_C.has(c) && ws[a].t === "d") ws[a].z = "mm-dd-yy";
       if (c === 11 && typeof ws[a].v === "number") ws[a].z = "#,##0.00";
@@ -2828,234 +2872,302 @@ function buildScheduleSheet(entries) {
   return buildAuxSheet(headers, rows, meta);
 }
 
-/* 현장일정 캘린더 시트 — 월별 달력. 각 날짜 칸에 일정(조사/착수/완수)·현장명·담당자. entries:[{yr,half,schools}] */
-function buildCalendarSheet(entries) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tkey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const LABEL = {
-    현장조사: "조사",
-    착수: "착수",
-    완수: "완수"
-  };
-  const byDay = {}; // dk -> ["조사·성남중 (한상오,채승준)", ...]
-  const seen = new Set();
-  const addEv = (d, type, s) => {
-    const k = String(d || "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
-    /* 같은 현장·같은 날·같은 종류는 한 번만 (이월본이 상·하반기 양쪽에 있어도 중복 표시 안 됨) */
-    const dedup = `${k}|${type}|${(s.school || "").trim()}`;
-    if (seen.has(dedup)) return;
-    seen.add(dedup);
-    const who = (s.assignees || []).join(",");
-    (byDay[k] = byDay[k] || []).push(`${LABEL[type]}·${s.school || ""}${who ? ` (${who})` : ""}`);
-  };
+/* ══════════════════════════════════════════════════════════════
+   월 달력 시트 — 회사 양식(9월달력)과 같은 형태
+   · 월요일 시작 · 한 주가 5줄: 구분 / 현장조사 / 조사인원 / 완수일 / 납품
+   · 날짜별로 해당 일정의 현장명을 쌓아 넣는다
+══════════════════════════════════════════════════════════════ */
+/* 일정이 들어 있는 달 목록 — 최대 6개까지 (시트가 너무 많아지지 않게) */
+/* 데이터 시트의 대략 행 수 — 달력 수식의 참조 범위를 잡는 데 쓴다 */
+function dataRowCount(schools) {
+  return (schools || []).reduce((a, s) => a + 1 + (s.buildings || []).length, 0) + 4;
+}
+function calMonths(entries) {
+  const cnt = {};
   entries.forEach(({
     schools
   }) => (schools || []).forEach(s => {
-    addEv(s.field, "현장조사", s);
-    addEv(s.start, "착수", s);
-    addEv(s.end, "완수", s);
+    if (s.deleted) return;
+    [s.field, s.end, s.deliverDate].forEach(d => {
+      const k = String(d || "").slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(k)) cnt[k] = (cnt[k] || 0) + 1;
+    });
   }));
-  const keys = Object.keys(byDay).sort();
-  if (!keys.length) {
-    const w0 = XLSX.utils.aoa_to_sheet([["등록된 현장일정이 없습니다."]]);
-    w0["!cols"] = [{
-      wch: 40
-    }];
-    return w0;
+  return Object.keys(cnt).sort().slice(-6).map(k => ({
+    y: +k.slice(0, 4),
+    m: +k.slice(5, 7)
+  }));
+}
+function buildCalendarSheet(entries, ym, dataSheetName, dataRows) {
+  const today = new Date();
+  /* 데이터 시트와 수식으로 연결한다 (원본 방식).
+     시트명이 주어지면 FILTER 수식을, 아니면 계산된 값을 넣는다. */
+  const SN = dataSheetName ? `'${dataSheetName}'!` : "";
+  const LAST = Math.max(200, (dataRows || 0) + 10);
+  const formula = (dateCell, colLetter, srcCol) => `_xlfn.TEXTJOIN(CHAR(10),TRUE,_xlfn._xlws.FILTER(${SN}$${srcCol || "AA"}$4:$${srcCol || "AA"}$${LAST},${SN}$${colLetter}$4:$${colLetter}$${LAST}=${dateCell},""))`;
+  let Y = ym && ym.y,
+    M = ym && ym.m;
+  if (!Y || !M) {
+    const key = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}`;
+    Y = +key.slice(0, 4);
+    M = +key.slice(5, 7);
   }
-  const WD = ["일", "월", "화", "수", "목", "금", "토"];
-  const FNT = "맑은 고딕";
-  const thin = c => ({
-    style: "thin",
-    color: {
-      rgb: c
+
+  /* 날짜별 수집 — 조사 / 조사인원 / 완수 / 납품 */
+  const byDay = {};
+  const add = (d, kind, text) => {
+    const k = String(d || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+    (byDay[k] = byDay[k] || {
+      조사: [],
+      인원: [],
+      완수: [],
+      납품: []
+    })[kind].push(text);
+  };
+  const seen = new Set();
+  entries.forEach(({
+    schools
+  }) => (schools || []).forEach(s => {
+    if (s.deleted) return;
+    const nm = (s.school || "").trim();
+    const mark = `${isNewSite(s) ? "[신규] " : ""}${nm}`;
+    const uk = (d, t) => `${d}|${t}|${nm}`;
+    if (s.field && !seen.has(uk(s.field, "조사"))) {
+      seen.add(uk(s.field, "조사"));
+      add(s.field, "조사", mark);
+      add(s.field, "인원", (s.assignees || []).join(",") || "미배정");
     }
-  });
-  const bd = c => ({
-    top: thin(c),
-    bottom: thin(c),
-    left: thin(c),
-    right: thin(c)
-  });
-  const fill = h => ({
-    patternType: "solid",
-    fgColor: {
-      rgb: h
+    if (s.end && !seen.has(uk(s.end, "완수"))) {
+      seen.add(uk(s.end, "완수"));
+      add(s.end, "완수", mark);
     }
-  });
+    if (s.deliverDate && !seen.has(uk(s.deliverDate, "납품"))) {
+      seen.add(uk(s.deliverDate, "납품"));
+      add(s.deliverDate, "납품", mark);
+    }
+  }));
+
+  /* 월요일 시작 격자 (원본과 동일) */
+  const first = new Date(Y, M - 1, 1, 12);
+  const gridStart = addDays(first, -((first.getDay() + 6) % 7));
   const aoa = [],
-    rowH = [],
-    merges = [],
-    styles = {};
+    styles = {},
+    rowH = [];
   const setS = (r, c, st) => {
     styles[`${r}_${c}`] = st;
   };
-  const [fy, fm] = keys[0].split("-").map(Number);
-  const [ly, lm] = keys[keys.length - 1].split("-").map(Number);
-  let y = fy,
-    m = fm;
-  while (y < ly || y === ly && m <= lm) {
-    const monthKeys = keys.filter(k => {
-      const a = k.split("-");
-      return +a[0] === y && +a[1] === m;
-    });
-    if (monthKeys.length) {
-      /* 제목 */
-      const rT = aoa.length;
-      aoa.push([`${y}년 ${m}월`, "", "", "", "", "", ""]);
-      merges.push({
-        s: {
-          r: rT,
-          c: 0
-        },
-        e: {
-          r: rT,
-          c: 6
+  const bd = {
+    top: {
+      style: "thin",
+      color: {
+        rgb: XLC.line
+      }
+    },
+    bottom: {
+      style: "thin",
+      color: {
+        rgb: XLC.line
+      }
+    },
+    left: {
+      style: "thin",
+      color: {
+        rgb: XLC.line
+      }
+    },
+    right: {
+      style: "thin",
+      color: {
+        rgb: XLC.line
+      }
+    }
+  };
+  const solid = rgb => ({
+    patternType: "solid",
+    fgColor: {
+      rgb
+    }
+  });
+  const FT = (bold, color) => ({
+    name: bold ? CAL_FONT : CAL_FONT_B,
+    sz: 10,
+    color: {
+      rgb: color || "FF000000"
+    }
+  });
+
+  /* 1행: YEAR / MONTH 머리 (원본은 H1·I1) */
+  const r1 = new Array(10).fill("");
+  r1[7] = "YEAR";
+  r1[8] = "MONTH";
+  aoa.push(r1);
+  [7, 8].forEach(c => setS(0, c, {
+    font: FT(true),
+    alignment: {
+      horizontal: "center",
+      vertical: "center"
+    }
+  }));
+  rowH.push({
+    hpt: 20.1
+  });
+
+  /* 2행: 범례 + 연·월 값 (원본 B2·C2·D2 / H2·I2) */
+  const r2 = new Array(10).fill("");
+  r2[1] = "현장조사";
+  r2[2] = "완수";
+  r2[3] = "납품 완료";
+  r2[7] = Y;
+  r2[8] = M;
+  aoa.push(r2);
+  setS(1, 1, {
+    font: {
+      name: XL_FONT,
+      sz: 10,
+      bold: true
+    },
+    alignment: {
+      horizontal: "center",
+      vertical: "center"
+    }
+  });
+  setS(1, 2, {
+    font: {
+      name: XL_FONT,
+      sz: 10,
+      bold: true
+    },
+    fill: solid(XLC.calField),
+    alignment: {
+      horizontal: "center",
+      vertical: "center"
+    }
+  });
+  setS(1, 3, {
+    font: {
+      name: XL_FONT,
+      sz: 10,
+      bold: true
+    },
+    fill: solid(XLC.calDone),
+    alignment: {
+      horizontal: "center",
+      vertical: "center"
+    }
+  });
+  [7, 8].forEach(c => setS(1, c, {
+    font: FT(true),
+    alignment: {
+      horizontal: "center",
+      vertical: "center"
+    }
+  }));
+  rowH.push({
+    hpt: 20.1
+  });
+  aoa.push(new Array(10).fill(""));
+  rowH.push({
+    hpt: 20.1
+  });
+
+  /* 주 단위 5줄: 구분 / 현장조사 / 조사인원 / 완수일 / 납품 */
+  const LABELS = [["구분", null], ["현장조사", "조사"], ["조사인원", "인원"], ["완수일", "완수"], ["납품", "납품"]];
+  /* 수식이 참조할 데이터 시트 열 — P 현장조사일 / Q 완수일 / R 납품일자 */
+  const FCOL = {
+    조사: "P",
+    완수: "Q",
+    납품: "R"
+  };
+  /* 조사인원은 담당자 열(AC)을 현장조사일(P) 기준으로 가져온다 */
+  const FSRC = {
+    인원: "AC"
+  };
+  const fcells = [];
+  /* 행 배경 — 원본: 완수일행 연하늘, 납품행 연보라 */
+  const ROWFILL = {
+    조사: null,
+    인원: null,
+    완수: XLC.calDeliver,
+    납품: XLC.calDone
+  };
+  for (let w = 0; w < 6; w++) {
+    const ws0 = addDays(gridStart, w * 7);
+    const inMonth = Array.from({
+      length: 7
+    }, (_, i) => addDays(ws0, i)).some(d => d.getMonth() + 1 === M && d.getFullYear() === Y);
+    if (!inMonth) continue;
+    LABELS.forEach(([label, kind]) => {
+      const row = new Array(10).fill("");
+      row[1] = label;
+      let maxLines = 1;
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(ws0, i);
+        const c = 2 + i;
+        if (kind === null) row[c] = d;else {
+          const list = (byDay[dstr(d)] || {})[kind] || [];
+          row[c] = list.join("\n");
+          maxLines = Math.max(maxLines, list.length || 1);
         }
+      }
+      const r = aoa.length;
+      aoa.push(row);
+      /* 수식으로 연결할 칸 기록 (조사·완수·납품) */
+      if (SN && (FCOL[kind] || FSRC[kind])) for (let i = 0; i < 7; i++) fcells.push({
+        r,
+        c: 2 + i,
+        dateRow: r - LABELS.findIndex(x => x[1] === kind),
+        col: FCOL[kind] || "P",
+        src: FSRC[kind] || "AA"
       });
-      setS(rT, 0, {
-        font: {
-          name: FNT,
-          sz: 13,
-          bold: true,
-          color: {
-            rgb: "FFFFFFFF"
-          }
-        },
-        fill: fill("FF1D6FF2"),
+      rowH.push({
+        hpt: kind === null ? 20.1 : Math.max(20.1, maxLines * 14 + 6)
+      });
+      /* 라벨 칸 */
+      setS(r, 1, {
+        font: FT(true, kind === "완수" ? XLC.sun : null),
+        ...(kind === null || ROWFILL[kind] ? {
+          fill: solid(kind === null ? XLC.header : ROWFILL[kind])
+        } : {}),
         alignment: {
           horizontal: "center",
           vertical: "center"
         },
-        border: bd("FF1559C9")
+        border: bd
       });
-      rowH[rT] = {
-        hpt: 26
-      };
-      /* 요일 헤더 */
-      const rW = aoa.length;
-      aoa.push(WD.slice());
-      WD.forEach((w, c) => setS(rW, c, {
-        font: {
-          name: FNT,
-          sz: 10,
-          bold: true,
-          color: {
-            rgb: "FF1A2332"
-          }
-        },
-        fill: fill("FFF0F4FA"),
-        alignment: {
-          horizontal: "center",
-          vertical: "center"
-        },
-        border: bd("FFD5DEEA")
-      }));
-      rowH[rW] = {
-        hpt: 20
-      };
-      /* 주차별 — 한 칸에 날짜 + 그날 일정 전부 */
-      const firstDow = new Date(y, m - 1, 1).getDay();
-      const daysIn = new Date(y, m, 0).getDate();
-      const weeks = Math.ceil((firstDow + daysIn) / 7);
-      for (let w = 0; w < weeks; w++) {
-        const vals = [],
-          meta = [];
-        let maxLines = 1;
-        for (let c = 0; c < 7; c++) {
-          const idx = w * 7 + c;
-          const dnum = idx - firstDow + 1;
-          if (idx < firstDow || dnum > daysIn) {
-            vals.push("");
-            meta.push({
-              c,
-              blank: true
-            });
-            continue;
-          }
-          const dk = `${y}-${String(m).padStart(2, "0")}-${String(dnum).padStart(2, "0")}`;
-          const es = byDay[dk] || [];
-          vals.push([String(dnum), ...es].join("\n"));
-          maxLines = Math.max(maxLines, 1 + es.length);
-          meta.push({
-            c,
-            dow: c,
-            has: es.length > 0,
-            today: dk === tkey
-          });
-        }
-        const rR = aoa.length;
-        aoa.push(vals);
-        rowH[rR] = {
-          hpt: Math.max(40, maxLines * 14 + 8)
-        };
-        /* 날짜 칸은 색 없이 흰 배경 · 검정 글자 (제목/요일 머리만 색). 오늘만 굵은 테두리로 표시 */
-        meta.forEach(dm => {
-          setS(rR, dm.c, {
-            font: {
-              name: FNT,
-              sz: 9,
-              bold: !!dm.today,
-              color: {
-                rgb: dm.blank ? "FFB8C0CC" : "FF1A2332"
-              }
-            },
-            fill: fill("FFFFFFFF"),
-            alignment: {
-              horizontal: "left",
-              vertical: "top",
-              wrapText: true
-            },
-            border: dm.today ? {
-              top: {
-                style: "medium",
-                color: {
-                  rgb: "FF1559C9"
-                }
-              },
-              bottom: {
-                style: "medium",
-                color: {
-                  rgb: "FF1559C9"
-                }
-              },
-              left: {
-                style: "medium",
-                color: {
-                  rgb: "FF1559C9"
-                }
-              },
-              right: {
-                style: "medium",
-                color: {
-                  rgb: "FF1559C9"
-                }
-              }
-            } : bd("FFE0E6EE")
-          });
+      /* 날짜 칸 */
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(ws0, i);
+        const c = 2 + i;
+        const other = d.getMonth() + 1 !== M || d.getFullYear() !== Y;
+        const dowColor = i === 5 ? XLC.sat : i === 6 ? XLC.sun : null;
+        setS(r, c, {
+          font: kind === null ? FT(true, other ? "FFA6A6A6" : dowColor) : FT(false, kind === "완수" ? XLC.sun : null),
+          ...(kind === null || ROWFILL[kind] ? {
+            fill: solid(kind === null ? XLC.header : ROWFILL[kind])
+          } : {}),
+          alignment: {
+            horizontal: kind === null ? "center" : "left",
+            vertical: "center",
+            wrapText: kind !== null
+          },
+          border: bd,
+          ...(kind === null ? {
+            numFmt: "m-d"
+          } : {})
         });
       }
-      aoa.push(new Array(7).fill(""));
-      rowH[aoa.length - 1] = {
-        hpt: 8
-      };
-    }
-    m++;
-    if (m > 12) {
-      m = 1;
-      y++;
-    }
+    });
   }
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = new Array(7).fill(0).map(() => ({
-    wch: 22
-  }));
-  ws["!merges"] = merges;
-  ws["!rows"] = aoa.map((_, i) => rowH[i] || {
-    hpt: 16
+  const ws = XLSX.utils.aoa_to_sheet(aoa, {
+    cellDates: true
   });
+  /* 열 너비 — 원본: A 9 / B 10.6 / 날짜칸 20.6 (D 는 50.6) */
+  /* 엑셀은 지정값에 0.8 을 더해 저장하므로 원본 너비에서 미리 빼둔다 */
+  ws["!cols"] = [9, 10.6, 20.6, 50.6, 20.6, 20.6, 20.6, 20.6, 20.6, 9].map(w => ({
+    wch: Math.max(1, w - 0.8)
+  }));
+  ws["!rows"] = rowH;
   Object.entries(styles).forEach(([rc, st]) => {
     const p = rc.split("_");
     const a = XLSX.utils.encode_cell({
@@ -3066,7 +3178,30 @@ function buildCalendarSheet(entries) {
       t: "s",
       v: ""
     };
-    ws[a].s = st;
+    const {
+      numFmt,
+      ...rest
+    } = st;
+    ws[a].s = rest;
+    if (numFmt) ws[a].z = numFmt;
+  });
+  /* 데이터 시트와 수식으로 연결 — 시설물 리스트를 고치면 달력도 따라 바뀐다 */
+  fcells.forEach(fc => {
+    const a = XLSX.utils.encode_cell({
+      r: fc.r,
+      c: fc.c
+    });
+    const dateRef = XLSX.utils.encode_cell({
+      r: fc.dateRow,
+      c: fc.c
+    });
+    const keep = ws[a] && ws[a].s;
+    ws[a] = {
+      t: "s",
+      v: ws[a] && ws[a].v || "",
+      f: formula(dateRef, fc.col, fc.src)
+    };
+    if (keep) ws[a].s = keep;
   });
   return ws;
 }
@@ -3952,7 +4087,7 @@ const addDays = (d, n) => {
 };
 const startOfWeek = d => addDays(d, -d.getDay()); // 일요일 시작
 const DOW = ["일", "월", "화", "수", "목", "금", "토"];
-const EV_KINDS = [["field", "조사", "#1D6FF2"], ["start", "착수", "#0D9B6C"], ["deliverDate", "납품", "#7C3AED"], ["end", "완수", "#B58A00"]];
+const EV_KINDS = [["start", "착수", "#0D9B6C"], ["field", "조사", "#1D6FF2"], ["deliverDate", "납품", "#7C3AED"], ["end", "완수", "#B58A00"]];
 /* 종류별 표식 — 색만으로는 4가지가 헷갈려서 모양을 함께 쓴다 */
 const EV_MARK = {
   field: "◆",
@@ -5686,7 +5821,14 @@ function EditPanel({
         color: on ? col : C.t2,
         flex: 1
       }
-    }, k), sp && /*#__PURE__*/React.createElement("span", {
+    }, k, STEP_DESC[k] && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        fontWeight: 600,
+        color: C.t4,
+        marginLeft: 5
+      }
+    }, STEP_DESC[k])), sp && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 11,
         fontWeight: 700,
@@ -8255,7 +8397,8 @@ function ExportImportPage({
       schools
     }];
     XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn); // 시설물 리스트
-    XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries), "현장일정"); // 현장일정(달력)
+    /* 일정이 있는 달마다 달력 시트를 만든다 (원본의 '9월달력' 형식) */
+    calMonths(entries).forEach(m => XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries, m, sn, dataRowCount(schools)), `${m.m}월달력`));
     XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정(목록)"); // 현장일정(목록)
     XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표"); // 예산표
     XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항"); // 특이사항
@@ -8276,7 +8419,10 @@ function ExportImportPage({
       });
     }));
     if (!entries.length) return;
-    XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries), "현장일정"); // 전체 현장일정(달력)
+    /* 시트가 여러 개일 땐 가장 큰 반기 시트에 연결한다 */
+    const main = entries.slice().sort((a, b) => (b.schools || []).length - (a.schools || []).length)[0];
+    const mainName = main ? `${String(main.yr).slice(2)}년(${main.half === "상반기" ? "상" : "하"})` : null;
+    calMonths(entries).forEach(m => XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries, m, mainName, main ? dataRowCount(main.schools) : 0), `${m.m}월달력`));
     XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정(목록)"); // 전체 현장일정(목록)
     XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표"); // 전체 예산표
     XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항"); // 전체 특이사항
