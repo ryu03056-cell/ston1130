@@ -110,6 +110,48 @@ const memberColor = () => C.t1;
 const CAT_LH = "LH";
 const isLH = yr => String(yr) === CAT_LH;
 
+/* 시설물 분류 — 엑셀의 시설물 개수(건축물 / 토목(종) / 토목(소)) 집계에 쓰인다.
+   값이 없는 예전 데이터는 건축물로 본다. */
+const CATS = [{
+  v: "건축",
+  label: "건축물",
+  short: "건축",
+  color: "#1D6FF2"
+}, {
+  v: "토목종",
+  label: "토목(종)",
+  short: "토목종",
+  color: "#0D9B6C"
+}, {
+  v: "토목소",
+  label: "토목(소)",
+  short: "토목소",
+  color: "#B58A00"
+}];
+const bldCat = b => {
+  const c = b && b.cat;
+  return c === "토목종" || c === "토목소" ? c : "건축";
+};
+/* 이름·종별로 분류 추정 — 엑셀에서 가져올 때 첫 값을 잡아준다 */
+const guessCat = (name, jong) => {
+  const t = `${name || ""}`;
+  if (/옹벽|사면|석축|절토|성토|용벽/.test(t)) return /소규모|소규모시설/.test(`${jong || ""}`) ? "토목소" : "토목종";
+  if (/교량|터널|지하차도|육교|배수로|암거/.test(t)) return "토목종";
+  return "건축";
+};
+/* 학교의 시설물 개수 — [건축물, 토목(종), 토목(소)] */
+const catCounts = s => {
+  const out = {
+    건축: 0,
+    토목종: 0,
+    토목소: 0
+  };
+  (s && s.buildings || []).forEach(b => {
+    out[bldCat(b)]++;
+  });
+  return out;
+};
+
 /* 현장 표시(드론·1년·피난) — 학교 단위, 중복 선택 가능 */
 const FLAG_OPTS = [{
   v: "드론",
@@ -124,6 +166,10 @@ const FLAG_OPTS = [{
   label: "🚪 피난",
   color: C.purple
 }];
+/* 신규 현장 — 엑셀 A열 '점검회차'가 '신규'이면 표시.
+   신규는 보고서 작성에 시간이 더 들어 눈에 띄어야 한다. */
+const isNewSite = s => !!(s && (s.isNew || String(s.round || "").includes("신규")));
+
 const getFlags = s => {
   if (Array.isArray(s?.flags)) return s.flags;
   /* 예전 데이터 호환: 동별 flag(●=드론)를 학교 단위로 합침 */
@@ -1565,14 +1611,14 @@ function parseSheet(ws) {
     defval: null
   });
   const clean = v => v == null ? "" : String(v).replace(/\u00a0/g, " ").trim();
-  /* 헤더 매칭용 정규화: 한글·영문·숫자만 남기고 소문자화 */
   const norm = v => clean(v).toLowerCase().replace(/[^a-z0-9가-힣]/g, "");
 
-  /* 1) 헤더 행 자동 탐지 — 알려진 머리글 단어가 가장 많은 행 (앞 8행 내) */
-  const HKEYS = ["학교", "시설물명", "번호", "no", "지역", "착수", "준공", "완수", "현장조사", "연면적", "시설명", "동명", "특기", "점검종류", "납품"];
+  /* 1) 헤더 행 찾기 — 회사 양식은 2단(예: 2행 '학교명', 3행 '층수')이라
+        위아래 두 줄을 합쳐서 한 줄처럼 본다. */
+  const HKEYS = ["학교", "시설물명", "번호", "no", "지역", "착수", "준공", "완수", "현장조사", "연면적", "시설명", "동명", "특기", "점검종류", "납품", "종별", "층수", "회차"];
   let hIdx = -1,
     best = 0;
-  for (let i = 0; i < Math.min(rows.length, 8); i++) {
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
     const cells = (rows[i] || []).map(norm);
     const score = cells.filter(c => c && HKEYS.some(k => c.includes(k))).length;
     if (score > best) {
@@ -1580,144 +1626,204 @@ function parseSheet(ws) {
       hIdx = i;
     }
   }
-  if (hIdx < 0 || best < 3) return []; // 인식 불가 시트
-  const H = (rows[hIdx] || []).map(norm);
+  if (hIdx < 0 || best < 3) return [];
 
-  /* 2) 머리글 이름으로 열 위치 매핑 (연도별 양식 차이 흡수) */
+  /* 헤더 두 줄 합치기 (아래줄이 세부 항목: 건축물/토목, 층수/연면적, ID/PW …) */
+  const H0 = (rows[hIdx] || []).map(norm);
+  const H1 = (rows[hIdx + 1] || []).map(norm);
+  const twoRow = H1.filter(Boolean).length >= 3 && H1.some(h => ["층수", "연면적", "건축물", "id", "pw", "유무", "방법"].some(k => h.includes(k)));
+  const width = Math.max(H0.length, H1.length);
+  const H = [];
+  for (let c = 0; c < width; c++) H.push(((H0[c] || "") + (twoRow ? H1[c] || "" : "")).trim());
+  const dataStart = hIdx + (twoRow ? 2 : 1);
+
+  /* 2) 열 위치 찾기 */
   const idxInc = (...keys) => H.findIndex(h => h && keys.some(k => h.includes(k)));
   const idxEq = (...keys) => H.findIndex(h => h && keys.some(k => h === k));
   const col = {
+    round: idxInc("점검회차", "회차"),
     no: (() => {
-      const e = idxEq("no", "번호");
+      const e = idxEq("no", "번호", "no.");
       return e >= 0 ? e : idxInc("번호");
     })(),
     kind: idxInc("점검종류"),
     region: idxInc("지역"),
     school: (() => {
-      let i = H.findIndex(h => h.includes("학교명") || h.includes("시설물명"));
+      const i = H.findIndex(h => h.includes("학교명") || h.includes("시설물명") && !h.includes("개수"));
       return i >= 0 ? i : idxInc("학교");
     })(),
-    building: idxEq("시설명", "동명"),
+    building: (() => {
+      const e = idxEq("시설명", "동명", "시설물명");
+      return e >= 0 ? e : -1;
+    })(),
+    cntB: idxInc("시설물개수건축물", "개수건축물"),
+    cntT1: idxInc("토목종"),
+    cntT2: idxInc("토목소"),
+    jong: idxEq("종별"),
     floor: idxInc("층수"),
     area: idxInc("연면적"),
+    length: idxInc("연장"),
     height: idxInc("높이"),
-    length: idxInc("길이"),
-    jong: idxInc("종별"),
-    field: idxInc("현장조사"),
     start: idxInc("착수"),
-    end: idxInc("완수", "준공"),
-    fms: H.findIndex(h => h.includes("fms") && h.includes("아이디")),
-    flag: idxInc("드론", "피난", "1년", "위치도"),
-    note: idxInc("특기"),
-    rep: H.findIndex(h => h.includes("보고서") && h.includes("완료")),
+    field: idxInc("현장조사"),
+    end: idxInc("완수일", "준공"),
+    deliverDate: idxInc("납품일자", "납품일"),
+    doneYN: idxInc("완수유무"),
+    delivYN: idxInc("납품유무"),
     delivery: idxInc("납품방법"),
+    fmsId: (() => {
+      const i = H.findIndex(h => h.includes("fms") && h.includes("id"));
+      return i >= 0 ? i : H.findIndex(h => h.includes("fms") && h.includes("아이디"));
+    })(),
+    fmsPw: H.findIndex(h => h.includes("fms") && (h.includes("pw") || h.includes("비번") || h.includes("비밀"))),
     fmsD: (() => {
-      const e = idxEq("fms");
-      return e >= 0 ? e : H.findIndex(h => h.includes("fms") && (h.includes("승인") || h.includes("등록")));
-    })()
+      const e = H.findIndex(h => h.includes("fms") && h.endsWith("완"));
+      return e >= 0 ? e : idxEq("fms");
+    })(),
+    fms: H.findIndex(h => h.includes("fms") && h.includes("아이디") && h.includes("비")),
+    flag: idxInc("드론", "피난", "위치도"),
+    note: idxInc("특기"),
+    memo: idxEq("비고"),
+    rep: H.findIndex(h => h.includes("보고서") && h.includes("완료")),
+    /* 앱 전용 열 (내보낸 파일을 다시 읽을 때) */
+    assignees: idxInc("담당자"),
+    tel: idxInc("연락처"),
+    appFlags: idxEq("표시"),
+    progress: idxInc("진행단계"),
+    cat: idxEq("분류")
   };
-  if (col.school < 0) return []; // 학교 열 없으면 포기
-
+  if (col.school < 0) return [];
   const gv = (r, i) => i == null || i < 0 ? null : r[i];
   const isMark = v => {
     const s = clean(v);
     return ["◎", "○", "●", "O", "o", "Y", "y", "V", "v", "✓"].includes(s) || v === true;
   };
-  const order = [],
-    out = [];
+  const num = v => {
+    const n = parseFloat(String(v == null ? "" : v).replace(/[^0-9.]/g, ""));
+    return isNaN(n) ? null : n;
+  };
+  const out = [];
   let cur = null;
-  for (let i = hIdx + 1; i < rows.length; i++) {
+  for (let i = dataStart; i < rows.length; i++) {
     const r = rows[i];
     if (!r) continue;
-    const noRaw = clean(gv(r, col.no));
-    const no = noRaw && noRaw !== "-" ? noRaw : "";
     const school = clean(gv(r, col.school));
     const building = clean(gv(r, col.building));
-    if (!no && !school && !building) continue; // 빈 줄
+    const noRaw = clean(gv(r, col.no));
+    const no = noRaw && noRaw !== "-" ? noRaw : "";
+    if (!school && !building && !no) continue;
 
-    /* 새 학교 시작: No가 (값이 있고) 현재와 다르거나, 학교명이 (값이 있고) 현재와 다를 때.
-       → No 중복(다른 학교가 같은 번호) / 같은 학교 다른 번호(별개 용역) 모두 정확히 분리.
-       → No·학교명이 비었거나 동일하면 같은 학교의 추가 동(연속행). */
-    let startNew;
-    if (!cur) startNew = true;else startNew = no && no !== cur.no || school && school !== cur.school;
-    if (startNew) {
+    /* 학교행: 학교명이 있으면 새 현장. (회사 양식은 학교행/시설행이 분리돼 있다) */
+    if (school && (!cur || school !== cur.school)) {
+      const roundV = clean(gv(r, col.round));
+      const fmsCombo = clean(gv(r, col.fms));
+      const fid = clean(gv(r, col.fmsId)),
+        fpw = clean(gv(r, col.fmsPw));
+      const fms = fmsCombo || (fid ? fpw ? `${fid} // ${fpw}` : fid : "");
+      const prog = {};
+      clean(gv(r, col.progress)).split(",").map(x => x.trim()).filter(Boolean).forEach(k => {
+        if (STEPS.includes(k)) prog[k] = true;
+      });
+      /* 진행단계 열이 없으면 완수·납품 유무로 최소한만 채운다 */
+      if (!Object.keys(prog).length) {
+        if (/완료|완수|○|◎|o/i.test(clean(gv(r, col.doneYN)))) prog["완수"] = true;
+        if (/완료|납품|○|◎|o/i.test(clean(gv(r, col.delivYN)))) prog["납품"] = true;
+      }
       cur = {
         id: `imp-${Date.now().toString(36)}-${out.length}-${Math.random().toString(36).slice(2, 6)}`,
         no,
         school,
+        round: roundV,
+        isNew: /신규/.test(roundV),
         region: clean(gv(r, col.region)),
         kind: clean(gv(r, col.kind)) || "정기점검",
         field: parseExcelDate(gv(r, col.field)),
         start: parseExcelDate(gv(r, col.start)),
         end: parseExcelDate(gv(r, col.end)),
+        deliverDate: parseExcelDate(gv(r, col.deliverDate)),
+        memo: clean(gv(r, col.memo)),
+        tel: clean(gv(r, col.tel)),
+        assignees: clean(gv(r, col.assignees)).split(/[,·]/).map(x => x.trim()).filter(Boolean),
         headcount: 2,
-        assignees: [],
+        progress: prog,
         buildings: [],
         flags: [],
-        tel: ""
+        _fms: fms,
+        _fmsD: isMark(gv(r, col.fmsD)) || clean(gv(r, col.fmsD)) === "O",
+        _delivery: clean(gv(r, col.delivery)),
+        _note: clean(gv(r, col.note))
       };
+      cur.headcount = cur.assignees.length || 2;
+      clean(gv(r, col.appFlags)).split(",").map(x => x.trim()).filter(Boolean).forEach(v => {
+        if (["드론", "1년", "피난"].includes(v)) cur.flags.push(v);
+      });
       out.push(cur);
-    } else {
+    } else if (cur) {
+      /* 병합 셀 탓에 아래 행에만 값이 있는 경우 보강 */
       if (no && !cur.no) cur.no = no;
-      if (school && !cur.school) cur.school = school;
       if (!cur.region) cur.region = clean(gv(r, col.region));
-      if (!cur.kind || cur.kind === "정기점검") {
-        const k = clean(gv(r, col.kind));
-        if (k) cur.kind = k;
-      }
       if (!cur.field) cur.field = parseExcelDate(gv(r, col.field));
       if (!cur.start) cur.start = parseExcelDate(gv(r, col.start));
       if (!cur.end) cur.end = parseExcelDate(gv(r, col.end));
+      if (!cur.deliverDate) cur.deliverDate = parseExcelDate(gv(r, col.deliverDate));
     }
+    if (!cur) continue;
+
+    /* 시설(동) 행 */
     if (building) {
-      /* 한 칸에 여러 동(줄바꿈) → 여러 동으로 분리 (구버전 양식 대응) */
       const names = building.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
       const floors = clean(gv(r, col.floor)).split(/\r?\n/);
       const areas = clean(gv(r, col.area)).split(/\r?\n/);
-      const pickArea = s => {
-        const n = parseFloat(String(s).replace(/[^0-9.]/g, ""));
-        return isNaN(n) ? null : n;
-      };
+      const jongV = clean(gv(r, col.jong));
       names.forEach((bn, bi) => {
         cur.buildings.push({
           b: bn,
+          cat: (() => {
+            const cv = clean(gv(r, col.cat));
+            return cv === "건축" || cv === "토목종" || cv === "토목소" ? cv : guessCat(bn, jongV);
+          })(),
           floor: (floors[bi] != null ? floors[bi] : floors[0] || "").trim() || null,
-          area: pickArea(areas[bi] != null ? areas[bi] : areas[0] || ""),
+          area: num(areas[bi] != null ? areas[bi] : areas[0] || ""),
           height: col.height >= 0 ? clean(gv(r, col.height)) || null : null,
           len: col.length >= 0 ? clean(gv(r, col.length)) || null : null,
-          jong: col.jong >= 0 ? clean(gv(r, col.jong)) || null : null,
-          fms: clean(gv(r, col.fms)) || null,
+          jong: jongV || null,
+          fms: bi === 0 && cur.buildings.length === 0 ? cur._fms || null : null,
           note: clean(gv(r, col.note)) || null,
-          rep: isMark(gv(r, col.rep)),
-          fmsD: isMark(gv(r, col.fmsD)),
-          delivery: clean(gv(r, col.delivery)) || null
+          rep: isMark(gv(r, col.rep)) || !!(cur.progress && cur.progress["보고서"]),
+          fmsD: !!cur._fmsD,
+          delivery: cur._delivery || null
         });
-        /* 드론·1년·피난 표시는 학교 단위로 합침 (어느 동에라도 있으면 학교 표시) */
         const fv = clean(gv(r, col.flag));
         if (fv) {
-          cur.flags = cur.flags || [];
-          if (/드론|●|○|◎|o|O/.test(fv) && !cur.flags.includes("드론")) cur.flags.push("드론");
+          if (/드론|●|○|◎/.test(fv) && !cur.flags.includes("드론")) cur.flags.push("드론");
           if (/1년|일년/.test(fv) && !cur.flags.includes("1년")) cur.flags.push("1년");
           if (/피난/.test(fv) && !cur.flags.includes("피난")) cur.flags.push("피난");
         }
       });
     }
   }
-  const out2 = out.filter(s => s.school || s.buildings.length);
+  /* 시설이 하나도 없으면 학교명으로 기본 동 하나 */
+  const out2 = out.filter(s => s.school);
   out2.forEach(s => {
     if (!s.buildings.length) s.buildings.push({
-      b: s.school || "본관",
+      b: s.school,
+      /* 시설 행이 없어 학교명으로 만든 기본 동 — 이름만으로 토목으로 단정하지 않는다 */
+      cat: "건축",
       floor: null,
       area: null,
       height: null,
       len: null,
       jong: null,
-      fms: null,
-      note: null,
-      rep: false,
-      fmsD: false,
-      delivery: null
+      fms: s._fms || null,
+      note: s._note || null,
+      rep: !!(s.progress && s.progress["보고서"]),
+      fmsD: !!s._fmsD,
+      delivery: s._delivery || null
     });
+    delete s._fms;
+    delete s._fmsD;
+    delete s._delivery;
+    delete s._note;
   });
   return out2;
 }
@@ -1859,219 +1965,299 @@ function xlDate(v) {
   const p = String(v).split("-").map(Number);
   return p.length === 3 && p[0] ? new Date(p[0], p[1] - 1, p[2], 12) : "";
 }
+/* ══════════════════════════════════════════════════════════════
+   시설물 리스트 시트 — 회사 표준 양식 그대로
+   · 1행: 색 범례 / 2~3행: 2단 헤더 / 4행부터 데이터
+   · 학교 정보는 '학교행'에, 시설물은 그 아래 '시설행'에 한 줄씩
+   · A~Z 는 원본 양식, AB~AF 는 앱 전용 정보(담당자·진행 등)
+══════════════════════════════════════════════════════════════ */
+const XL_FONT = "맑은 고딕";
+const xlBorder = st => ({
+  top: {
+    style: st,
+    color: {
+      rgb: "FFBFBFBF"
+    }
+  },
+  bottom: {
+    style: st,
+    color: {
+      rgb: "FFBFBFBF"
+    }
+  },
+  left: {
+    style: "thin",
+    color: {
+      rgb: "FF808080"
+    }
+  },
+  right: {
+    style: "thin",
+    color: {
+      rgb: "FF808080"
+    }
+  }
+});
+const xlCell = (bold, align, wrap, fill) => ({
+  font: {
+    name: XL_FONT,
+    sz: 10,
+    bold: !!bold,
+    color: {
+      rgb: "FF000000"
+    }
+  },
+  alignment: {
+    horizontal: align || "center",
+    vertical: "center",
+    wrapText: !!wrap
+  },
+  border: xlBorder("hair"),
+  ...(fill ? {
+    fill: {
+      patternType: "solid",
+      fgColor: {
+        rgb: fill
+      }
+    }
+  } : {})
+});
 function buildSheet(schools) {
-  const today = new Date();
-  const HEAD = ["담당자", "No.", "점검종류", "지역", "학교명", "시설명", "층수", "연면적(㎡)", "높이(m)", "길이(m)", "종별", "현장조사", "착수일", "완수일", "용역기간", "FMS 아이디/비번", "드론/피난/1년", "특기사항", "보고서완료", "납품방법", "FMS등록"];
-  const nCols = HEAD.length;
-  const aoa = [HEAD];
-  const blocks = []; // 학교 단위 블록 (병합·줄무늬용)
+  /* 원본 양식 A~Z + 앱 전용 AB~AF */
+  const HEAD1 = ["점검\n회차", "No.", "점검\n종류", "지역", "학교명", "시설물명", "시설물 개수", null, null, "종별", "건축", null, "옹벽/사면", null, "착수일", "현장조사일", "완수일", "납품일자", "완수\n유무", "납품", null, "FMS", null, null, "특기사항", "비고", null, "담당자", "연락처", "표시", "진행단계", "진행률", "분류"];
+  const HEAD2 = [null, null, null, null, null, null, "건축물", "토목(종)", "토목(소)", null, "층수", "연면적(m²)", "연장(m)", "높이(m)", null, null, null, null, null, "유무", "방법", "ID", "PW", "완", null, null, null, null, null, null, null, null, null];
+  const nC = HEAD1.length;
+  const aoa = [];
+  /* 1행 — 색 범례 (원본과 동일 위치) */
+  const r0 = new Array(nC).fill("");
+  r0[3] = "계약완료";
+  r0[4] = "현장조사완료";
+  r0[5] = "납품완료";
+  aoa.push(r0);
+  aoa.push(HEAD1.map(v => v == null ? "" : v));
+  aoa.push(HEAD2.map(v => v == null ? "" : v));
   const mkDate = v => {
     if (!v) return "";
     const p = String(v).split("-").map(Number);
     return p.length === 3 && p[0] ? new Date(p[0], p[1] - 1, p[2], 12) : "";
   };
+  const rows = []; // {r, kind:'school'|'bld', last}
   schools.forEach(s => {
-    const bs = s.buildings && s.buildings.length ? s.buildings : [{
-      b: s.school || "본관"
-    }];
-    const startRow = aoa.length; // 0-based(헤더 포함) 엑셀 행
-    const end = s.end ? new Date(s.end) : null;
-    const dd = end ? Math.floor((end - today) / 86400000) : null;
-    const ddStr = dd === null ? "" : dd >= 0 ? `D-${dd}` : `D+${-dd}`;
-    bs.forEach((b, bi) => {
-      const first = bi === 0;
-      const area = b.area != null && b.area !== "" ? Number(b.area) : "";
-      aoa.push([first ? (s.assignees || []).join(", ") : "", first ? s.no || "" : "", first ? s.kind || "" : "", first ? s.region || "" : "", first ? s.school || "" : "", b.b || "", b.floor || "", isNaN(area) ? "" : area, b.height || "", b.len || "", b.jong || "", first ? mkDate(s.field) : "", first ? mkDate(s.start) : "", first ? mkDate(s.end) : "", first ? ddStr : "", b.fms || "", first ? getFlags(s).join(",") : "", b.note || "", b.rep ? "◎" : "", b.delivery || "", b.fmsD ? "◎" : ""]);
+    const cc = catCounts(s);
+    const done = siteDone(s);
+    const deliv = siteDelivered(s);
+    const pg = s.progress || {};
+    const prog = STEPS.filter(k => pg[k]);
+    /* FMS 는 첫 시설의 계정을 학교행에 올린다 (원본 양식과 동일) */
+    const fms = String((s.buildings || []).map(b => b.fms).find(Boolean) || "");
+    const fmsPart = fms.split("//").map(x => x.trim());
+    const notes = (s.buildings || []).map(b => b.note).filter(Boolean).join(" / ");
+    const schoolRow = new Array(nC).fill("");
+    schoolRow[0] = isNewSite(s) ? "신규" : s.round || "-";
+    schoolRow[1] = s.no || "";
+    schoolRow[2] = s.kind || "정기점검";
+    schoolRow[3] = s.region || "";
+    schoolRow[4] = s.school || "";
+    schoolRow[6] = cc.건축 || "";
+    schoolRow[7] = cc.토목종 || "";
+    schoolRow[8] = cc.토목소 || "";
+    schoolRow[14] = mkDate(s.start);
+    schoolRow[15] = mkDate(s.field);
+    schoolRow[16] = mkDate(s.end);
+    schoolRow[17] = mkDate(s.deliverDate);
+    schoolRow[18] = done ? "완료" : "미완";
+    schoolRow[19] = deliv ? "완료" : "미납";
+    schoolRow[20] = (s.buildings || []).map(b => b.delivery).find(Boolean) || "";
+    schoolRow[21] = fmsPart[0] || "";
+    schoolRow[22] = fmsPart[1] || "";
+    schoolRow[23] = (s.buildings || []).every(b => b.fmsD) && (s.buildings || []).length ? "O" : "";
+    schoolRow[24] = notes;
+    schoolRow[25] = s.memo || "";
+    /* 앱 전용 (AB~AF) */
+    schoolRow[27] = (s.assignees || []).join(", ");
+    schoolRow[28] = s.tel || "";
+    schoolRow[29] = getFlags(s).join(",");
+    schoolRow[30] = prog.join(",");
+    schoolRow[31] = `${prog.length}/${STEPS.length}`;
+    rows.push({
+      r: aoa.length,
+      kind: "school"
     });
-    blocks.push({
-      startRow,
-      rows: bs.length
+    aoa.push(schoolRow);
+    /* 학교명과 같은 이름의 단일 동은 원본에 시설 행이 없던 경우 → 그대로 생략 */
+    const bs = (s.buildings || []).length === 1 && (s.buildings[0].b || "").trim() === (s.school || "").trim() && !s.buildings[0].floor && s.buildings[0].area == null ? [] : s.buildings || [];
+    bs.forEach(b => {
+      const br = new Array(nC).fill("");
+      br[2] = s.kind || "정기점검";
+      br[5] = b.b || "";
+      br[9] = b.jong || "";
+      br[10] = b.floor || "";
+      br[11] = b.area != null && b.area !== "" && !isNaN(Number(b.area)) ? Number(b.area) : "";
+      br[12] = b.len || "";
+      br[13] = b.height || "";
+      br[24] = b.note || "";
+      br[32] = bldCat(b); // 시설 분류 (앱 전용)
+      rows.push({
+        r: aoa.length,
+        kind: "bld"
+      });
+      aoa.push(br);
     });
+    if (rows.length) rows[rows.length - 1].last = true; // 학교 블록의 마지막 줄
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa, {
     cellDates: true
   });
-  const lastRow = aoa.length - 1;
-  ws["!cols"] = [7, 5, 9, 7, 24, 22, 6, 12, 8, 8, 16, 11, 11, 11, 9, 24, 12, 40, 9, 8, 8].map(w => ({
+  /* 열 너비 — 원본 값 */
+  ws["!cols"] = [4.6, 4.6, 12.6, 5.6, 29.5, 29, 6.6, 6.6, 6.6, 10.6, 8.6, 8.6, 8.6, 8.6, 10.6, 10.6, 10.6, 10.6, 4.6, 5.6, 5.6, 12.6, 12.6, 4.6, 45.6, 12, 2, 16, 13, 10, 22, 6, 8].map(w => ({
     wch: w
   }));
-  ws["!rows"] = [{
-    hpt: 28
+  ws["!rows"] = aoa.map(() => ({
+    hpt: 20.1
+  }));
+  /* 2단 헤더 병합 (원본과 동일) */
+  const M = (r1, c1, r2, c2) => ({
+    s: {
+      r: r1,
+      c: c1
+    },
+    e: {
+      r: r2,
+      c: c2
+    }
+  });
+  ws["!merges"] = [M(1, 0, 2, 0), M(1, 1, 2, 1), M(1, 2, 2, 2), M(1, 3, 2, 3), M(1, 4, 2, 4), M(1, 5, 2, 5), M(1, 6, 1, 8), M(1, 9, 2, 9), M(1, 10, 1, 11), M(1, 12, 1, 13), M(1, 14, 2, 14), M(1, 15, 2, 15), M(1, 16, 2, 16), M(1, 17, 2, 17), M(1, 18, 2, 18), M(1, 19, 1, 20), M(1, 21, 1, 23), M(1, 24, 2, 24), M(1, 25, 2, 25), M(1, 27, 2, 27), M(1, 28, 2, 28), M(1, 29, 2, 29), M(1, 30, 2, 30), M(1, 31, 2, 31), M(1, 32, 2, 32)];
+  /* 헤더 3줄 고정 — 스크롤해도 항목명이 보이게 */
+  ws["!freeze"] = {
+    xSplit: 0,
+    ySplit: 3,
+    topLeftCell: "A4",
+    activePane: "bottomLeft",
+    state: "frozen"
+  };
+  ws["!views"] = [{
+    state: "frozen",
+    xSplit: 0,
+    ySplit: 3,
+    topLeftCell: "A4",
+    activePane: "bottomLeft"
   }];
   ws["!autofilter"] = {
     ref: XLSX.utils.encode_range({
       s: {
-        r: 0,
+        r: 1,
         c: 0
       },
       e: {
-        r: 0,
-        c: nCols - 1
+        r: Math.max(3, aoa.length - 1),
+        c: nC - 1
       }
     })
   };
-  ws["!freeze"] = {
-    xSplit: 0,
-    ySplit: 1,
-    topLeftCell: "A2",
-    activePane: "bottomLeft",
-    state: "frozen"
-  };
-  const SCHOOL_COLS = [0, 1, 2, 3, 4, 11, 12, 13, 14, 16]; // 학교 단위(병합)
-  const DATE_COLS = new Set([11, 12, 13]);
-  const LEFT_COLS = new Set([4, 5, 15, 17]);
-  const CENTER_COLS = new Set([0, 1, 2, 3, 6, 8, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20]);
-  const sty = (cell, s) => {
-    if (ws[cell]) ws[cell].s = s;
-  };
-
-  /* 헤더 */
-  for (let c = 0; c < nCols; c++) {
+  const put = (r, c, st) => {
     const a = XLSX.utils.encode_cell({
-      r: 0,
+      r,
       c
     });
     if (!ws[a]) ws[a] = {
       t: "s",
-      v: HEAD[c]
+      v: ""
     };
-    ws[a].s = {
-      font: {
-        name: "맑은 고딕",
-        sz: 10,
-        bold: true,
-        color: {
-          rgb: "FFFFFFFF"
-        }
-      },
-      fill: {
-        patternType: "solid",
-        fgColor: {
-          rgb: "FF1D6FF2"
-        }
-      },
-      alignment: {
-        horizontal: "center",
-        vertical: "center",
-        wrapText: true
-      },
-      border: {
-        top: {
-          style: "thin",
-          color: {
-            rgb: "FF1559C9"
-          }
-        },
-        bottom: {
-          style: "medium",
-          color: {
-            rgb: "FF1559C9"
-          }
-        },
-        left: {
-          style: "thin",
-          color: {
-            rgb: "FF4D8AE8"
-          }
-        },
-        right: {
-          style: "thin",
-          color: {
-            rgb: "FF4D8AE8"
-          }
-        }
+    ws[a].s = st;
+  };
+  /* 1행 범례 — 원본의 세 가지 색 */
+  const LEGEND = {
+    3: "FFFEF3FF",
+    4: "FFEBF7FF",
+    5: "FFE8F7F2"
+  };
+  for (let c = 0; c < nC; c++) put(0, c, LEGEND[c] ? {
+    font: {
+      name: XL_FONT,
+      sz: 10
+    },
+    alignment: {
+      horizontal: "center",
+      vertical: "center"
+    },
+    fill: {
+      patternType: "solid",
+      fgColor: {
+        rgb: LEGEND[c]
       }
-    };
-  }
-  /* 데이터 */
-  blocks.forEach(bk => {
-    for (let ri = 0; ri < bk.rows; ri++) {
-      const r = bk.startRow + ri;
-      const lastOfSchool = ri === bk.rows - 1;
-      for (let c = 0; c < nCols; c++) {
-        const a = XLSX.utils.encode_cell({
-          r,
-          c
-        });
-        if (!ws[a]) ws[a] = {
-          t: "s",
-          v: ""
-        };
-        const schoolCol = SCHOOL_COLS.includes(c);
-        /* 데이터 행은 색 없이 흰 배경 · 검정 글자 (헤더만 색) */
-        let fill = "FFFFFFFF";
-        let font = {
-          name: "맑은 고딕",
-          sz: 9.5,
-          color: {
-            rgb: "FF1A2332"
-          }
-        };
-        if (c === 0 || c === 4) font = {
-          ...font,
-          bold: true
-        };
-        if (c === 17) font = {
-          ...font,
-          sz: 8.5
-        };
-        const align = {
-          vertical: schoolCol ? "center" : "top",
-          horizontal: CENTER_COLS.has(c) ? "center" : LEFT_COLS.has(c) ? "left" : "center",
-          wrapText: c === 17
-        };
-        ws[a].s = {
-          font,
-          fill: {
-            patternType: "solid",
-            fgColor: {
-              rgb: fill
-            }
-          },
-          alignment: align,
-          border: {
-            top: {
-              style: "thin",
-              color: {
-                rgb: "FFE3E8F0"
-              }
-            },
-            bottom: {
-              style: lastOfSchool ? "medium" : "thin",
-              color: {
-                rgb: lastOfSchool ? "FFC2CCDC" : "FFEDF0F5"
-              }
-            },
-            left: {
-              style: "thin",
-              color: {
-                rgb: "FFE3E8F0"
-              }
-            },
-            right: {
-              style: "thin",
-              color: {
-                rgb: "FFE3E8F0"
-              }
-            }
-          }
-        };
-        if (DATE_COLS.has(c) && ws[a].t === "d") ws[a].z = "yyyy-mm-dd";
-        if (c === 7 && typeof ws[a].v === "number") ws[a].z = "#,##0.00";
+    },
+    border: xlBorder("thin")
+  } : {
+    font: {
+      name: XL_FONT,
+      sz: 10
+    }
+  });
+  /* 2~3행 헤더 */
+  for (let r = 1; r <= 2; r++) for (let c = 0; c < nC; c++) put(r, c, {
+    font: {
+      name: XL_FONT,
+      sz: 10,
+      bold: true,
+      color: {
+        rgb: "FF000000"
+      }
+    },
+    alignment: {
+      horizontal: "center",
+      vertical: "center",
+      wrapText: true
+    },
+    border: xlBorder("thin"),
+    fill: {
+      patternType: "solid",
+      fgColor: {
+        rgb: c >= 27 ? "FFF2F2F2" : "FFFFFFFF"
       }
     }
-    if (bk.rows > 1) {
-      ws["!merges"] = ws["!merges"] || [];
-      SCHOOL_COLS.forEach(c => ws["!merges"].push({
-        s: {
-          r: bk.startRow,
-          c
+  });
+  /* 데이터 — 학교행은 굵게, 시설행은 보통 */
+  const LEFT = new Set([4, 5, 24, 25, 27]);
+  const DATE_C = new Set([14, 15, 16, 17]);
+  rows.forEach(row => {
+    const isSchool = row.kind === "school";
+    for (let c = 0; c < nC; c++) {
+      const a = XLSX.utils.encode_cell({
+        r: row.r,
+        c
+      });
+      if (!ws[a]) ws[a] = {
+        t: "s",
+        v: ""
+      };
+      ws[a].s = {
+        font: {
+          name: XL_FONT,
+          sz: 10,
+          bold: isSchool && (c === 1 || c === 4),
+          color: {
+            rgb: "FF000000"
+          }
         },
-        e: {
-          r: bk.startRow + bk.rows - 1,
-          c
+        alignment: {
+          horizontal: LEFT.has(c) ? "left" : "center",
+          vertical: "center",
+          wrapText: c === 24
+        },
+        border: {
+          ...xlBorder("hair"),
+          ...(row.last ? {
+            bottom: {
+              style: "thin",
+              color: {
+                rgb: "FF808080"
+              }
+            }
+          } : {})
         }
-      }));
+      };
+      if (DATE_C.has(c) && ws[a].t === "d") ws[a].z = "mm-dd-yy";
+      if (c === 11 && typeof ws[a].v === "number") ws[a].z = "#,##0.00";
     }
   });
   return ws;
@@ -3766,9 +3952,22 @@ const addDays = (d, n) => {
 };
 const startOfWeek = d => addDays(d, -d.getDay()); // 일요일 시작
 const DOW = ["일", "월", "화", "수", "목", "금", "토"];
-const EV_KINDS = [["field", "조사", "#1D6FF2"], ["start", "착수", "#0D9B6C"], ["end", "완수", "#B58A00"]];
-const evColor = f => f === "field" ? C.blue : f === "start" ? C.green : C.yellow;
-const evLabel = f => f === "field" ? "조사" : f === "start" ? "착수" : "완수";
+const EV_KINDS = [["field", "조사", "#1D6FF2"], ["start", "착수", "#0D9B6C"], ["deliverDate", "납품", "#7C3AED"], ["end", "완수", "#B58A00"]];
+/* 종류별 표식 — 색만으로는 4가지가 헷갈려서 모양을 함께 쓴다 */
+const EV_MARK = {
+  field: "◆",
+  start: "▶",
+  deliverDate: "■",
+  end: "●"
+};
+const evColor = f => f === "field" ? C.blue : f === "start" ? C.green : f === "deliverDate" ? C.purple : C.yellow;
+const evLabel = f => f === "field" ? "조사" : f === "start" ? "착수" : f === "deliverDate" ? "납품" : "완수";
+/* 납품은 완수일보다 최소 3일 앞서야 한다 — 늦으면 경고 */
+const DELIVER_LEAD = 3;
+const deliverLate = s => {
+  if (!s || !s.deliverDate || !s.end) return false;
+  return (parseD(s.end) - parseD(s.deliverDate)) / 86400000 < DELIVER_LEAD;
+};
 
 /* 연도·월·주 선택 버튼 — 눌러서 목록을 띄운다 */
 function SelBtn({
@@ -3942,7 +4141,7 @@ function EvRow({
       color: "#fff",
       background: col
     }
-  }, evLabel(e.field)), /*#__PURE__*/React.createElement("span", {
+  }, EV_MARK[e.field], " ", evLabel(e.field)), /*#__PURE__*/React.createElement("span", {
     style: {
       flex: 1,
       minWidth: 0
@@ -4018,7 +4217,7 @@ function WeekChip({
       fontWeight: 800,
       color: col
     }
-  }, evLabel(e.field)), e.region && /*#__PURE__*/React.createElement("span", {
+  }, EV_MARK[e.field], " ", evLabel(e.field)), e.region && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       color: C.t3,
@@ -4096,7 +4295,7 @@ function Calendar({
     const map = {},
       seen = new Set();
     allSchools.forEach(s => {
-      ["field", "start", "end"].forEach(f => {
+      ["field", "start", "deliverDate", "end"].forEach(f => {
         const ds = s[f];
         if (!ds) return;
         /* 같은 현장·같은 날·같은 종류는 한 번만 (이월본이 양쪽 반기에 있어도 중복 표시 안 됨) */
@@ -4437,7 +4636,7 @@ function Calendar({
           cursor: "grab",
           opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
         }
-      }, e.school.length > (isMobile ? 5 : 11) ? e.school.slice(0, isMobile ? 5 : 11) + "…" : e.school, e.field === "end" ? " 📦" : e.field === "start" ? " ▶" : "")), evs.length > cap && /*#__PURE__*/React.createElement("div", {
+      }, EV_MARK[e.field], " ", e.school.length > (isMobile ? 5 : 10) ? e.school.slice(0, isMobile ? 5 : 10) + "…" : e.school)), evs.length > cap && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: C.t4,
@@ -4926,13 +5125,17 @@ function EditPanel({
     kind: sc.kind || "정기점검",
     field: sc.field || "",
     start: sc.start || "",
+    deliverDate: sc.deliverDate || "",
     end: sc.end || "",
     assignees: sc.assignees || [],
     tel: sc.tel || "",
-    flags: getFlags(sc)
+    flags: getFlags(sc),
+    isNew: isNewSite(sc),
+    memo: sc.memo || ""
   });
   const [bf, setBf] = useState(sc.buildings.map(b => ({
     b: b.b || "",
+    cat: bldCat(b),
     floor: b.floor || "",
     area: b.area ? String(b.area) : "",
     fms: b.fms || "",
@@ -4985,7 +5188,10 @@ function EditPanel({
           kind: f.kind,
           field: f.field,
           start: f.start,
+          deliverDate: f.deliverDate,
           end: f.end,
+          isNew: !!f.isNew,
+          memo: (f.memo || "").trim(),
           tel: (f.tel || "").trim(),
           flags: [...(f.flags || [])],
           assignees: f.assignees,
@@ -4995,6 +5201,7 @@ function EditPanel({
           },
           buildings: bf.map(b => ({
             b: b.b || "동",
+            cat: b.cat || "건축",
             floor: b.floor || null,
             area: b.area ? parseFloat(b.area) : null,
             fms: b.fms || null,
@@ -5189,6 +5396,35 @@ function EditPanel({
       color: C.t3,
       fontWeight: 700
     }
+  }, "구분"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setF(p => ({
+      ...p,
+      isNew: !p.isNew
+    })),
+    style: {
+      alignSelf: "flex-start",
+      padding: "9px 15px",
+      borderRadius: 8,
+      fontSize: 14,
+      fontWeight: 800,
+      cursor: "pointer",
+      border: `1.5px solid ${f.isNew ? C.red : C.border}`,
+      background: f.isNew ? C.redL : "transparent",
+      color: f.isNew ? C.red : C.t3
+    }
+  }, f.isNew ? "✓ 🆕 신규 현장" : "🆕 신규 현장"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: C.t4,
+      marginTop: -1
+    }
+  }, "신규는 보고서 작성에 시간이 더 듭니다"), /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      color: C.t3,
+      fontWeight: 700,
+      marginTop: 6
+    }
   }, "현장 표시 ", /*#__PURE__*/React.createElement("span", {
     style: {
       color: C.t4,
@@ -5262,7 +5498,16 @@ function EditPanel({
   }, ["정기점검", "정밀점검", "내진성능", "구조감리", "내진보강설계", "구조검토"].map(k => /*#__PURE__*/React.createElement("option", {
     key: k
   }, k)))), /*#__PURE__*/React.createElement(LI, {
-    label: "현장조사일",
+    label: "▶ 착수일",
+    val: f.start,
+    on: v => setF(p => ({
+      ...p,
+      start: v
+    })),
+    type: "date",
+    col: C.green
+  }), /*#__PURE__*/React.createElement(LI, {
+    label: "◆ 현장조사일",
     val: f.field,
     on: v => setF(p => ({
       ...p,
@@ -5271,15 +5516,17 @@ function EditPanel({
     type: "date",
     col: tc.a
   }), /*#__PURE__*/React.createElement(LI, {
-    label: "착수일",
-    val: f.start,
+    label: "■ 납품일",
+    val: f.deliverDate,
     on: v => setF(p => ({
       ...p,
-      start: v
+      deliverDate: v
     })),
-    type: "date"
+    type: "date",
+    col: C.purple,
+    hint: deliverLate(f) ? `⚠ 완수일 ${DELIVER_LEAD}일 전까지 권장` : null
   }), /*#__PURE__*/React.createElement(LI, {
-    label: "완수일",
+    label: "● 완수일",
     val: f.end,
     on: v => setF(p => ({
       ...p,
@@ -5462,7 +5709,19 @@ function EditPanel({
       color: C.t2,
       marginBottom: 10
     }
-  }, "🏗 동별 수정"), bf.map((b, bi) => /*#__PURE__*/React.createElement("div", {
+  }, "🏗 시설물 (동) 수정"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.t4,
+      marginTop: -6,
+      marginBottom: 8
+    }
+  }, (() => {
+    const cc = catCounts({
+      buildings: bf
+    });
+    return `건축물 ${cc.건축} · 토목(종) ${cc.토목종} · 토목(소) ${cc.토목소}`;
+  })()), bf.map((b, bi) => /*#__PURE__*/React.createElement("div", {
     key: bi,
     style: {
       padding: 14,
@@ -5565,7 +5824,35 @@ function EditPanel({
       gap: 8,
       marginBottom: 8
     }
-  }, /*#__PURE__*/React.createElement(LI, {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      gridColumn: isMobile ? "span 2" : "span 3",
+      display: "flex",
+      gap: 6,
+      marginBottom: 2
+    }
+  }, CATS.map(ct => {
+    const on = (b.cat || "건축") === ct.v;
+    return /*#__PURE__*/React.createElement("button", {
+      key: ct.v,
+      onClick: () => setBf(p => p.map((x, i) => i !== bi ? x : {
+        ...x,
+        cat: ct.v
+      })),
+      style: {
+        flex: 1,
+        padding: "9px 4px",
+        borderRadius: 7,
+        fontSize: 13,
+        fontWeight: on ? 800 : 600,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        border: `1.5px solid ${on ? ct.color : C.border}`,
+        background: on ? ct.color + "18" : "transparent",
+        color: on ? ct.color : C.t3
+      }
+    }, on ? "✓ " : "", ct.label);
+  })), /*#__PURE__*/React.createElement(LI, {
     label: "동명",
     val: b.b,
     on: v => setBf(p => p.map((x, i) => i !== bi ? x : {
@@ -5648,6 +5935,7 @@ function EditPanel({
   })))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setBf(p => [...p, {
       b: "",
+      cat: "건축",
       floor: "",
       area: "",
       fms: "",
@@ -6861,7 +7149,11 @@ function SitesManager({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, s.school), urgent && /*#__PURE__*/React.createElement(Tag, {
+    }, s.school), isNewSite(s) && /*#__PURE__*/React.createElement(Tag, {
+      bg: C.redL,
+      color: C.red,
+      border: `1px solid ${C.red}45`
+    }, "🆕 신규"), urgent && /*#__PURE__*/React.createElement(Tag, {
       bg: C.redL,
       color: C.red,
       border: `1px solid ${C.red}30`
@@ -7231,7 +7523,11 @@ function SitesManager({
         fontSize: 16,
         color: C.t1
       }
-    }, s.school), s.carried && /*#__PURE__*/React.createElement(Tag, {
+    }, s.school), isNewSite(s) && /*#__PURE__*/React.createElement(Tag, {
+      bg: C.redL,
+      color: C.red,
+      border: `1px solid ${C.red}45`
+    }, "🆕 신규"), s.carried && /*#__PURE__*/React.createElement(Tag, {
       bg: C.orange + "18",
       color: C.orange,
       border: `1px solid ${C.orange}40`
@@ -10546,10 +10842,11 @@ function SettingsPage({
    · 카드에서 보고서·FMS·납품을 바로 눌러 처리 (수정 화면 안 들어가도 됨)
    · 완료에서 체크를 풀면 기준이 같아 긴급 쪽으로 다시 나타남
    ══════════════════════════════════════════════════════════════ */
-const siteDone = s => {
-  const bs = s && s.buildings || [];
-  return bs.length > 0 && bs.every(b => b.rep && b.fmsD && b.delivery);
-};
+/* 완수 판정 — 업무 진행 단계의 '완수' 체크가 기준.
+   엑셀 S열(완수유무)과 같은 값을 쓰기 위해 앱 전체가 이 함수를 따른다. */
+const siteDone = s => !!(s && s.progress && s.progress["완수"]);
+/* 납품 판정 — 진행 단계의 '납품' 체크 (엑셀 T열) */
+const siteDelivered = s => !!(s && s.progress && s.progress["납품"]);
 const doneAt = s => {
   // 완료로 볼 기준 날짜(완수일)
   return s && s.end ? s.end : "";
@@ -10609,7 +10906,18 @@ function ReportCard({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, s.school), tel && /*#__PURE__*/React.createElement("a", {
+    }, s.school), isNewSite(s) && /*#__PURE__*/React.createElement("span", {
+      style: {
+        flexShrink: 0,
+        fontSize: 12,
+        fontWeight: 800,
+        color: C.red,
+        background: C.redL,
+        border: `1px solid ${C.red}45`,
+        borderRadius: 4,
+        padding: "2px 6px"
+      }
+    }, "🆕 신규"), tel && /*#__PURE__*/React.createElement("a", {
       href: `tel:${tel.replace(/[^0-9+]/g, "")}`,
       style: {
         padding: isMobile ? "9px 12px" : "3px 9px",
@@ -10654,7 +10962,12 @@ function ReportCard({
         color: C.t3,
         marginBottom: 8
       }
-    }, s.region, " · ", isLH(s._year) ? "LH" : `${String(s._year).slice(2)}년 ${s._half === "상반기" ? "상" : "하"}`, " · ", bs.length, "동", s.end && ` · 완수 ${fd(s.end)}`, (s.assignees || []).length > 0 && ` · 👤 ${s.assignees.join("·")}`), /*#__PURE__*/React.createElement("div", {
+    }, s.region, " · ", isLH(s._year) ? "LH" : `${String(s._year).slice(2)}년 ${s._half === "상반기" ? "상" : "하"}`, " · 시설 ", bs.length, s.deliverDate && ` · 납품 ${fd(s.deliverDate)}`, deliverLate(s) && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: C.orange,
+        fontWeight: 800
+      }
+    }, " ⚠"), s.end && ` · 완수 ${fd(s.end)}`, (s.assignees || []).length > 0 && ` · 👤 ${s.assignees.join("·")}`), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 6,
