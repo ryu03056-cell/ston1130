@@ -4535,7 +4535,7 @@ function Calendar({
       return;
     }
     const sc = allSchools.find(s => s.id === schoolId);
-    const lb = field === "field" ? "현장조사일" : field === "start" ? "착수일" : "완수일";
+    const lb = field === "field" ? "현장조사일" : field === "start" ? "착수일" : field === "deliverDate" ? "납품일" : "완수일";
     if (sc?._year && sc?._half) {
       setDb(prev => {
         const next = {
@@ -4618,7 +4618,7 @@ function Calendar({
     }
   }, EV_KINDS.map(([f, l, c]) => {
     const on = kinds.includes(f);
-    const lab = f === "field" ? "현장조사" : f === "start" ? "착수" : "완수";
+    const lab = f === "field" ? "현장조사" : f === "start" ? "착수" : f === "deliverDate" ? "납품" : "완수";
     return /*#__PURE__*/React.createElement("button", {
       key: f,
       onClick: () => toggleKind(f),
@@ -6775,7 +6775,7 @@ function SitesManager({
   const schools = useMemo(() => (db[yr]?.[half] || []).filter(s => !s.deleted), [db, yr, half]);
   const updDate = (sid, field, v) => {
     const sc = schools.find(s => s.id === sid);
-    const lbl = field === "field" ? "현장조사일" : field === "start" ? "착수일" : "완수일";
+    const lbl = field === "field" ? "현장조사일" : field === "start" ? "착수일" : field === "deliverDate" ? "납품일" : "완수일";
     setDb(prev => {
       const n = {
         ...prev
