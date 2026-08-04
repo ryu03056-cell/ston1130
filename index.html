@@ -102,6 +102,20 @@ const C = {
 const MEMBERS = ["한상오", "장민태", "채승준", "함예린", "김동영", "한범용", "권태민", "김유빈", "정도혁", "윤종현", "이동현", "관우남", "이준혁", "박서연", "최민준", "윤지현"];
 const allMembers = () => MEMBERS.slice();
 
+/* ── 직급 ──
+   순서가 곧 정렬 우선순위. 같은 직급이면 이름 가나다순으로 정렬한다. */
+const RANKS = ["대표", "상무", "이사", "차장", "팀장", "과장", "대리", "주임", "보조인원"];
+let RANK_OF = {}; // 이름 → 직급
+const rankIdx = nm => {
+  const r = RANK_OF[nm];
+  const i = RANKS.indexOf(r);
+  return i < 0 ? RANKS.length : i; // 직급 미지정은 맨 뒤
+};
+const rankOf = nm => RANK_OF[nm] || "";
+/* 직급 → 이름 순으로 정렬 */
+const byRank = (a, b) => rankIdx(a) - rankIdx(b) || String(a).localeCompare(String(b), "ko");
+const sortMembers = list => (list || []).slice().sort(byRank);
+
 /* 인원별 고정 색상 — 이름 해시로 일관된 색을 주어 일정에서 구분이 쉽도록 */
 /* 인원 색상 — 사람마다 다르게 하지 않고 검정으로 통일 (가독성 우선) */
 const memberColor = () => C.t1;
@@ -1695,7 +1709,8 @@ function parseSheet(ws) {
     tel: idxInc("연락처"),
     appFlags: idxEq("표시"),
     progress: idxInc("진행단계"),
-    cat: idxEq("분류")
+    cat: idxEq("분류"),
+    period: idxEq("조사기간")
   };
   if (col.school < 0) return [];
   const gv = (r, i) => i == null || i < 0 ? null : r[i];
@@ -1747,6 +1762,17 @@ function parseSheet(ws) {
         end: parseExcelDate(gv(r, col.end)),
         deliverDate: parseExcelDate(gv(r, col.deliverDate)),
         memo: clean(gv(r, col.memo)),
+        ...(() => {
+          /* 조사기간 칸: "2026-08-10~2026-08-12,2026-08-20" 형태 */
+          const p = clean(gv(r, col.period));
+          if (!p) return {};
+          const parts = p.split(",").map(x => x.trim()).filter(Boolean);
+          const run = (parts[0] || "").split("~").map(x => x.trim());
+          return {
+            fieldEnd: run[1] && /^\d{4}-\d{2}-\d{2}$/.test(run[1]) ? run[1] : "",
+            fieldExtra: parts.slice(1).filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x))
+          };
+        })(),
         tel: clean(gv(r, col.tel)),
         assignees: clean(gv(r, col.assignees)).split(/[,·]/).map(x => x.trim()).filter(Boolean),
         headcount: 2,
@@ -2054,8 +2080,8 @@ const xlCell = (bold, align, wrap, fill) => ({
 });
 function buildSheet(schools) {
   /* 원본 양식 A~Z + 앱 전용 AB~AF */
-  const HEAD1 = ["점검\n회차", "No.", "점검\n종류", "지역", "학교명", "시설물명", "시설물 개수", null, null, "종별", "건축", null, "옹벽/사면", null, "착수일", "현장조사일", "완수일", "납품일자", "완수\n유무", "납품", null, "FMS", null, null, "특기사항", "비고", null, "담당자", "연락처", "표시", "진행단계", "진행률", "분류"];
-  const HEAD2 = [null, null, null, null, null, null, "건축물", "토목(종)", "토목(소)", null, "층수", "연면적(m²)", "연장(m)", "높이(m)", null, null, null, null, null, "유무", "방법", "ID", "PW", "완", null, null, null, null, null, null, null, null, null];
+  const HEAD1 = ["점검\n회차", "No.", "점검\n종류", "지역", "학교명", "시설물명", "시설물 개수", null, null, "종별", "건축", null, "옹벽/사면", null, "착수일", "현장조사일", "완수일", "납품일자", "완수\n유무", "납품", null, "FMS", null, null, "특기사항", "비고", null, "담당자", "연락처", "표시", "진행단계", "진행률", "분류", "조사기간"];
+  const HEAD2 = [null, null, null, null, null, null, "건축물", "토목(종)", "토목(소)", null, "층수", "연면적(m²)", "연장(m)", "높이(m)", null, null, null, null, null, "유무", "방법", "ID", "PW", "완", null, null, null, null, null, null, null, null, null, null];
   const nC = HEAD1.length;
   const aoa = [];
   /* 1행 — 색 범례 (원본과 동일 위치) */
@@ -2111,6 +2137,10 @@ function buildSheet(schools) {
     schoolRow[29] = getFlags(s).join(",");
     schoolRow[30] = prog.join(",");
     schoolRow[31] = `${prog.length}/${STEPS.length}`;
+    /* 조사가 여러 날이면 P열은 첫날만 두고(달력 수식이 날짜 하나를 비교하므로)
+       전체 일정은 이 칸에 따로 적는다. */
+    const sd = surveyDates(s);
+    schoolRow[33] = sd.length > 1 ? `${s.fieldEnd && s.fieldEnd > s.field ? `${s.field}~${s.fieldEnd}` : s.field}${(s.fieldExtra || []).length ? `,${(s.fieldExtra || []).join(",")}` : ""}` : "";
     rows.push({
       r: aoa.length,
       kind: "school"
@@ -2141,7 +2171,7 @@ function buildSheet(schools) {
     cellDates: true
   });
   /* 열 너비 — 원본 값 */
-  ws["!cols"] = [4.6, 4.6, 12.6, 5.6, 29.5, 29, 6.6, 6.6, 6.6, 10.6, 8.6, 8.6, 8.6, 8.6, 10.6, 10.6, 10.6, 10.6, 4.6, 5.6, 5.6, 12.6, 12.6, 4.6, 45.6, 12, 2, 16, 13, 10, 22, 6, 8].map(w => ({
+  ws["!cols"] = [4.6, 4.6, 12.6, 5.6, 29.5, 29, 6.6, 6.6, 6.6, 10.6, 8.6, 8.6, 8.6, 8.6, 10.6, 10.6, 10.6, 10.6, 4.6, 5.6, 5.6, 12.6, 12.6, 4.6, 45.6, 12, 2, 16, 13, 10, 22, 6, 8, 22].map(w => ({
     wch: Math.max(1, w - 0.8)
   }));
   /* 시설물 행은 접어 둔다 — 왼쪽 [+] 버튼으로 펼쳐 볼 수 있게 (원본과 동일) */
@@ -2166,7 +2196,7 @@ function buildSheet(schools) {
       c: c2
     }
   });
-  ws["!merges"] = [M(1, 0, 2, 0), M(1, 1, 2, 1), M(1, 2, 2, 2), M(1, 3, 2, 3), M(1, 4, 2, 4), M(1, 5, 2, 5), M(1, 6, 1, 8), M(1, 9, 2, 9), M(1, 10, 1, 11), M(1, 12, 1, 13), M(1, 14, 2, 14), M(1, 15, 2, 15), M(1, 16, 2, 16), M(1, 17, 2, 17), M(1, 18, 2, 18), M(1, 19, 1, 20), M(1, 21, 1, 23), M(1, 24, 2, 24), M(1, 25, 2, 25), M(1, 27, 2, 27), M(1, 28, 2, 28), M(1, 29, 2, 29), M(1, 30, 2, 30), M(1, 31, 2, 31), M(1, 32, 2, 32)];
+  ws["!merges"] = [M(1, 0, 2, 0), M(1, 1, 2, 1), M(1, 2, 2, 2), M(1, 3, 2, 3), M(1, 4, 2, 4), M(1, 5, 2, 5), M(1, 6, 1, 8), M(1, 9, 2, 9), M(1, 10, 1, 11), M(1, 12, 1, 13), M(1, 14, 2, 14), M(1, 15, 2, 15), M(1, 16, 2, 16), M(1, 17, 2, 17), M(1, 18, 2, 18), M(1, 19, 1, 20), M(1, 21, 1, 23), M(1, 24, 2, 24), M(1, 25, 2, 25), M(1, 27, 2, 27), M(1, 28, 2, 28), M(1, 29, 2, 29), M(1, 30, 2, 30), M(1, 31, 2, 31), M(1, 32, 2, 32), M(1, 33, 2, 33)];
   /* 헤더 3줄 고정 — 스크롤해도 항목명이 보이게 */
   ws["!freeze"] = {
     xSplit: 0,
@@ -3334,6 +3364,87 @@ function applyNotes(schools, notes) {
   return applied;
 }
 
+/* 기존 현장을 찾아 이 날짜를 넣는다 — 현장 관리에 이미 있는 현장에 일정만 추가할 때 */
+function SitePicker({
+  dateStr,
+  allSchools,
+  setDb,
+  onDone
+}) {
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState("field");
+  const KINDS = [["field", "◆ 현장조사"], ["start", "▶ 착수"], ["deliverDate", "■ 납품"], ["end", "● 완수"]];
+  const hits = useMemo(() => {
+    const key = normSchool(q);
+    if (!key) return [];
+    return allSchools.filter(s => !s.deleted && normSchool(s.school).includes(key)).sort((a, b) => {
+      const na = normSchool(a.school),
+        nb = normSchool(b.school);
+      return (na.startsWith(key) ? 0 : 1) - (nb.startsWith(key) ? 0 : 1) || a.school.length - b.school.length;
+    }).slice(0, 8);
+  }, [q, allSchools]);
+  const apply = s => {
+    const cur = s[kind] || "";
+    const label = KINDS.find(k => k[0] === kind)[1].slice(2);
+    if (cur === dateStr) {
+      onDone(`${s.school} — 이미 같은 날짜입니다`);
+      return;
+    }
+    if (cur && !window.confirm(`${s.school}\n${label}: ${cur} → ${dateStr}\n\n덮어쓸까요?`)) return;
+    setDb(prev => {
+      const next = { ...prev };
+      next[s._year] = { ...(prev[s._year] || {}) };
+      next[s._year][s._half] = (prev[s._year]?.[s._half] || []).map(x => x.id !== s.id ? x : stampEdit({ ...x, [kind]: dateStr }, `${label}일 지정`));
+      return next;
+    });
+    logAction("수정", `${s.school} · ${label}일`, cur || "-", dateStr);
+    onDone(`${s.school} · ${label} ${dateStr.slice(5).replace("-", "/")} 지정됨`);
+  };
+  return React.createElement("div", {
+    style: { marginTop: 8, padding: 12, borderRadius: 10, border: `1.5px solid ${C.blue}40`, background: C.blue + "0a" }
+  }, React.createElement("div", {
+    style: { fontSize: 12, fontWeight: 800, color: C.blue, marginBottom: 8 }
+  }, "이미 등록된 현장에 이 날짜를 넣습니다"), React.createElement("div", {
+    style: { display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }
+  }, KINDS.map(([k, l]) => {
+    const on = kind === k;
+    return React.createElement("button", {
+      key: k,
+      onClick: () => setKind(k),
+      style: { flex: 1, minWidth: 74, padding: "8px 4px", borderRadius: 7, fontSize: 12, fontWeight: on ? 800 : 600, cursor: "pointer", whiteSpace: "nowrap", border: `1.5px solid ${on ? evColor(k) : C.border}`, background: on ? evColor(k) + "18" : C.surface, color: on ? evColor(k) : C.t3 }
+    }, l);
+  })), React.createElement("input", {
+    value: q,
+    onChange: e => setQ(e.target.value),
+    placeholder: "현장 이름으로 찾기",
+    autoFocus: true,
+    style: { width: "100%", boxSizing: "border-box", padding: "10px 12px", background: C.surface, border: `1.5px solid ${q ? C.blue : C.border}`, borderRadius: 8, color: C.t1, fontSize: 14, outline: "none" }
+  }), q && hits.length === 0 && React.createElement("div", {
+    style: { fontSize: 13, color: C.t4, padding: "12px 2px" }
+  }, "찾는 현장이 없습니다."), React.createElement("div", {
+    style: { display: "flex", flexDirection: "column", gap: 5, marginTop: 8, maxHeight: 300, overflowY: "auto" }
+  }, hits.map(s => {
+    const cur = s[kind] || "";
+    const lh = isLH(s._year);
+    const hc = lh ? C.purple : s._half === "상반기" ? C.blue : C.orange;
+    return React.createElement("div", {
+      key: `${s._year}-${s._half}-${s.id}`,
+      style: { display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: C.surface, border: BD, borderRadius: 8 }
+    }, React.createElement("span", {
+      style: { flexShrink: 0, minWidth: 50, textAlign: "center", padding: "3px 5px", borderRadius: 5, fontSize: 12, fontWeight: 800, color: hc, background: hc + "16", border: `1px solid ${hc}45` }
+    }, lh ? "LH" : `${String(s._year).slice(2)}년 ${s._half === "상반기" ? "상" : "하"}`), React.createElement("span", {
+      style: { flex: 1, minWidth: 0 }
+    }, React.createElement("span", {
+      style: { display: "block", fontSize: 14, fontWeight: 700, color: C.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+    }, s.school), React.createElement("span", {
+      style: { display: "block", fontSize: 12, color: cur ? C.orange : C.t4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+    }, s.region ? `${s.region} · ` : "", cur ? `${cur.slice(5).replace("-", "/")} → 덮어씀` : "날짜 없음")), React.createElement("button", {
+      onClick: () => apply(s),
+      style: { flexShrink: 0, padding: "8px 14px", borderRadius: 7, border: "none", background: C.blue, color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }
+    }, "넣기"));
+  })));
+}
+
 /* ══════════════════════════════════════════════════════════════
    날짜 클릭 상세 패널 (현장조사 · 완수일)
 ══════════════════════════════════════════════════════════════ */
@@ -3351,6 +3462,8 @@ function DayPanel({
   const dragStart = useRef(null);
   const [routeFor, setRouteFor] = useState(null); // 길찾기 앱 선택
   const [draft, setDraft] = useState(null); // 아직 저장 안 한 새 현장
+  const [pickOpen, setPickOpen] = useState(false); // 기존 현장 찾아 넣기
+  const [pickMsg, setPickMsg] = useState(null);
   const geoAll = useGeoCache();
 
   /* 같은 현장이 상·하반기 양쪽에 있으면(1년 계약 이월) 한 번만 표시.
@@ -3371,7 +3484,8 @@ function DayPanel({
     });
     return [...m.values()];
   };
-  const fieldSchools = dedup(allSchools.filter(s => s.field === dateStr));
+  /* 조사가 며칠에 걸치면 그 기간의 모든 날에 나타난다 */
+  const fieldSchools = dedup(allSchools.filter(s => surveyDates(s).includes(dateStr)));
   const startSchools = dedup(allSchools.filter(s => s.start === dateStr));
   const endSchools = dedup(allSchools.filter(s => s.end === dateStr));
   const total = fieldSchools.length + startSchools.length + endSchools.length;
@@ -3426,7 +3540,7 @@ function DayPanel({
       next[sc._year][sc._half] = (prev[sc._year]?.[sc._half] || []).map(s => {
         if (s.id !== sid) return s;
         const cur = s.assignees || [];
-        const upd = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
+        const upd = sortMembers(cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name]);
         return stampEdit({
           ...s,
           assignees: upd,
@@ -3548,7 +3662,7 @@ function DayPanel({
   const FieldCard = ({
     s
   }) => {
-    const assignees = s.assignees || [];
+    const assignees = sortMembers(s.assignees || []);
     const available = allMembers().filter(n => !assignees.includes(n));
     const open = pickerId === s.id;
     return /*#__PURE__*/React.createElement("div", {
@@ -3674,7 +3788,14 @@ function DayPanel({
           color: mc,
           border: `1.5px solid ${mc}55`
         }
-      }, name);
+      }, rankOf(name) ? /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 11,
+          fontWeight: 600,
+          opacity: .7,
+          marginRight: 4
+        }
+      }, rankOf(name)) : null, name);
     })))), /*#__PURE__*/React.createElement(EditLine, {
       s: s
     }), /*#__PURE__*/React.createElement("div", {
@@ -3684,7 +3805,19 @@ function DayPanel({
         gap: 3,
         marginTop: 7
       }
-    }, s.buildings.map((b, i) => /*#__PURE__*/React.createElement("span", {
+    }, isMultiSurvey(s) && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        fontWeight: 800,
+        padding: "2px 7px",
+        borderRadius: 4,
+        marginRight: 3,
+        background: C.blueL,
+        border: `1px solid ${C.blue}45`,
+        color: C.blue,
+        whiteSpace: "nowrap"
+      }
+    }, `조사 ${surveyDates(s).length}일 중 ${surveyDates(s).indexOf(dateStr) + 1}일차`), s.buildings.map((b, i) => /*#__PURE__*/React.createElement("span", {
       key: i,
       style: {
         fontSize: 12,
@@ -3921,12 +4054,47 @@ function DayPanel({
       marginBottom: 6,
       boxShadow: `0 3px 12px ${C.blue}38`
     }
-  }, "+ 이 날짜로 현장 추가"), /*#__PURE__*/React.createElement("div", {
+  }, "+ 이 날짜로 현장 추가"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setPickOpen(v => !v),
+    style: {
+      width: "100%",
+      padding: "12px 0",
+      borderRadius: 10,
+      marginTop: 7,
+      border: `1.5px solid ${pickOpen ? C.blue : C.border}`,
+      background: pickOpen ? C.blueL : C.surface,
+      color: pickOpen ? C.blue : C.t2,
+      fontSize: 15,
+      fontWeight: 800,
+      cursor: "pointer"
+    }
+  }, pickOpen ? "✕ 닫기" : "⌕ 기존 현장에 이 날짜 넣기"), pickOpen && /*#__PURE__*/React.createElement(SitePicker, {
+    dateStr: dateStr,
+    allSchools: allSchools,
+    setDb: setDb,
+    onDone: msg => {
+      setPickOpen(false);
+      setPickMsg(msg);
+      setTimeout(() => setPickMsg(null), 2600);
+    }
+  }), pickMsg && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 8,
+      padding: "9px 12px",
+      background: C.greenL,
+      border: `1px solid ${C.green}35`,
+      borderRadius: 8,
+      fontSize: 13,
+      fontWeight: 700,
+      color: C.green
+    }
+  }, "✓ ", pickMsg), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: C.t4,
       textAlign: "center",
       marginBottom: 16,
+      marginTop: 10,
       lineHeight: 1.6
     }
   }, `현장조사일 ${dateStr.slice(5).replace("-", "/")} · ${isLH(dYear) ? "LH" : `${dYear}년 ${dHalf}`}에 등록됩니다`, /*#__PURE__*/React.createElement("br", null), "현장 관리 탭에도 함께 나타납니다"), total === 0 && /*#__PURE__*/React.createElement("div", {
@@ -4097,6 +4265,39 @@ const EV_MARK = {
 };
 const evColor = f => f === "field" ? C.blue : f === "start" ? C.green : f === "deliverDate" ? C.purple : C.yellow;
 const evLabel = f => f === "field" ? "조사" : f === "start" ? "착수" : f === "deliverDate" ? "납품" : "완수";
+/* ── 현장조사 여러 날 ──
+   기본은 하루(field). 며칠에 걸치면 fieldEnd(연속 종료일)와
+   fieldExtra(따로 떨어진 날 목록)를 함께 쓴다. 둘 다 없으면 예전과 똑같이 동작한다. */
+const surveyDates = s => {
+  const out = [];
+  const f = s && s.field;
+  if (!f) return out;
+  out.push(f);
+  const fe = s && s.fieldEnd;
+  if (fe && fe > f) {
+    let d = addDays(parseD(f), 1);
+    const last = parseD(fe);
+    let guard = 0;
+    while (d <= last && guard++ < 120) {
+      out.push(dstr(d));
+      d = addDays(d, 1);
+    }
+  }
+  (s && s.fieldExtra || []).forEach(d => {
+    if (d && !out.includes(d)) out.push(d);
+  });
+  return out.sort();
+};
+const isMultiSurvey = s => surveyDates(s).length > 1;
+/* 그 날짜가 조사 기간의 어디인지 — 첫날/마지막날/중간 */
+const surveyPos = (s, ds) => {
+  const a = surveyDates(s);
+  if (a.length <= 1) return "";
+  if (ds === a[0]) return "시작";
+  if (ds === a[a.length - 1]) return "종료";
+  return "";
+};
+
 /* 납품은 완수일보다 최소 3일 앞서야 한다 — 늦으면 경고 */
 const DELIVER_LEAD = 3;
 const deliverLate = s => {
@@ -4276,7 +4477,7 @@ function EvRow({
       color: "#fff",
       background: col
     }
-  }, EV_MARK[e.field], " ", evLabel(e.field)), /*#__PURE__*/React.createElement("span", {
+  }, EV_MARK[e.field], " ", evLabel(e.field), e.pos ? ` ${e.pos}` : ""), /*#__PURE__*/React.createElement("span", {
     style: {
       flex: 1,
       minWidth: 0
@@ -4352,7 +4553,7 @@ function WeekChip({
       fontWeight: 800,
       color: col
     }
-  }, EV_MARK[e.field], " ", evLabel(e.field)), e.region && /*#__PURE__*/React.createElement("span", {
+  }, EV_MARK[e.field], " ", evLabel(e.field), e.pos ? ` ${e.pos}` : "", e.days > 1 && e.field === "field" ? ` (${e.days}일)` : ""), e.region && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       color: C.t3,
@@ -4430,9 +4631,13 @@ function Calendar({
     const map = {},
       seen = new Set();
     allSchools.forEach(s => {
-      ["field", "start", "deliverDate", "end"].forEach(f => {
-        const ds = s[f];
-        if (!ds) return;
+      /* 현장조사는 여러 날에 걸칠 수 있어 날짜 목록으로 편다 */
+      const list = [];
+      surveyDates(s).forEach(d => list.push(["field", d]));
+      ["start", "deliverDate", "end"].forEach(f => {
+        if (s[f]) list.push([f, s[f]]);
+      });
+      list.forEach(([f, ds]) => {
         /* 같은 현장·같은 날·같은 종류는 한 번만 (이월본이 양쪽 반기에 있어도 중복 표시 안 됨) */
         const k = `${ds}|${f}|${(s.school || "").trim()}|${(s.no || "").toString().trim()}`;
         if (seen.has(k)) return;
@@ -4443,7 +4648,9 @@ function Calendar({
           field: f,
           region: s.region || "",
           headcount: s.headcount || 2,
-          assignees: s.assignees || []
+          assignees: s.assignees || [],
+          pos: f === "field" ? surveyPos(s, ds) : "",
+          days: f === "field" ? surveyDates(s).length : 1
         });
       });
     });
@@ -4756,7 +4963,7 @@ function Calendar({
           setDragging(null);
           setOverDate(null);
         },
-        title: `${e.school} · ${evLabel(e.field)} · ${e.assignees.length ? e.assignees.join(",") : "인원 미배정"}`,
+        title: `${e.school} · ${evLabel(e.field)}${e.days > 1 ? ` (${e.days}일 중 ${e.pos || "중간"})` : ""} · ${e.assignees.length ? e.assignees.join(",") : "인원 미배정"}`,
         style: {
           padding: isMobile ? "3px 5px" : "3px 7px",
           borderRadius: 4,
@@ -4771,7 +4978,7 @@ function Calendar({
           cursor: "grab",
           opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
         }
-      }, EV_MARK[e.field], " ", e.school.length > (isMobile ? 5 : 10) ? e.school.slice(0, isMobile ? 5 : 10) + "…" : e.school)), evs.length > cap && /*#__PURE__*/React.createElement("div", {
+      }, EV_MARK[e.field], " ", e.school.length > (isMobile ? 5 : 10) ? e.school.slice(0, isMobile ? 5 : 10) + "…" : e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "")), evs.length > cap && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: C.t4,
@@ -5235,6 +5442,192 @@ function LI({
   }, hint));
 }
 
+/* 현장조사가 며칠에 걸칠 때 — 연속 기간 + 따로 떨어진 날.
+   모듈 레벨에 둬야 입력 중 컴포넌트가 다시 만들어지지 않는다. */
+function MultiSurvey({
+  f,
+  setF,
+  extraIn,
+  setExtraIn,
+  tc
+}) {
+  const all = surveyDates({
+    field: f.field,
+    fieldEnd: f.fieldEnd,
+    fieldExtra: f.fieldExtra
+  });
+  const runLen = f.fieldEnd && f.fieldEnd > f.field ? Math.round((parseD(f.fieldEnd) - parseD(f.field)) / 86400000) + 1 : f.field ? 1 : 0;
+  const dayLabel = d => {
+    const x = parseD(d);
+    return `${x.getMonth() + 1}/${x.getDate()} ${DOW[x.getDay()]}`;
+  };
+  const addExtra = () => {
+    const v = (extraIn || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+    if (all.includes(v)) {
+      setExtraIn("");
+      return;
+    }
+    setF(p => ({
+      ...p,
+      fieldExtra: [...(p.fieldExtra || []), v].sort()
+    }));
+    setExtraIn("");
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      border: `1.5px solid ${tc.a}40`,
+      borderRadius: 9,
+      padding: 11,
+      background: tc.a + "0a"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 7
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: C.t3,
+      fontWeight: 700,
+      flexShrink: 0
+    }
+  }, "~"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: f.fieldEnd || "",
+    min: f.field || undefined,
+    onChange: e => setF(p => ({
+      ...p,
+      fieldEnd: e.target.value
+    })),
+    style: {
+      flex: 1,
+      minWidth: 0,
+      padding: "7px 9px",
+      background: C.surface,
+      border: BD,
+      borderRadius: 6,
+      color: tc.a,
+      fontSize: 13,
+      outline: "none"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 7,
+      flexWrap: "wrap",
+      marginTop: 7,
+      paddingBottom: 9,
+      borderBottom: `1px solid ${tc.a}30`
+    }
+  }, runLen > 1 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      fontWeight: 800,
+      color: tc.a,
+      background: C.surface,
+      border: `1px solid ${tc.a}45`,
+      borderRadius: 6,
+      padding: "3px 9px"
+    }
+  }, "연속 ", runLen, "일"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: C.t3
+    }
+  }, f.fieldEnd && f.fieldEnd < f.field ? "종료일이 시작일보다 앞이라 무시됩니다" : runLen > 1 ? all.slice(0, runLen).map(dayLabel).join(" · ") : "종료일을 비우면 하루짜리입니다")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 800,
+      color: tc.a,
+      margin: "9px 0 6px"
+    }
+  }, "따로 떨어진 날"), (f.fieldExtra || []).length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 6,
+      marginBottom: 7
+    }
+  }, (f.fieldExtra || []).map(d => /*#__PURE__*/React.createElement("span", {
+    key: d,
+    style: {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 6,
+      fontSize: 13,
+      fontWeight: 700,
+      background: C.surface,
+      border: BD,
+      borderRadius: 6,
+      padding: "5px 7px 5px 10px",
+      color: C.t1
+    }
+  }, dayLabel(d), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setF(p => ({
+      ...p,
+      fieldExtra: (p.fieldExtra || []).filter(x => x !== d)
+    })),
+    style: {
+      width: 20,
+      height: 20,
+      borderRadius: "50%",
+      border: "none",
+      background: C.redL,
+      color: C.red,
+      fontSize: 13,
+      fontWeight: 900,
+      cursor: "pointer",
+      lineHeight: 1,
+      padding: 0
+    }
+  }, "×")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 7
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: extraIn,
+    onChange: e => setExtraIn(e.target.value),
+    style: {
+      flex: 1,
+      minWidth: 0,
+      padding: "7px 9px",
+      background: C.surface,
+      border: BD,
+      borderRadius: 6,
+      color: C.t1,
+      fontSize: 13,
+      outline: "none"
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: addExtra,
+    style: {
+      flexShrink: 0,
+      padding: "7px 15px",
+      borderRadius: 7,
+      border: `1.5px solid ${tc.a}50`,
+      background: C.surface,
+      color: tc.a,
+      fontSize: 13,
+      fontWeight: 800,
+      cursor: "pointer",
+      whiteSpace: "nowrap"
+    }
+  }, "+ 추가")), all.length > 1 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.t2,
+      marginTop: 9,
+      fontWeight: 700
+    }
+  }, "총 ", all.length, "일 — ", all.map(dayLabel).join(", ")));
+}
+
 /* ══════════════════════════════════════════════════════════════
    현장 수정 슬라이드 패널 (학교 + 동별)
 ══════════════════════════════════════════════════════════════ */
@@ -5248,6 +5641,9 @@ function EditPanel({
 }) {
   const isMobile = useIsMobile();
   const [nameErr, setNameErr] = useState("");
+  /* 현장조사가 며칠에 걸칠 때만 펼친다 (기본은 하루) */
+  const [multiOpen, setMultiOpen] = useState(!!(sc.fieldEnd || (sc.fieldExtra || []).length));
+  const [extraIn, setExtraIn] = useState("");
   const tc = {
     a: C.blue,
     b: C.blueL,
@@ -5259,6 +5655,8 @@ function EditPanel({
     region: sc.region || "",
     kind: sc.kind || "정기점검",
     field: sc.field || "",
+    fieldEnd: sc.fieldEnd || "",
+    fieldExtra: (sc.fieldExtra || []).slice(),
     start: sc.start || "",
     deliverDate: sc.deliverDate || "",
     end: sc.end || "",
@@ -5322,6 +5720,8 @@ function EditPanel({
           region: f.region,
           kind: f.kind,
           field: f.field,
+          fieldEnd: (f.fieldEnd || "") > (f.field || "") ? f.fieldEnd : "",
+          fieldExtra: (f.fieldExtra || []).filter(Boolean),
           start: f.start,
           deliverDate: f.deliverDate,
           end: f.end,
@@ -5329,7 +5729,7 @@ function EditPanel({
           memo: (f.memo || "").trim(),
           tel: (f.tel || "").trim(),
           flags: [...(f.flags || [])],
-          assignees: f.assignees,
+          assignees: sortMembers(f.assignees),
           headcount: f.assignees.length || s.headcount,
           progress: {
             ...prog
@@ -5641,16 +6041,106 @@ function EditPanel({
     })),
     type: "date",
     col: C.green
-  }), /*#__PURE__*/React.createElement(LI, {
-    label: "◆ 현장조사일",
-    val: f.field,
-    on: v => setF(p => ({
-      ...p,
-      field: v
-    })),
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      gridColumn: "span 2",
+      display: "flex",
+      flexDirection: "column",
+      gap: 5
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      color: multiOpen ? tc.a : C.t3,
+      fontWeight: 700,
+      flex: 1
+    }
+  }, "◆ 현장조사일", surveyDates({
+    field: f.field,
+    fieldEnd: f.fieldEnd,
+    fieldExtra: f.fieldExtra
+  }).length > 1 ? ` · 총 ${surveyDates({
+    field: f.field,
+    fieldEnd: f.fieldEnd,
+    fieldExtra: f.fieldExtra
+  }).length}일` : ""), multiOpen && /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setMultiOpen(false);
+      setF(p => ({
+        ...p,
+        fieldEnd: "",
+        fieldExtra: []
+      }));
+    },
+    style: {
+      padding: "5px 11px",
+      borderRadius: 7,
+      border: `1px solid ${C.border}`,
+      background: "transparent",
+      color: C.t3,
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: "pointer",
+      whiteSpace: "nowrap"
+    }
+  }, "하루로 되돌리기")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 7
+    }
+  }, /*#__PURE__*/React.createElement("input", {
     type: "date",
-    col: tc.a
-  }), /*#__PURE__*/React.createElement(LI, {
+    value: f.field,
+    onChange: e => setF(p => ({
+      ...p,
+      field: e.target.value
+    })),
+    style: {
+      flex: 1,
+      minWidth: 0,
+      padding: "7px 9px",
+      background: C.surfaceL,
+      border: BD,
+      borderRadius: 6,
+      color: tc.a,
+      fontSize: 13,
+      outline: "none"
+    }
+  }), !multiOpen && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setMultiOpen(true),
+    title: "며칠에 걸치면 누르세요",
+    style: {
+      flexShrink: 0,
+      width: 40,
+      height: 38,
+      borderRadius: 8,
+      border: `1.5px solid ${C.border}`,
+      background: C.surface,
+      color: C.t2,
+      fontSize: 20,
+      fontWeight: 700,
+      cursor: "pointer",
+      lineHeight: 1
+    }
+  }, "+")), !multiOpen && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: C.t4
+    }
+  }, "며칠에 걸치면 + 를 누르세요"), multiOpen && /*#__PURE__*/React.createElement(MultiSurvey, {
+    f: f,
+    setF: setF,
+    extraIn: extraIn,
+    setExtraIn: setExtraIn,
+    tc: tc
+  })), /*#__PURE__*/React.createElement(LI, {
     label: "■ 납품일",
     val: f.deliverDate,
     on: v => setF(p => ({
@@ -5716,7 +6206,14 @@ function EditPanel({
         color: on ? "#fff" : mc,
         border: `1.5px solid ${on ? mc : mc + "40"}`
       }
-    }, on && "✓ ", name);
+    }, on && "✓ ", rankOf(name) ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        fontWeight: 600,
+        opacity: .7,
+        marginRight: 4
+      }
+    }, rankOf(name)) : null, name);
   }))))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 14,
@@ -9249,13 +9746,20 @@ function applyConfig(cfg) {
   };
   /* 인원 명단 = 등록된 사람 목록. 아직 등록이 하나도 없으면 예전 members 를 그대로 쓴다
      (등록을 마치기 전에 담당자 배정이 막히지 않도록) */
-  Object.values(ACCOUNTS).forEach(a => push(a && a.name));
+  RANK_OF = {};
+  Object.values(ACCOUNTS).forEach(a => {
+    if (a && a.name) {
+      push(a.name);
+      if (a.rank) RANK_OF[a.name] = a.rank;
+    }
+  });
   if (!flat.length && cfg.members) {
     if (Array.isArray(cfg.members)) cfg.members.forEach(push);else if (typeof cfg.members === "object") Object.values(cfg.members).forEach(v => toArr(v).forEach(push));
   }
   if (flat.length) {
     MEMBERS.length = 0;
-    flat.sort((a, b) => a.localeCompare(b)).forEach(n => MEMBERS.push(n));
+    /* 직급 순 → 같은 직급이면 이름 순 */
+    flat.sort(byRank).forEach(n => MEMBERS.push(n));
   }
 }
 
@@ -10185,12 +10689,14 @@ function SettingsPage({
      수정 기록·게시판에 실명이 남는다. 화면에는 이름만 보인다. */
   const [accEmail, setAccEmail] = useState("");
   const [accName, setAccName] = useState("");
+  const [accRank, setAccRank] = useState("");
   const accList = Object.entries(ACCOUNTS).map(([k, v]) => ({
     k,
     email: v && v.email || k,
     name: v && v.name || "",
+    rank: v && v.rank || "",
     admin: ADMINS[k] === true
-  })).sort((a, b) => (isOwnerEmail(b.email) ? 1 : 0) - (isOwnerEmail(a.email) ? 1 : 0) || (b.admin ? 1 : 0) - (a.admin ? 1 : 0) || a.name.localeCompare(b.name));
+  })).sort((a, b) => byRank(a.name, b.name));
   const writeAccounts = next => {
     try {
       firebase.database().ref(FB_CONFIG).update({
@@ -10219,12 +10725,26 @@ function SettingsPage({
       ...ACCOUNTS,
       [entryKey(em, nm)]: {
         email: em,
-        name: nm
+        name: nm,
+        rank: accRank || ""
       }
     });
-    logAction("추가", "인원 등록", null, `${nm}${em ? ` (${em})` : " (로그인 없음)"}`);
+    logAction("추가", "인원 등록", null, `${accRank ? `${accRank} ` : ""}${nm}${em ? ` (${em})` : " (로그인 없음)"}`);
     setAccEmail("");
     setAccName("");
+    setAccRank("");
+  };
+  /* 등록된 사람의 직급 변경 */
+  const setRank = (a, rank) => {
+    writeAccounts({
+      ...ACCOUNTS,
+      [a.k]: {
+        email: a.email,
+        name: a.name,
+        rank: rank || ""
+      }
+    });
+    logAction("수정", `직급 · ${a.name}`, a.rank || "미지정", rank || "미지정");
   };
   /* 예전 인원 명단 중 아직 등록되지 않은 사람 — 한 번에 옮길 수 있게 */
   const notRegistered = MEMBERS.filter(n => !accList.some(a => a.name === n));
@@ -10861,7 +11381,26 @@ function SettingsPage({
       fontSize: 14,
       outline: "none"
     }
-  }), /*#__PURE__*/React.createElement("button", {
+  }), /*#__PURE__*/React.createElement("select", {
+    value: accRank,
+    onChange: e => setAccRank(e.target.value),
+    style: {
+      flexShrink: 0,
+      minWidth: 92,
+      padding: "9px 8px",
+      background: C.surfaceL,
+      border: `1.5px dashed ${C.border}`,
+      borderRadius: 8,
+      color: accRank ? C.t1 : C.t4,
+      fontSize: 14,
+      outline: "none"
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "직급"), RANKS.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r,
+    value: r
+  }, r))), /*#__PURE__*/React.createElement("button", {
     onClick: addAccount,
     style: {
       padding: "9px 18px",
