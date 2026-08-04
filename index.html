@@ -7219,7 +7219,7 @@ function SitesManager({
   }, !isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "2fr 110px 110px 70px 116px 50px",
+      gridTemplateColumns: "2fr 126px 126px 68px 116px 46px",
       background: C.surfaceL,
       borderBottom: `1.5px solid ${C.borderD}`,
       padding: "10px 16px",
@@ -7248,14 +7248,16 @@ function SitesManager({
       n.has(s.id) ? n.delete(s.id) : n.add(s.id);
       return n;
     });
-    const rowBg = urgent ? C.redL + "80" : allDone ? C.greenL + "50" : si % 2 === 0 ? C.surface : C.surfaceL;
+    /* 줄무늬를 없애고 흰색으로 통일 — 대신 행 사이 구분선을 진하게 했다.
+       긴급·완료만 아주 옅게 표시해 눈에 걸리게 둔다. */
+    const rowBg = urgent ? C.redL + "60" : allDone ? C.greenL + "40" : C.surface;
     const rowAccent = urgent ? C.red : allDone ? C.green : "transparent";
 
     /* ── 휴대폰: 칸을 나누지 않고 위아래로 쌓아서 표시 ── */
     if (isMobile) return /*#__PURE__*/React.createElement("div", {
       key: s.id,
       style: {
-        borderBottom: BD
+        borderBottom: `1.5px solid ${C.borderD}`
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -7623,13 +7625,13 @@ function SitesManager({
     return /*#__PURE__*/React.createElement("div", {
       key: s.id,
       style: {
-        borderBottom: BD
+        borderBottom: `1.5px solid ${C.borderD}`
       }
     }, /*#__PURE__*/React.createElement("div", {
       onClick: toggleOpen,
       style: {
         display: "grid",
-        gridTemplateColumns: "2fr 110px 110px 70px 116px 50px",
+        gridTemplateColumns: "2fr 126px 126px 68px 116px 46px",
         gap: 8,
         padding: "12px 16px",
         cursor: "pointer",
@@ -7761,8 +7763,8 @@ function SitesManager({
         border: `1px solid ${C.border}`,
         borderRadius: 5,
         color: C.blue,
-        fontSize: 13,
-        padding: "3px 5px",
+        fontSize: 12,
+        padding: "4px 3px",
         outline: "none",
         width: "100%",
         textAlign: "center",
@@ -7784,8 +7786,8 @@ function SitesManager({
         border: `1px solid ${C.border}`,
         borderRadius: 5,
         color: C.orange,
-        fontSize: 13,
-        padding: "3px 5px",
+        fontSize: 12,
+        padding: "4px 3px",
         outline: "none",
         width: "100%",
         textAlign: "center",
@@ -7862,7 +7864,7 @@ function SitesManager({
         key: bi,
         style: {
           display: "grid",
-          gridTemplateColumns: "2fr 110px 110px 70px 116px 50px",
+          gridTemplateColumns: "2fr 126px 126px 68px 116px 46px",
           gap: 8,
           padding: "8px 16px 8px 38px",
           background: C.surfaceL,
