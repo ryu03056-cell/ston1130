@@ -2132,7 +2132,7 @@ function buildSheet(schools) {
     /* 앱 전용 (AB~AF) */
     /* AA열 — 달력 시트가 FILTER 로 끌어가는 표시 문자열 (원본과 동일한 수식) */
     schoolRow[26] = null; // 수식은 아래에서 직접 넣는다
-    schoolRow[27] = (s.assignees || []).join(", ");
+    schoolRow[27] = sortMembers(s.assignees).join(", ");
     schoolRow[28] = s.tel || "";
     schoolRow[29] = getFlags(s).join(",");
     schoolRow[30] = prog.join(",");
@@ -2523,7 +2523,7 @@ function buildBudgetSheet(entries) {
     bs.forEach((b, bi) => {
       const first = bi === 0;
       const ba = b.budget != null && b.budget !== "" ? Number(b.budget) : "";
-      aoa.push([first ? xlHalfLabel(yr, half) : "", first ? (s.assignees || []).join(", ") : "", first ? s.region || "" : "", first ? s.school || "" : "", b.b || "", isNaN(ba) ? "" : ba, first ? total || "" : ""]);
+      aoa.push([first ? xlHalfLabel(yr, half) : "", first ? sortMembers(s.assignees).join(", ") : "", first ? s.region || "" : "", first ? s.school || "" : "", b.b || "", isNaN(ba) ? "" : ba, first ? total || "" : ""]);
     });
     blocks.push({
       startRow,
@@ -2792,7 +2792,7 @@ function buildNotesSheet(entries) {
     half,
     schools
   }) => (schools || []).forEach(s => (s.buildings || []).forEach(b => {
-    if (b.note && String(b.note).trim()) rows.push([xlHalfLabel(yr, half), (s.assignees || []).join(", "), s.school || "", b.b || "", b.note]);
+    if (b.note && String(b.note).trim()) rows.push([xlHalfLabel(yr, half), sortMembers(s.assignees).join(", "), s.school || "", b.b || "", b.note]);
   })));
   if (!rows.length) rows.push(["", "", "", "", "특이사항이 입력된 현장이 없습니다."]);
   return buildAuxSheet(headers, rows, meta);
@@ -2895,7 +2895,7 @@ function buildScheduleSheet(entries) {
     s,
     label
   }) => {
-    const base = [s.region || "", s.school || "", getFlags(s).join(","), xlDate(s.field), xlDate(s.start), xlDate(s.end), ddStr(s.end), (s.assignees || []).join(", "), s.tel || ""];
+    const base = [s.region || "", s.school || "", getFlags(s).join(","), xlDate(s.field), xlDate(s.start), xlDate(s.end), ddStr(s.end), sortMembers(s.assignees).join(", "), s.tel || ""];
     return multi ? [label, ...base] : base;
   });
   if (!rows.length) rows.push(new Array(headers.length).fill(""));
@@ -2966,7 +2966,7 @@ function buildCalendarSheet(entries, ym, dataSheetName, dataRows) {
     if (s.field && !seen.has(uk(s.field, "조사"))) {
       seen.add(uk(s.field, "조사"));
       add(s.field, "조사", mark);
-      add(s.field, "인원", (s.assignees || []).join(",") || "미배정");
+      add(s.field, "인원", sortMembers(s.assignees).join(",") || "미배정");
     }
     if (s.end && !seen.has(uk(s.end, "완수"))) {
       seen.add(uk(s.end, "완수"));
@@ -3882,7 +3882,7 @@ function DayPanel({
       fontSize: 12,
       color: C.t2
     }
-  }, "🏁 완수 예정 · ", s.buildings.length, "동", (s.assignees || []).length ? ` · ${s.assignees.join("·")}` : ""), /*#__PURE__*/React.createElement(EditLine, {
+  }, "🏁 완수 예정 · ", s.buildings.length, "동", (s.assignees || []).length ? ` · ${sortMembers(s.assignees).join("·")}` : ""), /*#__PURE__*/React.createElement(EditLine, {
     s: s
   }));
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -4447,7 +4447,7 @@ function EvRow({
   onClick
 }) {
   const col = evColor(e.field);
-  const who = (e.assignees || []).join(" · ");
+  const who = sortMembers(e.assignees).join(" · ");
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     title: `${e.school}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
@@ -4524,7 +4524,7 @@ function WeekChip({
   onClick
 }) {
   const col = evColor(e.field);
-  const who = (e.assignees || []).join("·");
+  const who = sortMembers(e.assignees).join("·");
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     title: `${e.school}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
@@ -4648,7 +4648,7 @@ function Calendar({
           field: f,
           region: s.region || "",
           headcount: s.headcount || 2,
-          assignees: s.assignees || [],
+          assignees: sortMembers(s.assignees),
           pos: f === "field" ? surveyPos(s, ds) : "",
           days: f === "field" ? surveyDates(s).length : 1
         });
@@ -4963,7 +4963,7 @@ function Calendar({
           setDragging(null);
           setOverDate(null);
         },
-        title: `${e.school} · ${evLabel(e.field)}${e.days > 1 ? ` (${e.days}일 중 ${e.pos || "중간"})` : ""} · ${e.assignees.length ? e.assignees.join(",") : "인원 미배정"}`,
+        title: `${e.school} · ${evLabel(e.field)}${e.days > 1 ? ` (${e.days}일 중 ${e.pos || "중간"})` : ""} · ${e.assignees.length ? sortMembers(e.assignees).join(",") : "인원 미배정"}`,
         style: {
           padding: isMobile ? "3px 5px" : "3px 7px",
           borderRadius: 4,
@@ -7885,7 +7885,7 @@ function SitesManager({
         marginTop: 5,
         paddingLeft: 19
       }
-    }, "👤 ", s.assignees.join(" · ")), s.lastEdit && /*#__PURE__*/React.createElement("div", {
+    }, "👤 ", sortMembers(s.assignees).join(" · ")), s.lastEdit && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 4,
         paddingLeft: 19
@@ -8211,7 +8211,7 @@ function SitesManager({
         fontSize: 12,
         color: C.t2
       }
-    }, "👤 ", s.assignees.join("·")), /*#__PURE__*/React.createElement("span", {
+    }, "👤 ", sortMembers(s.assignees).join("·")), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
         color: C.t4
@@ -11678,7 +11678,7 @@ function ReportCard({
         color: C.orange,
         fontWeight: 800
       }
-    }, " ⚠"), s.end && ` · 완수 ${fd(s.end)}`, (s.assignees || []).length > 0 && ` · 👤 ${s.assignees.join("·")}`), /*#__PURE__*/React.createElement("div", {
+    }, " ⚠"), s.end && ` · 완수 ${fd(s.end)}`, (s.assignees || []).length > 0 && ` · 👤 ${sortMembers(s.assignees).join("·")}`), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 6,
