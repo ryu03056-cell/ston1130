@@ -11311,7 +11311,29 @@ function SettingsPage({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, a.email || "로그인 없음 · 현장 인원"), a.email ? /*#__PURE__*/React.createElement("button", {
+  }, a.email || "로그인 없음 · 현장 인원"), /*#__PURE__*/React.createElement("select", {
+    value: a.rank || "",
+    onChange: e => setRank(a, e.target.value),
+    title: "직급",
+    style: {
+      flexShrink: 0,
+      minWidth: 84,
+      padding: "6px 6px",
+      borderRadius: 7,
+      border: `1.5px solid ${a.rank ? C.blue + "50" : C.border}`,
+      background: a.rank ? C.blueL : C.surface,
+      color: a.rank ? C.blue : C.t4,
+      fontSize: 12,
+      fontWeight: 800,
+      outline: "none",
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "직급 없음"), RANKS.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r,
+    value: r
+  }, r))), a.email ? /*#__PURE__*/React.createElement("button", {
     onClick: () => setAdminFlag(a, !a.admin),
     title: "관리자로 지정하면 설정·엑셀 관리를 쓸 수 있습니다",
     style: {
