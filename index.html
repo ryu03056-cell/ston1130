@@ -2931,7 +2931,7 @@ function calMonths(entries) {
     m: +k.slice(5, 7)
   }));
 }
-function buildCalendarSheet(entries, ym, dataSheetName, dataRows) {
+function buildCalendarSheet(entries, ym, dataSheetName, dataRows, notes) {
   const today = new Date();
   /* 데이터 시트와 수식으로 연결한다 (원본 방식).
      시트명이 주어지면 FILTER 수식을, 아니면 계산된 값을 넣는다. */
@@ -2959,6 +2959,13 @@ function buildCalendarSheet(entries, ym, dataSheetName, dataRows) {
     })[kind].push(text);
   };
   const seen = new Set();
+  /* 메모 일정도 달력에 함께 (현장 리스트에는 넣지 않는다) */
+  (notes || []).forEach(n => {
+    noteDates(n).forEach(d => {
+      const who = (n.who || []).join(",");
+      add(d, "조사", `[${n.kind}] ${n.text}${who ? ` (${who})` : ""}`);
+    });
+  });
   entries.forEach(({
     schools
   }) => (schools || []).forEach(s => {
@@ -3367,6 +3374,137 @@ function applyNotes(schools, notes) {
   return applied;
 }
 
+/* 메모 일정 편집 — 현장이 아닌 부가 일정(휴가·반차·회의 등).
+   현장조사와 같은 방식으로 기간과 따로 떨어진 날을 함께 지정할 수 있다. */
+function NoteEditor({
+  dateStr,
+  note,
+  editor,
+  onClose
+}) {
+  const [kind, setKind] = useState(note ? note.kind : "일반");
+  const [text, setText] = useState(note ? note.text : "");
+  const [who, setWho] = useState(note ? (note.who || []).slice() : []);
+  const [dEnd, setDEnd] = useState(note ? note.dateEnd || "" : "");
+  const [extra, setExtra] = useState(note ? (note.extra || []).slice() : []);
+  const [extraIn, setExtraIn] = useState("");
+  const [multi, setMulti] = useState(!!(note && (note.dateEnd || (note.extra || []).length)));
+  const [pick, setPick] = useState(false);
+  const base = note ? note.date : dateStr;
+  const all = noteDates({ date: base, dateEnd: dEnd, extra });
+  const dayLabel = d => { const x = parseD(d); return `${x.getMonth() + 1}/${x.getDate()} ${DOW[x.getDay()]}`; };
+  const addExtra = () => {
+    const v = (extraIn || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || all.includes(v)) { setExtraIn(""); return; }
+    setExtra(p => [...p, v].sort());
+    setExtraIn("");
+  };
+  const save = () => {
+    const t = (text || "").trim();
+    if (!t) { window.alert("내용을 입력하세요."); return; }
+    const body = {
+      kind, text: t, who,
+      date: base,
+      dateEnd: dEnd && dEnd > base ? dEnd : null,
+      extra: extra.length ? extra : null,
+      by: editor || "익명",
+      at: note ? note.at || Date.now() : Date.now(),
+      editedAt: note ? Date.now() : null
+    };
+    try {
+      const ref = firebase.database().ref(FB_NOTES);
+      (note ? ref.child(note.id).update(body) : ref.push(body))
+        .catch(e => window.alert("저장 실패: " + (e && e.message || e)));
+      logAction(note ? "수정" : "추가", `메모 · ${kind}`, note ? note.text : null, t);
+    } catch (e) { window.alert("저장 실패: " + (e && e.message || e)); }
+    onClose();
+  };
+  const inp = { padding: "9px 11px", background: C.surface, border: BD, borderRadius: 8, color: C.t1, fontSize: 14, outline: "none" };
+  return React.createElement("div", {
+    style: { marginTop: 8, padding: 12, borderRadius: 10, border: `1.5px solid ${noteColor(kind)}45`, background: noteColor(kind) + "0a" }
+  },
+    React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: noteColor(kind), marginBottom: 8 } },
+      note ? "✎ 메모 수정" : "✎ 이 날짜에 메모 추가"),
+    React.createElement("div", { style: { display: "flex", gap: 5, marginBottom: 8 } },
+      NOTE_KINDS.map(k => {
+        const on = kind === k.v;
+        return React.createElement("button", {
+          key: k.v, onClick: () => setKind(k.v),
+          style: { flex: 1, padding: "8px 4px", borderRadius: 7, fontSize: 13, fontWeight: on ? 800 : 600, cursor: "pointer", whiteSpace: "nowrap",
+            border: `1.5px solid ${on ? k.color : C.border}`, background: on ? k.color + "18" : C.surface, color: on ? k.color : C.t3 }
+        }, k.v);
+      })),
+    React.createElement("input", {
+      value: text, onChange: e => setText(e.target.value), autoFocus: true,
+      placeholder: "예: 본사 회의 14시 · 장비 점검",
+      onKeyDown: e => { if (e.key === "Enter") save(); },
+      style: { ...inp, width: "100%", boxSizing: "border-box", marginBottom: 8 }
+    }),
+    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 8 } },
+      React.createElement("span", { style: { fontSize: 12, color: C.t3, fontWeight: 700 } }, "담당"),
+      sortMembers(who).map(n => React.createElement("span", {
+        key: n,
+        style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 700, background: C.surface, border: BD, borderRadius: 20, padding: "4px 6px 4px 11px", color: C.t1 }
+      }, n, React.createElement("button", {
+        onClick: () => setWho(p => p.filter(x => x !== n)),
+        style: { width: 18, height: 18, borderRadius: "50%", border: "none", background: C.redL, color: C.red, fontSize: 12, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: 0 }
+      }, "×"))),
+      React.createElement("button", {
+        onClick: () => setPick(v => !v),
+        style: { padding: "5px 11px", borderRadius: 7, border: `1px solid ${C.blue}45`, background: pick ? C.blue : C.blueL, color: pick ? "#fff" : C.blue, fontSize: 12, fontWeight: 800, cursor: "pointer" }
+      }, pick ? "닫기" : "+ 인원"),
+      React.createElement("span", { style: { fontSize: 11, color: C.t4 } }, "선택 안 해도 됩니다")),
+    pick && React.createElement("div", {
+      style: { display: "flex", flexWrap: "wrap", gap: 5, padding: 9, marginBottom: 8, background: C.surface, border: BD, borderRadius: 8 }
+    }, allMembers().filter(n => !who.includes(n)).map(n =>
+      React.createElement("button", {
+        key: n, onClick: () => { setWho(p => [...p, n]); },
+        style: { padding: "6px 11px", borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: "pointer", background: C.surfaceL, color: C.t1, border: BD }
+      }, rankOf(n) ? React.createElement("span", { style: { fontSize: 11, opacity: .7, marginRight: 4 } }, rankOf(n)) : null, n))),
+    !multi && React.createElement("button", {
+      onClick: () => setMulti(true),
+      style: { padding: "7px 12px", borderRadius: 7, border: `1px solid ${C.border}`, background: C.surface, color: C.t3, fontSize: 12, fontWeight: 700, cursor: "pointer", marginBottom: 8 }
+    }, "+ 여러 날에 걸쳐요"),
+    multi && React.createElement("div", {
+      style: { padding: 10, borderRadius: 8, border: `1px solid ${C.border}`, background: C.surface, marginBottom: 8 }
+    },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 7, marginBottom: 7 } },
+        React.createElement("span", { style: { fontSize: 13, color: C.t3, fontWeight: 700 } }, base, " ~"),
+        React.createElement("input", {
+          type: "date", value: dEnd, min: base, onChange: e => setDEnd(e.target.value),
+          style: { ...inp, flex: 1, minWidth: 0, fontSize: 13 }
+        }),
+        React.createElement("button", {
+          onClick: () => { setMulti(false); setDEnd(""); setExtra([]); },
+          style: { padding: "6px 10px", borderRadius: 7, border: `1px solid ${C.border}`, background: "transparent", color: C.t3, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }
+        }, "하루로")),
+      extra.length > 0 && React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 } },
+        extra.map(d => React.createElement("span", {
+          key: d,
+          style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700, background: C.surfaceL, border: BD, borderRadius: 6, padding: "4px 6px 4px 9px", color: C.t1 }
+        }, dayLabel(d), React.createElement("button", {
+          onClick: () => setExtra(p => p.filter(x => x !== d)),
+          style: { width: 17, height: 17, borderRadius: "50%", border: "none", background: C.redL, color: C.red, fontSize: 11, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: 0 }
+        }, "×")))),
+      React.createElement("div", { style: { display: "flex", gap: 6 } },
+        React.createElement("input", { type: "date", value: extraIn, onChange: e => setExtraIn(e.target.value), style: { ...inp, flex: 1, minWidth: 0, fontSize: 13 } }),
+        React.createElement("button", {
+          onClick: addExtra,
+          style: { padding: "7px 13px", borderRadius: 7, border: `1.5px solid ${C.border}`, background: C.surface, color: C.t2, fontSize: 13, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }
+        }, "+ 따로")),
+      all.length > 1 && React.createElement("div", { style: { fontSize: 12, color: C.t2, marginTop: 8, fontWeight: 700 } },
+        "총 ", all.length, "일 — ", all.map(dayLabel).join(", "))),
+    React.createElement("div", { style: { display: "flex", gap: 6 } },
+      React.createElement("button", {
+        onClick: onClose,
+        style: { flex: 1, padding: "10px 0", borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", color: C.t3, fontSize: 13, fontWeight: 700, cursor: "pointer" }
+      }, "취소"),
+      React.createElement("button", {
+        onClick: save,
+        style: { flex: 2, padding: "10px 0", borderRadius: 8, border: "none", background: noteColor(kind), color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }
+      }, note ? "저장" : "메모 추가")));
+}
+
 /* 기존 현장을 찾아 이 날짜를 넣는다 — 현장 관리에 이미 있는 현장에 일정만 추가할 때 */
 function SitePicker({
   dateStr,
@@ -3457,7 +3595,10 @@ function DayPanel({
   allSchools,
   setDb,
   onClose,
-  isMobile
+  isMobile,
+  notes,
+  isAdmin,
+  editor
 }) {
   const [pickerId, setPickerId] = useState(null);
   const [editId, setEditId] = useState(null);
@@ -3467,6 +3608,18 @@ function DayPanel({
   const [draft, setDraft] = useState(null); // 아직 저장 안 한 새 현장
   const [pickOpen, setPickOpen] = useState(false); // 기존 현장 찾아 넣기
   const [pickMsg, setPickMsg] = useState(null);
+  const [noteOpen, setNoteOpen] = useState(false); // 메모 작성
+  const [noteEdit, setNoteEdit] = useState(null); // 수정 중인 메모
+  const dayNotes = (notes || []).filter(n => noteDates(n).includes(dateStr));
+  const delNote = n => {
+    if (!window.confirm(`'${n.text}' 메모를 지울까요?`)) return;
+    try {
+      firebase.database().ref(`${FB_NOTES}/${n.id}`).remove().catch(e => window.alert("삭제 실패: " + (e && e.message || e)));
+      logAction("삭제", `메모 · ${n.kind}`, n.text, null);
+    } catch (e) {
+      window.alert("삭제 실패: " + (e && e.message || e));
+    }
+  };
   const geoAll = useGeoCache();
 
   /* 같은 현장이 상·하반기 양쪽에 있으면(1년 계약 이월) 한 번만 표시.
@@ -4019,7 +4172,7 @@ function DayPanel({
       color: C.blue + "bb",
       marginTop: 4
     }
-  }, "현장 ", fieldSchools.length, " · 착수 ", startSchools.length, " · 완수 ", endSchools.length, " · 총 ", total, "건")), /*#__PURE__*/React.createElement("button", {
+  }, "현장 ", fieldSchools.length, " · 착수 ", startSchools.length, " · 완수 ", endSchools.length, dayNotes.length ? ` · 메모 ${dayNotes.length}` : "", " · 총 ", total + dayNotes.length, "건")), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
       width: 32,
@@ -4071,7 +4224,116 @@ function DayPanel({
       fontWeight: 800,
       cursor: "pointer"
     }
-  }, pickOpen ? "✕ 닫기" : "⌕ 기존 현장에 이 날짜 넣기"), pickOpen && /*#__PURE__*/React.createElement(SitePicker, {
+  }, pickOpen ? "✕ 닫기" : "⌕ 기존 현장에 이 날짜 넣기"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setNoteEdit(null);
+      setNoteOpen(v => !v);
+    },
+    style: {
+      width: "100%",
+      padding: "12px 0",
+      borderRadius: 10,
+      marginTop: 7,
+      border: `1.5px solid ${noteOpen ? C.t2 : C.border}`,
+      background: noteOpen ? C.surfaceD : C.surface,
+      color: C.t2,
+      fontSize: 15,
+      fontWeight: 800,
+      cursor: "pointer"
+    }
+  }, noteOpen && !noteEdit ? "✕ 닫기" : "✎ 메모 추가 (휴가·회의 등)"), (noteOpen || noteEdit) && /*#__PURE__*/React.createElement(NoteEditor, {
+    dateStr: dateStr,
+    note: noteEdit,
+    editor: editor,
+    onClose: () => {
+      setNoteOpen(false);
+      setNoteEdit(null);
+    }
+  }), dayNotes.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10
+    }
+  }, dayNotes.map(n => /*#__PURE__*/React.createElement("div", {
+    key: n.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 9,
+      padding: "10px 11px",
+      marginBottom: 6,
+      background: C.surfaceL,
+      border: `1px dashed ${noteColor(n.kind)}55`,
+      borderLeft: `4px dotted ${noteColor(n.kind)}`,
+      borderRadius: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flexShrink: 0,
+      minWidth: 40,
+      textAlign: "center",
+      padding: "3px 5px",
+      borderRadius: 5,
+      fontSize: 12,
+      fontWeight: 800,
+      color: noteColor(n.kind),
+      background: noteColor(n.kind) + "16",
+      border: `1px solid ${noteColor(n.kind)}40`
+    }
+  }, n.kind), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "block",
+      fontSize: 14,
+      fontWeight: 700,
+      color: C.t1,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, n.text), /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "block",
+      fontSize: 12,
+      color: C.t3,
+      marginTop: 2,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, (n.who || []).length ? `👤 ${sortMembers(n.who).join(" · ")} · ` : "", noteDates(n).length > 1 ? `${noteDates(n).length}일 · ` : "", n.by || "")), isAdmin && /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setNoteOpen(false);
+      setNoteEdit(n);
+    },
+    style: {
+      flexShrink: 0,
+      padding: "6px 11px",
+      borderRadius: 7,
+      border: `1px solid ${C.blue}40`,
+      background: C.blueL,
+      color: C.blue,
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "수정"), isAdmin && /*#__PURE__*/React.createElement("button", {
+    onClick: () => delNote(n),
+    style: {
+      flexShrink: 0,
+      padding: "6px 11px",
+      borderRadius: 7,
+      border: `1px solid ${C.red}35`,
+      background: "transparent",
+      color: C.red,
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "삭제")))), pickOpen && /*#__PURE__*/React.createElement(SitePicker, {
     dateStr: dateStr,
     allSchools: allSchools,
     setDb: setDb,
@@ -4521,6 +4783,73 @@ function EvRow({
   }, who ? `👤 ${who}` : `⚠ 인원 미배정 · ${e.headcount}명 예정`)));
 }
 
+/* 메모 일정 한 줄 — 현장 점검이 아닌 부가 일정 (휴가·회의 등) */
+function NoteRow({
+  n,
+  compact,
+  onClick
+}) {
+  const col = noteColor(n.kind);
+  const who = sortMembers(n.who || []).join(" · ");
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    title: `${n.kind} · ${n.text}${who ? ` · ${who}` : ""}`,
+    style: {
+      width: "100%",
+      textAlign: "left",
+      display: "flex",
+      alignItems: "center",
+      gap: 9,
+      padding: compact ? "8px 10px" : "10px 12px",
+      marginBottom: 5,
+      borderRadius: 8,
+      cursor: "pointer",
+      border: `1px dashed ${col}55`,
+      borderLeft: `4px dotted ${col}`,
+      background: C.surfaceL
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flexShrink: 0,
+      minWidth: 40,
+      textAlign: "center",
+      padding: "3px 5px",
+      borderRadius: 5,
+      fontSize: 12,
+      fontWeight: 800,
+      color: col,
+      background: col + "16",
+      border: `1px solid ${col}40`
+    }
+  }, n.kind), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "block",
+      fontSize: compact ? 14 : 15,
+      fontWeight: 700,
+      color: C.t1,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, n.text), who && /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "block",
+      marginTop: 2,
+      fontSize: 12,
+      fontWeight: 700,
+      color: C.t2,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, "👤 ", who)));
+}
+
 /* 일정 칸 (데스크탑 주 보기 7칸) — 좁으니 세 줄로 압축 */
 function WeekChip({
   e,
@@ -4598,7 +4927,10 @@ function WeekChip({
 function Calendar({
   allSchools,
   setDb,
-  isMobile
+  isMobile,
+  notes,
+  isAdmin,
+  editor
 }) {
   const [view, setView] = useState("month"); // day | week | month
   const [cursor, setCursor] = useState(() => todayStr());
@@ -4667,6 +4999,17 @@ function Calendar({
   }, [allSchools]);
 
   const evOf = ds => (evByDate[ds] || []).filter(e => kinds.includes(e.field));
+
+  /* 날짜별 메모 — 현장 일정과 따로 모아 둔다 */
+  const noteByDate = useMemo(() => {
+    const map = {};
+    (notes || []).forEach(n => {
+      noteDates(n).forEach(d => (map[d] = map[d] || []).push(n));
+    });
+    Object.values(map).forEach(a => a.sort((x, y2) => String(x.at || 0) - String(y2.at || 0)));
+    return map;
+  }, [notes]);
+  const noteOf = ds => noteByDate[ds] || [];
 
   /* 기간 이동 */
   const shift = n => {
@@ -4992,14 +5335,38 @@ function Calendar({
           }),
           opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
         }
-      }, isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "")), evs.length > cap && /*#__PURE__*/React.createElement("div", {
+      }, isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "")), noteOf(ds).slice(0, Math.max(0, cap - evs.length)).map((n, ni) => /*#__PURE__*/React.createElement("div", {
+        key: `n${ni}`,
+        title: `${n.kind} · ${n.text}${(n.who || []).length ? ` · ${n.who.join(",")}` : ""}`,
+        style: {
+          padding: isMobile ? "2px 3px" : "3px 7px",
+          borderRadius: 3,
+          background: C.surfaceL,
+          borderLeft: `${isMobile ? 2 : 3}px dotted ${noteColor(n.kind)}`,
+          fontSize: isMobile ? 11 : 14,
+          lineHeight: isMobile ? 1.25 : 1.5,
+          letterSpacing: isMobile ? "-0.4px" : 0,
+          color: C.t2,
+          fontWeight: 600,
+          overflow: "hidden",
+          ...(isMobile ? {
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            wordBreak: "break-all"
+          } : {
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap"
+          })
+        }
+      }, isMobile ? null : "✎ ", n.text)), evs.length + noteOf(ds).length > cap && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: isMobile ? 10 : 12,
           color: C.t4,
           paddingLeft: 3,
           fontWeight: 800
         }
-      }, "+", evs.length - cap, "건"))));
+      }, "+", evs.length + noteOf(ds).length - cap, "건"))));
     }))))));
   };
 
@@ -5063,24 +5430,56 @@ function Calendar({
           fontWeight: 700,
           color: dow === 0 ? C.red : dow === 6 ? C.blue : C.t2
         }
-      }, DOW[dow]), evs.length > 0 && /*#__PURE__*/React.createElement("span", {
+      }, DOW[dow]), evs.length + noteOf(ds).length > 0 && /*#__PURE__*/React.createElement("span", {
         style: {
           marginLeft: "auto",
           fontSize: 12,
           fontWeight: 700,
           color: C.t3
         }
-      }, evs.length)), evs.length === 0 ? /*#__PURE__*/React.createElement("div", {
+      }, evs.length + noteOf(ds).length)), evs.length + noteOf(ds).length === 0 ? /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: C.t4,
           padding: "3px 2px"
         }
-      }, "일정 없음") : evs.map((e, i) => /*#__PURE__*/React.createElement(WeekChip, {
+      }, "일정 없음") : null, evs.map((e, i) => /*#__PURE__*/React.createElement(WeekChip, {
         key: i,
         e: e,
         onClick: () => setSelDate(ds)
-      })));
+      })), noteOf(ds).map((n, i) => /*#__PURE__*/React.createElement("button", {
+        key: `n${i}`,
+        onClick: () => setSelDate(ds),
+        title: `${n.kind} · ${n.text}`,
+        style: {
+          width: "100%",
+          textAlign: "left",
+          display: "block",
+          padding: "6px 8px",
+          marginBottom: 5,
+          borderRadius: 7,
+          cursor: "pointer",
+          border: `1px dashed ${noteColor(n.kind)}45`,
+          borderLeft: `4px dotted ${noteColor(n.kind)}`,
+          background: C.surfaceL
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 12,
+          fontWeight: 800,
+          color: noteColor(n.kind),
+          marginBottom: 2
+        }
+      }, n.kind), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 13,
+          fontWeight: 700,
+          color: C.t1,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap"
+        }
+      }, n.text))));
     }));
   };
 
@@ -5089,7 +5488,7 @@ function Calendar({
     const days = Array.from({
       length: 7
     }, (_, i) => addDays(weekStart, i));
-    const total = days.reduce((a, d) => a + evOf(dstr(d)).length, 0);
+    const total = days.reduce((a, d) => a + evOf(dstr(d)).length + noteOf(dstr(d)).length, 0);
     return /*#__PURE__*/React.createElement("div", {
       ...swipeProps,
       style: {
@@ -5164,9 +5563,14 @@ function Calendar({
           fontWeight: 700,
           color: evs.length ? C.t2 : C.t4
         }
-      }, evs.length ? `${evs.length}건` : "일정 없음")), evs.map((e, i) => /*#__PURE__*/React.createElement(EvRow, {
+      }, evs.length + noteOf(ds).length ? `${evs.length + noteOf(ds).length}건` : "일정 없음")), evs.map((e, i) => /*#__PURE__*/React.createElement(EvRow, {
         key: i,
         e: e,
+        compact: true,
+        onClick: () => setSelDate(ds)
+      })), noteOf(ds).map((n, i) => /*#__PURE__*/React.createElement(NoteRow, {
+        key: `n${i}`,
+        n: n,
         compact: true,
         onClick: () => setSelDate(ds)
       })));
@@ -5187,7 +5591,39 @@ function Calendar({
       style: {
         touchAction: "pan-y"
       }
-    }, evs.length === 0 && /*#__PURE__*/React.createElement("div", {
+    }, noteOf(cursor).length > 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginBottom: 14
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px",
+        borderRadius: 8,
+        background: C.surfaceL,
+        border: `1px dashed ${C.borderD}`,
+        marginBottom: 8
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 14,
+        fontWeight: 800,
+        color: C.t2
+      }
+    }, "✎ 메모"), /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: "auto",
+        fontSize: 14,
+        fontWeight: 800,
+        color: C.t2
+      }
+    }, noteOf(cursor).length)), noteOf(cursor).map((n, i) => /*#__PURE__*/React.createElement(NoteRow, {
+      key: `n${i}`,
+      n: n,
+      onClick: () => setSelDate(cursor)
+    }))), evs.length === 0 && noteOf(cursor).length === 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "center",
         padding: "50px 20px",
@@ -5354,7 +5790,10 @@ function Calendar({
     allSchools: allSchools,
     setDb: setDb,
     onClose: () => setSelDate(null),
-    isMobile: isMobile
+    isMobile: isMobile,
+    notes: notes,
+    isAdmin: isAdmin,
+    editor: editor
   }), picker && /*#__PURE__*/React.createElement(ListPicker, {
     isMobile: isMobile,
     onClose: () => setPicker(null),
@@ -8617,7 +9056,8 @@ function SitesManager({
 function ExportImportPage({
   db,
   setDb,
-  saveNow
+  saveNow,
+  notes
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [parsed, setParsed] = useState(null);
@@ -8911,7 +9351,7 @@ function ExportImportPage({
     }];
     XLSX.utils.book_append_sheet(wb, buildSheet(schools), sn); // 시설물 리스트
     /* 일정이 있는 달마다 달력 시트를 만든다 (원본의 '9월달력' 형식) */
-    calMonths(entries).forEach(m => XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries, m, sn, dataRowCount(schools)), `${m.m}월달력`));
+    calMonths(entries).forEach(m => XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries, m, sn, dataRowCount(schools), notes), `${m.m}월달력`));
     XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정(목록)"); // 현장일정(목록)
     XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표"); // 예산표
     XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항"); // 특이사항
@@ -8935,7 +9375,7 @@ function ExportImportPage({
     /* 시트가 여러 개일 땐 가장 큰 반기 시트에 연결한다 */
     const main = entries.slice().sort((a, b) => (b.schools || []).length - (a.schools || []).length)[0];
     const mainName = main ? `${String(main.yr).slice(2)}년(${main.half === "상반기" ? "상" : "하"})` : null;
-    calMonths(entries).forEach(m => XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries, m, mainName, main ? dataRowCount(main.schools) : 0), `${m.m}월달력`));
+    calMonths(entries).forEach(m => XLSX.utils.book_append_sheet(wb, buildCalendarSheet(entries, m, mainName, main ? dataRowCount(main.schools) : 0, notes), `${m.m}월달력`));
     XLSX.utils.book_append_sheet(wb, buildScheduleSheet(entries), "현장일정(목록)"); // 전체 현장일정(목록)
     XLSX.utils.book_append_sheet(wb, buildBudgetSheet(entries), "예산표"); // 전체 예산표
     XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항"); // 전체 특이사항
@@ -9612,6 +10052,44 @@ const FB_BK_DAT = "ston/backup_data"; // 백업 본문(무거움 — 복원할 �
 const FB_UNDO = "ston/undo"; // 최근 변경 되돌리기용 기록
 const FB_BOARD = "ston/board"; // 게시판 글
 const FB_ADMINS = "ston/admins"; // 관리자 이메일 목록 — 규칙에서도 이 값을 본다
+const FB_NOTES = "ston/notes"; // 현장이 아닌 메모 일정 (휴가·회의 등)
+
+/* 메모 일정 종류 — 현장 점검과 구분되는 부가 일정 */
+const NOTE_KINDS = [{
+  v: "일반",
+  color: "#5C6879"
+}, {
+  v: "휴가",
+  color: "#1D6FF2"
+}, {
+  v: "반차",
+  color: "#0D9B6C"
+}, {
+  v: "회의",
+  color: "#7C3AED"
+}];
+const noteColor = k => (NOTE_KINDS.find(x => x.v === k) || NOTE_KINDS[0]).color;
+/* 메모가 걸리는 날짜들 — 현장조사와 같은 방식(기간 + 따로 떨어진 날) */
+const noteDates = n => {
+  const out = [];
+  const f = n && n.date;
+  if (!f) return out;
+  out.push(f);
+  const fe = n && n.dateEnd;
+  if (fe && fe > f) {
+    let d = addDays(parseD(f), 1);
+    const last = parseD(fe);
+    let guard = 0;
+    while (d <= last && guard++ < 120) {
+      out.push(dstr(d));
+      d = addDays(d, 1);
+    }
+  }
+  (n && n.extra || []).forEach(d => {
+    if (d && !out.includes(d)) out.push(d);
+  });
+  return out.sort();
+};
 
 /* 푸시 알림 — OneSignal (Cloudflare Worker 경유, 본인 제외 전송) */
 function registerOneSignal(userName) {
@@ -14818,6 +15296,7 @@ function App() {
   const saveTimer = useRef(null);
   const [cfgVer, setCfgVer] = useState(0); // 인원 설정 갱신 트리거
   const [accounts, setAccounts] = useState({}); // 등록된 인원·계정 (화면 갱신용)
+  const [notes, setNotes] = useState([]); // 현장이 아닌 메모 일정
   const [kakaoKey, setKakaoKey] = useState(""); // 지도(카카오맵) 키 — 설정에 저장
   const [logs, setLogs] = useState([]); // 수정 로그
 
@@ -14928,6 +15407,7 @@ function App() {
     const cRef = rootDb.ref(FB_CONFIG),
       presRef = rootDb.ref(FB_PRESENCE);
     const lRef = rootDb.ref(FB_LOGS).limitToLast(200);
+    const nRef = rootDb.ref(FB_NOTES);
     dataRef.current = dRef;
     metaRef.current = mRef;
     const onData = snap => {
@@ -14995,6 +15475,14 @@ function App() {
       })).sort((a, b) => (b.ts || 0) - (a.ts || 0)));
     };
     lRef.on("value", onLogs);
+    const onNotes = sn => {
+      const v = sn.val() || {};
+      setNotes(Object.entries(v).map(([id, o]) => ({
+        id,
+        ...o
+      })));
+    };
+    nRef.on("value", onNotes, () => setNotes([]));
     const presNode = presRef.push();
     presNode.set({
       name: editorRef.current || CURRENT_USER.email || "익명",
@@ -15008,6 +15496,7 @@ function App() {
       mRef.off("value", onMeta);
       cRef.off("value", onCfg);
       lRef.off("value", onLogs);
+      nRef.off("value", onNotes);
       presRef.off("value", onPres);
       presNode.remove().catch(() => {});
     };
@@ -15290,7 +15779,10 @@ function App() {
     schedule: /*#__PURE__*/React.createElement(Calendar, {
       allSchools: allSchools,
       setDb: setDb,
-      isMobile: isMobile
+      isMobile: isMobile,
+      notes: notes,
+      isAdmin: isAdmin,
+      editor: editor
     }),
     sites: /*#__PURE__*/React.createElement(SitesManager, {
       db: db,
@@ -15316,7 +15808,8 @@ function App() {
     export: isAdmin && /*#__PURE__*/React.createElement(ExportImportPage, {
       db: db,
       setDb: setDb,
-      saveNow: saveNow
+      saveNow: saveNow,
+      notes: notes
     }),
     settings: canSettings && /*#__PURE__*/React.createElement(SettingsPage, {
       cfgVer: cfgVer,
