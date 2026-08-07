@@ -4195,53 +4195,71 @@ function DayPanel({
       overflowY: "auto",
       padding: "16px 18px"
     }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: addSiteHere,
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      width: "100%",
-      padding: "13px 0",
-      borderRadius: 10,
+      display: "flex",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setPickOpen(false);
+      setNoteOpen(false);
+      setNoteEdit(null);
+      addSiteHere();
+    },
+    style: {
+      flex: 1,
+      minWidth: 0,
+      padding: "11px 4px",
+      borderRadius: 9,
       border: "none",
       background: C.blue,
       color: "#fff",
-      fontSize: 15,
+      fontSize: 14,
       fontWeight: 800,
       cursor: "pointer",
-      marginBottom: 6,
-      boxShadow: `0 3px 12px ${C.blue}38`
+      whiteSpace: "nowrap",
+      boxShadow: `0 2px 8px ${C.blue}35`
     }
-  }, "+ 이 날짜로 현장 추가"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setPickOpen(v => !v),
+  }, "+ 현장 추가"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setNoteOpen(false);
+      setNoteEdit(null);
+      setPickOpen(v => !v);
+    },
     style: {
-      width: "100%",
-      padding: "12px 0",
-      borderRadius: 10,
-      marginTop: 7,
+      flex: 1,
+      minWidth: 0,
+      padding: "11px 4px",
+      borderRadius: 9,
       border: `1.5px solid ${pickOpen ? C.blue : C.border}`,
       background: pickOpen ? C.blueL : C.surface,
       color: pickOpen ? C.blue : C.t2,
-      fontSize: 15,
+      fontSize: 14,
       fontWeight: 800,
-      cursor: "pointer"
+      cursor: "pointer",
+      whiteSpace: "nowrap"
     }
-  }, pickOpen ? "✕ 닫기" : "⌕ 기존 현장에 이 날짜 넣기"), /*#__PURE__*/React.createElement("button", {
+  }, "⌕ 기존 현장"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
+      setPickOpen(false);
       setNoteEdit(null);
       setNoteOpen(v => !v);
     },
     style: {
-      width: "100%",
-      padding: "12px 0",
-      borderRadius: 10,
-      marginTop: 7,
+      flex: 1,
+      minWidth: 0,
+      padding: "11px 4px",
+      borderRadius: 9,
       border: `1.5px solid ${noteOpen ? C.t2 : C.border}`,
       background: noteOpen ? C.surfaceD : C.surface,
       color: C.t2,
-      fontSize: 15,
+      fontSize: 14,
       fontWeight: 800,
-      cursor: "pointer"
+      cursor: "pointer",
+      whiteSpace: "nowrap"
     }
-  }, noteOpen && !noteEdit ? "✕ 닫기" : "✎ 메모 추가 (휴가·회의 등)"), (noteOpen || noteEdit) && /*#__PURE__*/React.createElement(NoteEditor, {
+  }, "✎ 메모")), (noteOpen || noteEdit) && /*#__PURE__*/React.createElement(NoteEditor, {
     dateStr: dateStr,
     note: noteEdit,
     editor: editor,
@@ -4358,11 +4376,10 @@ function DayPanel({
       fontSize: 12,
       color: C.t4,
       textAlign: "center",
-      marginBottom: 16,
-      marginTop: 10,
-      lineHeight: 1.6
+      marginBottom: 14,
+      marginTop: 7
     }
-  }, `현장조사일 ${dateStr.slice(5).replace("-", "/")} · ${isLH(dYear) ? "LH" : `${dYear}년 ${dHalf}`}에 등록됩니다`, /*#__PURE__*/React.createElement("br", null), "현장 관리 탭에도 함께 나타납니다"), total === 0 && /*#__PURE__*/React.createElement("div", {
+  }, `${isLH(dYear) ? "LH" : `${dYear}년 ${dHalf}`}에 등록됩니다`), total === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "60px 0",
