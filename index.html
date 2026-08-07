@@ -60,6 +60,10 @@ const isOwnerEmail = e => !!OWNER_EMAIL && String(e || "").trim().toLowerCase() 
    · 엑셀 가져오기/내보내기 (원본 형식)
 ══════════════════════════════════════════════════════════════ */
 
+/* 객체-키 ↔ 배열 변환.
+   Firebase 는 배열을 {0:…,1:…} 객체로 돌려주므로 어디서든 이걸 거쳐 배열로 만든다. */
+const toArr = v => Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v) : [];
+
 /* ── 색상 시스템 ── */
 const C = {
   bg: "#F0F2F5",
@@ -114,7 +118,7 @@ const rankIdx = nm => {
 const rankOf = nm => RANK_OF[nm] || "";
 /* 직급 → 이름 순으로 정렬 */
 const byRank = (a, b) => rankIdx(a) - rankIdx(b) || String(a).localeCompare(String(b), "ko");
-const sortMembers = list => (list || []).slice().sort(byRank);
+const sortMembers = list => toArr(list).filter(Boolean).sort(byRank);
 
 /* 인원별 고정 색상 — 이름 해시로 일관된 색을 주어 일정에서 구분이 쉽도록 */
 /* 인원 색상 — 사람마다 다르게 하지 않고 검정으로 통일 (가독성 우선) */
@@ -185,7 +189,10 @@ const FLAG_OPTS = [{
 const isNewSite = s => !!(s && (s.isNew || String(s.round || "").includes("신규")));
 
 const getFlags = s => {
-  if (Array.isArray(s?.flags)) return s.flags;
+  if (s && s.flags && typeof s.flags === "object") {
+    const a = toArr(s.flags).filter(Boolean);
+    if (a.length || Array.isArray(s.flags)) return a;
+  }
   /* 예전 데이터 호환: 동별 flag(●=드론)를 학교 단위로 합침 */
   const set = new Set();
   (s?.buildings || []).forEach(b => {
@@ -272,6 +279,17 @@ function mergeSites(a, b) {
     start: pick("start"),
     end: pick("end"),
     contract: base.contract != null && base.contract > 0 ? base.contract : other.contract ?? null,
+    /* 나중에 추가된 항목들 — 한쪽에만 있으면 그 값을 살린다 */
+    fieldEnd: pick("fieldEnd") || "",
+    fieldExtra: [...new Set([...toArr(base.fieldExtra), ...toArr(other.fieldExtra)])].filter(Boolean).sort(),
+    fieldWho: {
+      ...(other.fieldWho || {}),
+      ...(base.fieldWho || {})
+    },
+    deliverDate: pick("deliverDate") || "",
+    isNew: !!(base.isNew || other.isNew),
+    memo: pick("memo") || "",
+    round: pick("round") || "",
     assignees: base.assignees && base.assignees.length ? base.assignees : other.assignees || [],
     headcount: base.headcount || other.headcount || 2,
     progress: base.progress && Object.keys(base.progress).length ? base.progress : other.progress || {},
@@ -1774,7 +1792,8 @@ function parseSheet(ws) {
           };
         })(),
         tel: clean(gv(r, col.tel)),
-        assignees: clean(gv(r, col.assignees)).split(/[,·]/).map(x => x.trim()).filter(Boolean),
+        /* 직급 순으로 정렬해서 들여온다 (엑셀에는 직급 정보가 없다) */
+        assignees: sortMembers(clean(gv(r, col.assignees)).split(/[,·]/).map(x => x.trim()).filter(Boolean)),
         headcount: 2,
         progress: prog,
         buildings: [],
@@ -4578,7 +4597,8 @@ const surveyDates = s => {
       d = addDays(d, 1);
     }
   }
-  (s && s.fieldExtra || []).forEach(d => {
+  /* Firebase 가 배열을 객체로 돌려줄 수 있어 toArr 로 감싼다 */
+  toArr(s && s.fieldExtra).forEach(d => {
     if (d && !out.includes(d)) out.push(d);
   });
   return out.sort();
@@ -4587,7 +4607,8 @@ const isMultiSurvey = s => surveyDates(s).length > 1;
 /* 그 날 실제로 가는 인원 — 날짜별로 정해둔 게 있으면 그것, 없으면 기본 인원 */
 const whoOnDate = (s, ds) => {
   const w = s && s.fieldWho && s.fieldWho[ds];
-  return Array.isArray(w) ? w : s && s.assignees || [];
+  if (w && typeof w === "object") return toArr(w).filter(Boolean);
+  return toArr(s && s.assignees);
 };
 /* 그 날짜가 조사 기간의 어디인지 — 첫날/마지막날/중간 */
 const surveyPos = (s, ds) => {
@@ -10337,7 +10358,7 @@ const noteDates = n => {
       d = addDays(d, 1);
     }
   }
-  (n && n.extra || []).forEach(d => {
+  toArr(n && n.extra).forEach(d => {
     if (d && !out.includes(d)) out.push(d);
   });
   return out.sort();
@@ -10507,8 +10528,6 @@ function applyConfig(cfg) {
   }
 }
 
-/* 객체-키 ↔ 배열 변환 */
-const toArr = v => Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v) : [];
 
 /* Firebase(키잉 객체) → 화면용 배열 db */
 function fbToDb(raw) {
@@ -10520,7 +10539,20 @@ function fbToDb(raw) {
       out[yr][half] = toArr(schoolsObj).filter(Boolean).map(s => ({
         ...s,
         assignees: toArr(s.assignees),
-        buildings: toArr(s.buildings).filter(Boolean)
+        buildings: toArr(s.buildings).filter(Boolean),
+        /* Firebase 는 배열을 {0:…,1:…} 객체로 돌려준다.
+           배열로 되돌리지 않으면 새로고침 후 값이 사라지거나 오류가 난다. */
+        fieldExtra: toArr(s.fieldExtra).filter(Boolean),
+        fieldWho: (() => {
+          const w = s.fieldWho;
+          if (!w || typeof w !== "object") return null;
+          const o = {};
+          Object.entries(w).forEach(([d, v]) => {
+            o[d] = toArr(v).filter(Boolean);
+          });
+          return Object.keys(o).length ? o : null;
+        })(),
+        flags: toArr(s.flags).filter(Boolean)
       })).sort((a, b) => {
         const na = parseInt(a.no, 10),
           nb = parseInt(b.no, 10);
@@ -15729,9 +15761,12 @@ function App() {
     lRef.on("value", onLogs);
     const onNotes = sn => {
       const v = sn.val() || {};
+      /* who·extra 도 배열이라 객체로 돌아온다 → 배열로 복원 */
       setNotes(Object.entries(v).map(([id, o]) => ({
         id,
-        ...o
+        ...o,
+        who: toArr(o && o.who).filter(Boolean),
+        extra: toArr(o && o.extra).filter(Boolean)
       })));
     };
     nRef.on("value", onNotes, () => setNotes([]));
