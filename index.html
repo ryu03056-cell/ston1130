@@ -2973,11 +2973,13 @@ function buildCalendarSheet(entries, ym, dataSheetName, dataRows, notes) {
     const nm = (s.school || "").trim();
     const mark = `${isNewSite(s) ? "[신규] " : ""}${nm}`;
     const uk = (d, t) => `${d}|${t}|${nm}`;
-    if (s.field && !seen.has(uk(s.field, "조사"))) {
-      seen.add(uk(s.field, "조사"));
-      add(s.field, "조사", mark);
-      add(s.field, "인원", sortMembers(s.assignees).join(",") || "미배정");
-    }
+    /* 조사가 여러 날이면 모든 날에, 그 날 가는 인원과 함께 */
+    surveyDates(s).forEach(d => {
+      if (seen.has(uk(d, "조사"))) return;
+      seen.add(uk(d, "조사"));
+      add(d, "조사", mark);
+      add(d, "인원", sortMembers(whoOnDate(s, d)).join(",") || "미배정");
+    });
     if (s.end && !seen.has(uk(s.end, "완수"))) {
       seen.add(uk(s.end, "완수"));
       add(s.end, "완수", mark);
@@ -3685,7 +3687,9 @@ function DayPanel({
     if (!setDb) return;
     const sc = allSchools.find(s => s.id === sid);
     if (!sc?._year || !sc?._half) return;
-    const had = (sc.assignees || []).includes(name);
+    /* 조사가 여러 날이면 이 날짜에만 반영한다 (다른 날 인원은 건드리지 않음) */
+    const multi = isMultiSurvey(sc);
+    const had = whoOnDate(sc, dateStr).includes(name);
     setDb(prev => {
       const next = {
         ...prev
@@ -3695,17 +3699,25 @@ function DayPanel({
       };
       next[sc._year][sc._half] = (prev[sc._year]?.[sc._half] || []).map(s => {
         if (s.id !== sid) return s;
-        const cur = s.assignees || [];
+        const cur = whoOnDate(s, dateStr);
         const upd = sortMembers(cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name]);
+        const label = `${name} ${had ? "제외" : "배정"}${multi ? ` (${dateStr.slice(5).replace("-", "/")})` : ""}`;
+        if (multi) return stampEdit({
+          ...s,
+          fieldWho: {
+            ...(s.fieldWho || {}),
+            [dateStr]: upd
+          }
+        }, label);
         return stampEdit({
           ...s,
           assignees: upd,
           headcount: upd.length || s.headcount || 1
-        }, had ? `${name} 제외` : `${name} 배정`);
+        }, label);
       });
       return next;
     });
-    logAction(had ? "삭제" : "추가", `인원 배정 · ${sc.school}`, had ? name : null, had ? null : name);
+    logAction(had ? "삭제" : "추가", `인원 배정 · ${sc.school}${multi ? ` · ${dateStr}` : ""}`, had ? name : null, had ? null : name);
   };
 
   /* 현장에서 바로 통화 — 번호가 있으면 탭 한 번으로 전화 앱 연결 */
@@ -3818,7 +3830,8 @@ function DayPanel({
   const FieldCard = ({
     s
   }) => {
-    const assignees = sortMembers(s.assignees || []);
+    /* 이 날짜에 실제로 가는 인원 (조사가 여러 날이면 날짜마다 다를 수 있다) */
+    const assignees = sortMembers(whoOnDate(s, dateStr));
     const available = allMembers().filter(n => !assignees.includes(n));
     const open = pickerId === s.id;
     return /*#__PURE__*/React.createElement("div", {
@@ -4571,6 +4584,11 @@ const surveyDates = s => {
   return out.sort();
 };
 const isMultiSurvey = s => surveyDates(s).length > 1;
+/* 그 날 실제로 가는 인원 — 날짜별로 정해둔 게 있으면 그것, 없으면 기본 인원 */
+const whoOnDate = (s, ds) => {
+  const w = s && s.fieldWho && s.fieldWho[ds];
+  return Array.isArray(w) ? w : s && s.assignees || [];
+};
 /* 그 날짜가 조사 기간의 어디인지 — 첫날/마지막날/중간 */
 const surveyPos = (s, ds) => {
   const a = surveyDates(s);
@@ -5000,7 +5018,8 @@ function Calendar({
           field: f,
           region: s.region || "",
           headcount: s.headcount || 2,
-          assignees: sortMembers(s.assignees),
+          /* 조사일은 그 날 실제로 가는 인원을 쓴다 (날짜별로 다를 수 있음) */
+          assignees: sortMembers(f === "field" ? whoOnDate(s, ds) : s.assignees),
           pos: f === "field" ? surveyPos(s, ds) : "",
           days: f === "field" ? surveyDates(s).length : 1
         });
@@ -6095,7 +6114,205 @@ function MultiSurvey({
       marginTop: 9,
       fontWeight: 700
     }
-  }, "총 ", all.length, "일 — ", all.map(dayLabel).join(", ")));
+  }, "총 ", all.length, "일 — ", all.map(dayLabel).join(", ")), all.length > 1 && /*#__PURE__*/React.createElement(DayWho, {
+    days: all,
+    f: f,
+    setF: setF,
+    tc: tc,
+    dayLabel: dayLabel
+  }));
+}
+
+/* 날짜별 조사 인원 — 날마다 가는 사람이 다를 수 있다.
+   따로 정하지 않은 날은 기본 인원이 그대로 간다. */
+function DayWho({
+  days,
+  f,
+  setF,
+  tc,
+  dayLabel
+}) {
+  const [open, setOpen] = useState(null);
+  const base = sortMembers(f.assignees || []);
+  const whoOf = d => {
+    const w = f.fieldWho && f.fieldWho[d];
+    return Array.isArray(w) ? sortMembers(w) : base;
+  };
+  const own = d => Array.isArray(f.fieldWho && f.fieldWho[d]);
+  const setWho = (d, list) => setF(p => ({
+    ...p,
+    fieldWho: {
+      ...(p.fieldWho || {}),
+      [d]: sortMembers(list)
+    }
+  }));
+  const resetDay = d => setF(p => {
+    const n = {
+      ...(p.fieldWho || {})
+    };
+    delete n[d];
+    return {
+      ...p,
+      fieldWho: n
+    };
+  });
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10,
+      paddingTop: 10,
+      borderTop: `1px solid ${tc.a}30`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 800,
+      color: tc.a,
+      marginBottom: 3
+    }
+  }, "날짜별 조사 인원"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.t4,
+      marginBottom: 8
+    }
+  }, "정하지 않은 날은 기본 인원(", base.join("·") || "미배정", ")이 그대로 갑니다"), days.map(d => {
+    const list = whoOf(d);
+    const mine = own(d);
+    const avail = allMembers().filter(n => !list.includes(n));
+    return /*#__PURE__*/React.createElement("div", {
+      key: d,
+      style: {
+        background: C.surface,
+        border: `1px solid ${mine ? tc.a + "50" : C.border}`,
+        borderRadius: 8,
+        padding: "9px 10px",
+        marginBottom: 6
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+        marginBottom: 7
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 13,
+        fontWeight: 800,
+        color: C.t1,
+        minWidth: 68
+      }
+    }, dayLabel(d)), mine ? /*#__PURE__*/React.createElement("button", {
+      onClick: () => resetDay(d),
+      style: {
+        marginLeft: "auto",
+        padding: "4px 9px",
+        borderRadius: 6,
+        border: `1px solid ${C.border}`,
+        background: "transparent",
+        color: C.t3,
+        fontSize: 11,
+        fontWeight: 700,
+        cursor: "pointer",
+        whiteSpace: "nowrap"
+      }
+    }, "기본으로") : /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: "auto",
+        fontSize: 11,
+        color: C.t4
+      }
+    }, "기본 인원")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 5,
+        alignItems: "center"
+      }
+    }, list.map(n => /*#__PURE__*/React.createElement("span", {
+      key: n,
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        fontSize: 13,
+        fontWeight: 700,
+        background: C.surfaceL,
+        border: BD,
+        borderRadius: 20,
+        padding: "4px 6px 4px 11px",
+        color: C.t1
+      }
+    }, n, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setWho(d, list.filter(x => x !== n)),
+      style: {
+        width: 18,
+        height: 18,
+        borderRadius: "50%",
+        border: "none",
+        background: C.redL,
+        color: C.red,
+        fontSize: 12,
+        fontWeight: 900,
+        cursor: "pointer",
+        lineHeight: 1,
+        padding: 0
+      }
+    }, "×"))), list.length === 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: C.orange,
+        fontWeight: 700
+      }
+    }, "이 날은 미배정"), avail.length > 0 && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setOpen(open === d ? null : d),
+      style: {
+        width: 28,
+        height: 28,
+        borderRadius: "50%",
+        border: `1.5px solid ${tc.a}`,
+        background: open === d ? tc.a : C.surface,
+        color: open === d ? "#fff" : tc.a,
+        fontSize: 16,
+        fontWeight: 700,
+        cursor: "pointer",
+        lineHeight: 1,
+        padding: 0,
+        flexShrink: 0
+      }
+    }, "+")), open === d && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 5,
+        marginTop: 8,
+        paddingTop: 8,
+        borderTop: `1px solid ${C.border}`
+      }
+    }, avail.map(n => /*#__PURE__*/React.createElement("button", {
+      key: n,
+      onClick: () => {
+        setWho(d, [...list, n]);
+        setOpen(null);
+      },
+      style: {
+        padding: "6px 11px",
+        borderRadius: 20,
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: "pointer",
+        background: C.surfaceL,
+        color: C.t1,
+        border: BD
+      }
+    }, rankOf(n) ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        opacity: .7,
+        marginRight: 4
+      }
+    }, rankOf(n)) : null, n))));
+  }));
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -6127,6 +6344,9 @@ function EditPanel({
     field: sc.field || "",
     fieldEnd: sc.fieldEnd || "",
     fieldExtra: (sc.fieldExtra || []).slice(),
+    fieldWho: {
+      ...(sc.fieldWho || {})
+    },
     start: sc.start || "",
     deliverDate: sc.deliverDate || "",
     end: sc.end || "",
@@ -6192,6 +6412,21 @@ function EditPanel({
           field: f.field,
           fieldEnd: (f.fieldEnd || "") > (f.field || "") ? f.fieldEnd : "",
           fieldExtra: (f.fieldExtra || []).filter(Boolean),
+          /* 조사가 하루로 돌아가면 날짜별 인원은 의미가 없으므로 비운다 */
+          fieldWho: (() => {
+            const days = surveyDates({
+              field: f.field,
+              fieldEnd: (f.fieldEnd || "") > (f.field || "") ? f.fieldEnd : "",
+              fieldExtra: f.fieldExtra
+            });
+            if (days.length <= 1) return null;
+            const out = {};
+            days.forEach(d => {
+              const w = f.fieldWho && f.fieldWho[d];
+              if (Array.isArray(w)) out[d] = sortMembers(w);
+            });
+            return Object.keys(out).length ? out : null;
+          })(),
           start: f.start,
           deliverDate: f.deliverDate,
           end: f.end,
