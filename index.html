@@ -4921,7 +4921,7 @@ function Calendar({
         style: {
           padding: isMobile ? "6px 5px" : "7px 8px",
           verticalAlign: "top",
-          height: isMobile ? 112 : 138,
+          height: isMobile ? 132 : 138,
           width: "14.285%",
           borderRight: di < 6 ? BD : "none",
           cursor: ds ? "pointer" : "default",
@@ -4932,24 +4932,24 @@ function Calendar({
         }
       }, ds && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
         style: {
-          width: isMobile ? 30 : 38,
-          height: isMobile ? 30 : 38,
+          width: isMobile ? 26 : 38,
+          height: isMobile ? 26 : 38,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           borderRadius: "50%",
           background: isT ? C.blue : "transparent",
           color: isT ? "#fff" : di === 0 ? C.red : di === 6 ? C.blue : C.t1,
-          fontSize: isMobile ? 16 : 19,
+          fontSize: isMobile ? 14 : 19,
           fontWeight: isT ? 900 : 700,
-          marginBottom: 4,
+          marginBottom: isMobile ? 2 : 4,
           boxShadow: isT ? `0 2px 8px ${C.blue}55` : "none"
         }
       }, day), /*#__PURE__*/React.createElement("div", {
         style: {
           display: "flex",
           flexDirection: "column",
-          gap: 3
+          gap: isMobile ? 2 : 3
         }
       }, evs.slice(0, cap).map((e, ei) => /*#__PURE__*/React.createElement("div", {
         key: ei,
@@ -4965,25 +4965,36 @@ function Calendar({
         },
         title: `${e.school} · ${evLabel(e.field)}${e.days > 1 ? ` (${e.days}일 중 ${e.pos || "중간"})` : ""} · ${e.assignees.length ? sortMembers(e.assignees).join(",") : "인원 미배정"}`,
         style: {
-          padding: isMobile ? "3px 5px" : "3px 7px",
-          borderRadius: 4,
-          background: `${evColor(e.field)}15`,
-          borderLeft: `3px solid ${evColor(e.field)}`,
-          fontSize: isMobile ? 12 : 14,
+          padding: isMobile ? "2px 3px" : "3px 7px",
+          borderRadius: 3,
+          background: `${evColor(e.field)}1c`,
+          borderLeft: `${isMobile ? e.field === "field" ? 3 : e.field === "start" ? 2 : e.field === "deliverDate" ? 4 : 5 : 3}px solid ${evColor(e.field)}`,
+          borderTop: isMobile && e.field === "end" ? `1px solid ${evColor(e.field)}55` : undefined,
+          fontSize: isMobile ? 11 : 14,
+          lineHeight: isMobile ? 1.25 : 1.5,
+          letterSpacing: isMobile ? "-0.4px" : 0,
           color: evColor(e.field),
           fontWeight: 700,
           overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
           cursor: "grab",
+          /* 폰에서는 두 줄까지 보여 8글자 정도가 읽힌다 (넘치면 … 로 잘림) */
+          ...(isMobile ? {
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            wordBreak: "break-all"
+          } : {
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap"
+          }),
           opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
         }
-      }, EV_MARK[e.field], " ", e.school.length > (isMobile ? 5 : 10) ? e.school.slice(0, isMobile ? 5 : 10) + "…" : e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "")), evs.length > cap && /*#__PURE__*/React.createElement("div", {
+      }, isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "")), evs.length > cap && /*#__PURE__*/React.createElement("div", {
         style: {
-          fontSize: 12,
+          fontSize: isMobile ? 10 : 12,
           color: C.t4,
-          paddingLeft: 4,
-          fontWeight: 700
+          paddingLeft: 3,
+          fontWeight: 800
         }
       }, "+", evs.length - cap, "건"))));
     }))))));
@@ -5320,7 +5331,7 @@ function Calendar({
       cursor: "pointer",
       flexShrink: 0
     }
-  }, "오늘")), /*#__PURE__*/React.createElement("div", {
+  }, "오늘")), !isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "9px 13px",
       background: C.surfaceL,
@@ -5331,7 +5342,7 @@ function Calendar({
       fontWeight: 600,
       marginBottom: 12
     }
-  }, view === "month" ? "제목을 눌러 연·월 이동 · 일정을 끌어 날짜 변경 · 좌우로 밀면 달 이동" : view === "week" ? "제목을 눌러 주 선택 · 날짜를 누르면 그날 상세 · 좌우로 밀면 주 이동" : "제목을 눌러 날짜 이동 · 좌우로 밀면 하루씩 이동"), kindBar, view === "month" ? monthGrid() : view === "week" ? isMobile ? weekList() : weekGrid() : dayList(), selDate && /*#__PURE__*/React.createElement(DayPanel, {
+  }, view === "month" ? "제목을 눌러 연·월 이동 · 일정을 끌어 날짜 변경 · 좌우로 밀면 달 이동" : view === "week" ? "제목을 눌러 주 선택 · 날짜를 누르면 그날 상세 · 좌우로 밀면 주 이동" : "제목을 눌러 날짜 이동 · 좌우로 밀면 하루씩 이동") , kindBar, view === "month" ? monthGrid() : view === "week" ? isMobile ? weekList() : weekGrid() : dayList(), selDate && /*#__PURE__*/React.createElement(DayPanel, {
     dateStr: selDate,
     label: (() => {
       const d = parseD(selDate);
