@@ -2803,14 +2803,17 @@ function buildScheduleSheet(entries) {
   const multi = entries.length > 1;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  /* 화면(calcDday)과 같은 방식으로 계산한다.
+     new Date("2026-08-06") 은 UTC 자정으로 해석돼 시간대에 따라 하루가 밀린다. */
   const ddStr = end => {
-    if (!end) return "";
-    const d = Math.floor((new Date(end) - today) / 86400000);
-    return d >= 0 ? `D-${d}` : `D+${-d}`;
+    const d = calcDday(end);
+    return d === null ? "" : d >= 0 ? `D-${d}` : `D+${-d}`;
   };
+  /* 날짜 문자열은 그대로 비교해도 순서가 맞다 (YYYY-MM-DD).
+     new Date(문자열) 은 시간대 영향을 받으므로 쓰지 않는다. */
   const sortKey = s => {
-    const ds = [s.field, s.start, s.end].filter(Boolean).map(x => new Date(x).getTime()).filter(t => !isNaN(t));
-    return ds.length ? Math.min(...ds) : Infinity;
+    const ds = [s.field, s.start, s.end].filter(Boolean).filter(x => /^\d{4}-\d{2}-\d{2}/.test(x));
+    return ds.length ? ds.sort()[0] : "9999-99-99";
   };
   const headers = multi ? ["구분", "지역", "학교명", "표시", "현장조사", "착수일", "완수일", "잔여", "담당자", "연락처"] : ["지역", "학교명", "표시", "현장조사", "착수일", "완수일", "잔여", "담당자", "연락처"];
   const meta = multi ? [{
@@ -2890,7 +2893,7 @@ function buildScheduleSheet(entries) {
     s,
     label: xlHalfLabel(yr, half)
   })));
-  all.sort((a, b) => sortKey(a.s) - sortKey(b.s));
+  all.sort((a, b) => String(sortKey(a.s)).localeCompare(String(sortKey(b.s))));
   const rows = all.map(({
     s,
     label
