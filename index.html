@@ -288,6 +288,7 @@ function mergeSites(a, b) {
     },
     deliverDate: pick("deliverDate") || "",
     isNew: !!(base.isNew || other.isNew),
+    tentative: !!(base.tentative && other.tentative),
     memo: pick("memo") || "",
     round: pick("round") || "",
     assignees: base.assignees && base.assignees.length ? base.assignees : other.assignees || [],
@@ -1728,7 +1729,8 @@ function parseSheet(ws) {
     appFlags: idxEq("표시"),
     progress: idxInc("진행단계"),
     cat: idxEq("분류"),
-    period: idxEq("조사기간")
+    period: idxEq("조사기간"),
+    tentative: idxEq("일정상태")
   };
   if (col.school < 0) return [];
   const gv = (r, i) => i == null || i < 0 ? null : r[i];
@@ -1780,6 +1782,7 @@ function parseSheet(ws) {
         end: parseExcelDate(gv(r, col.end)),
         deliverDate: parseExcelDate(gv(r, col.deliverDate)),
         memo: clean(gv(r, col.memo)),
+        tentative: /예정|미정/.test(clean(gv(r, col.tentative))),
         ...(() => {
           /* 조사기간 칸: "2026-08-10~2026-08-12,2026-08-20" 형태 */
           const p = clean(gv(r, col.period));
@@ -2099,8 +2102,8 @@ const xlCell = (bold, align, wrap, fill) => ({
 });
 function buildSheet(schools) {
   /* 원본 양식 A~Z + 앱 전용 AB~AF */
-  const HEAD1 = ["점검\n회차", "No.", "점검\n종류", "지역", "학교명", "시설물명", "시설물 개수", null, null, "종별", "건축", null, "옹벽/사면", null, "착수일", "현장조사일", "완수일", "납품일자", "완수\n유무", "납품", null, "FMS", null, null, "특기사항", "비고", null, "담당자", "연락처", "표시", "진행단계", "진행률", "분류", "조사기간"];
-  const HEAD2 = [null, null, null, null, null, null, "건축물", "토목(종)", "토목(소)", null, "층수", "연면적(m²)", "연장(m)", "높이(m)", null, null, null, null, null, "유무", "방법", "ID", "PW", "완", null, null, null, null, null, null, null, null, null, null];
+  const HEAD1 = ["점검\n회차", "No.", "점검\n종류", "지역", "학교명", "시설물명", "시설물 개수", null, null, "종별", "건축", null, "옹벽/사면", null, "착수일", "현장조사일", "완수일", "납품일자", "완수\n유무", "납품", null, "FMS", null, null, "특기사항", "비고", null, "담당자", "연락처", "표시", "진행단계", "진행률", "분류", "조사기간", "일정상태"];
+  const HEAD2 = [null, null, null, null, null, null, "건축물", "토목(종)", "토목(소)", null, "층수", "연면적(m²)", "연장(m)", "높이(m)", null, null, null, null, null, "유무", "방법", "ID", "PW", "완", null, null, null, null, null, null, null, null, null, null, null];
   const nC = HEAD1.length;
   const aoa = [];
   /* 1행 — 색 범례 (원본과 동일 위치) */
@@ -2159,6 +2162,7 @@ function buildSheet(schools) {
     /* 조사가 여러 날이면 P열은 첫날만 두고(달력 수식이 날짜 하나를 비교하므로)
        전체 일정은 이 칸에 따로 적는다. */
     const sd = surveyDates(s);
+    schoolRow[34] = isTentative(s) ? "예정" : "확정";
     schoolRow[33] = sd.length > 1 ? `${s.fieldEnd && s.fieldEnd > s.field ? `${s.field}~${s.fieldEnd}` : s.field}${(s.fieldExtra || []).length ? `,${(s.fieldExtra || []).join(",")}` : ""}` : "";
     rows.push({
       r: aoa.length,
@@ -2190,7 +2194,7 @@ function buildSheet(schools) {
     cellDates: true
   });
   /* 열 너비 — 원본 값 */
-  ws["!cols"] = [4.6, 4.6, 12.6, 5.6, 29.5, 29, 6.6, 6.6, 6.6, 10.6, 8.6, 8.6, 8.6, 8.6, 10.6, 10.6, 10.6, 10.6, 4.6, 5.6, 5.6, 12.6, 12.6, 4.6, 45.6, 12, 2, 16, 13, 10, 22, 6, 8, 22].map(w => ({
+  ws["!cols"] = [4.6, 4.6, 12.6, 5.6, 29.5, 29, 6.6, 6.6, 6.6, 10.6, 8.6, 8.6, 8.6, 8.6, 10.6, 10.6, 10.6, 10.6, 4.6, 5.6, 5.6, 12.6, 12.6, 4.6, 45.6, 12, 2, 16, 13, 10, 22, 6, 8, 22, 9].map(w => ({
     wch: Math.max(1, w - 0.8)
   }));
   /* 시설물 행은 접어 둔다 — 왼쪽 [+] 버튼으로 펼쳐 볼 수 있게 (원본과 동일) */
@@ -2215,7 +2219,7 @@ function buildSheet(schools) {
       c: c2
     }
   });
-  ws["!merges"] = [M(1, 0, 2, 0), M(1, 1, 2, 1), M(1, 2, 2, 2), M(1, 3, 2, 3), M(1, 4, 2, 4), M(1, 5, 2, 5), M(1, 6, 1, 8), M(1, 9, 2, 9), M(1, 10, 1, 11), M(1, 12, 1, 13), M(1, 14, 2, 14), M(1, 15, 2, 15), M(1, 16, 2, 16), M(1, 17, 2, 17), M(1, 18, 2, 18), M(1, 19, 1, 20), M(1, 21, 1, 23), M(1, 24, 2, 24), M(1, 25, 2, 25), M(1, 27, 2, 27), M(1, 28, 2, 28), M(1, 29, 2, 29), M(1, 30, 2, 30), M(1, 31, 2, 31), M(1, 32, 2, 32), M(1, 33, 2, 33)];
+  ws["!merges"] = [M(1, 0, 2, 0), M(1, 1, 2, 1), M(1, 2, 2, 2), M(1, 3, 2, 3), M(1, 4, 2, 4), M(1, 5, 2, 5), M(1, 6, 1, 8), M(1, 9, 2, 9), M(1, 10, 1, 11), M(1, 12, 1, 13), M(1, 14, 2, 14), M(1, 15, 2, 15), M(1, 16, 2, 16), M(1, 17, 2, 17), M(1, 18, 2, 18), M(1, 19, 1, 20), M(1, 21, 1, 23), M(1, 24, 2, 24), M(1, 25, 2, 25), M(1, 27, 2, 27), M(1, 28, 2, 28), M(1, 29, 2, 29), M(1, 30, 2, 30), M(1, 31, 2, 31), M(1, 32, 2, 32), M(1, 33, 2, 33), M(1, 34, 2, 34)];
   /* 헤더 3줄 고정 — 스크롤해도 항목명이 보이게 */
   ws["!freeze"] = {
     xSplit: 0,
@@ -4604,6 +4608,8 @@ const surveyDates = s => {
   return out.sort();
 };
 const isMultiSurvey = s => surveyDates(s).length > 1;
+/* 일정 확정 여부 — 값이 없으면 '확정'으로 본다 (예전 데이터가 그대로 보이도록) */
+const isTentative = s => !!(s && s.tentative);
 /* 그 날 실제로 가는 인원 — 날짜별로 정해둔 게 있으면 그것, 없으면 기본 인원 */
 const whoOnDate = (s, ds) => {
   const w = s && s.fieldWho && s.fieldWho[ds];
@@ -4784,7 +4790,7 @@ function EvRow({
       cursor: "pointer",
       border: `1px solid ${col}38`,
       borderLeft: `4px solid ${col}`,
-      background: col + "0e"
+      background: e.tentative ? `repeating-linear-gradient(45deg, ${col}12, ${col}12 5px, transparent 5px, transparent 10px)` : col + "0e"
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -4798,7 +4804,7 @@ function EvRow({
       color: "#fff",
       background: col
     }
-  }, EV_MARK[e.field], " ", evLabel(e.field), e.pos ? ` ${e.pos}` : ""), /*#__PURE__*/React.createElement("span", {
+  }, e.tentative ? "? " : "", EV_MARK[e.field], " ", evLabel(e.field), e.pos ? ` ${e.pos}` : ""), /*#__PURE__*/React.createElement("span", {
     style: {
       flex: 1,
       minWidth: 0
@@ -4926,7 +4932,7 @@ function WeekChip({
       cursor: "pointer",
       border: `1px solid ${col}3a`,
       borderLeft: `4px solid ${col}`,
-      background: col + "0e"
+      background: e.tentative ? `repeating-linear-gradient(45deg, ${col}12, ${col}12 5px, transparent 5px, transparent 10px)` : col + "0e"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4941,7 +4947,7 @@ function WeekChip({
       fontWeight: 800,
       color: col
     }
-  }, EV_MARK[e.field], " ", evLabel(e.field), e.pos ? ` ${e.pos}` : "", e.days > 1 && e.field === "field" ? ` (${e.days}일)` : ""), e.region && /*#__PURE__*/React.createElement("span", {
+  }, e.tentative ? "? " : "", EV_MARK[e.field], " ", evLabel(e.field), e.pos ? ` ${e.pos}` : "", e.days > 1 && e.field === "field" ? ` (${e.days}일)` : ""), e.region && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       color: C.t3,
@@ -4991,6 +4997,7 @@ function Calendar({
   const [view, setView] = useState("month"); // day | week | month
   const [cursor, setCursor] = useState(() => todayStr());
   const [kinds, setKinds] = useState(["field", "start", "end"]); // 보이는 일정 종류
+  const [onlyTent, setOnlyTent] = useState(false); // 예정만 보기
   /* 전부 켜진 상태에서 하나를 누르면 그것만 남는다.
      그 뒤엔 눌러서 더하거나 뺄 수 있고, 마지막 하나를 끄면 다시 전부 켜진다. */
   const toggleKind = k => setKinds(prev => {
@@ -5042,7 +5049,8 @@ function Calendar({
           /* 조사일은 그 날 실제로 가는 인원을 쓴다 (날짜별로 다를 수 있음) */
           assignees: sortMembers(f === "field" ? whoOnDate(s, ds) : s.assignees),
           pos: f === "field" ? surveyPos(s, ds) : "",
-          days: f === "field" ? surveyDates(s).length : 1
+          days: f === "field" ? surveyDates(s).length : 1,
+          tentative: isTentative(s)
         });
       });
     });
@@ -5055,7 +5063,7 @@ function Calendar({
     return map;
   }, [allSchools]);
 
-  const evOf = ds => (evByDate[ds] || []).filter(e => kinds.includes(e.field));
+  const evOf = ds => (evByDate[ds] || []).filter(e => kinds.includes(e.field) && (!onlyTent || e.tentative));
 
   /* 날짜별 메모 — 현장 일정과 따로 모아 둔다 */
   const noteByDate = useMemo(() => {
@@ -5066,7 +5074,7 @@ function Calendar({
     Object.values(map).forEach(a => a.sort((x, y2) => String(x.at || 0) - String(y2.at || 0)));
     return map;
   }, [notes]);
-  const noteOf = ds => noteByDate[ds] || [];
+  const noteOf = ds => onlyTent ? [] : noteByDate[ds] || [];
 
   /* 기간 이동 */
   const shift = n => {
@@ -5256,7 +5264,22 @@ function Calendar({
         background: on ? c : C.borderD
       }
     }), lab);
-  }));
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOnlyTent(v => !v),
+    title: "아직 확정되지 않은 일정만 보기",
+    style: {
+      flexShrink: 0,
+      padding: "11px 13px",
+      borderRadius: 9,
+      cursor: "pointer",
+      border: `1.5px solid ${onlyTent ? C.orange : C.border}`,
+      background: onlyTent ? C.orange + "18" : C.surface,
+      color: onlyTent ? C.orange : C.t4,
+      fontSize: 15,
+      fontWeight: onlyTent ? 800 : 600,
+      whiteSpace: "nowrap"
+    }
+  }, "◌ 예정만"));
 
   /* ── 월 보기 ── */
   const monthGrid = () => {
@@ -5370,7 +5393,8 @@ function Calendar({
         style: {
           padding: isMobile ? "2px 3px" : "3px 7px",
           borderRadius: 3,
-          background: `${evColor(e.field)}1c`,
+          /* 예정은 빗금 배경 — 메모(점선 막대)와 겹치지 않게 막대는 실선 유지 */
+          background: e.tentative ? `repeating-linear-gradient(45deg, ${evColor(e.field)}1c, ${evColor(e.field)}1c 4px, transparent 4px, transparent 8px)` : `${evColor(e.field)}1c`,
           borderLeft: `${isMobile ? e.field === "field" ? 3 : e.field === "start" ? 2 : e.field === "deliverDate" ? 4 : 5 : 3}px solid ${evColor(e.field)}`,
           borderTop: isMobile && e.field === "end" ? `1px solid ${evColor(e.field)}55` : undefined,
           fontSize: isMobile ? 11 : 14,
@@ -5392,7 +5416,7 @@ function Calendar({
           }),
           opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
         }
-      }, isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "")), noteOf(ds).slice(0, Math.max(0, cap - evs.length)).map((n, ni) => /*#__PURE__*/React.createElement("div", {
+      }, e.tentative ? "? " : null, isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "")), noteOf(ds).slice(0, Math.max(0, cap - evs.length)).map((n, ni) => /*#__PURE__*/React.createElement("div", {
         key: `n${ni}`,
         title: `${n.kind} · ${n.text}${(n.who || []).length ? ` · ${n.who.join(",")}` : ""}`,
         style: {
@@ -6375,6 +6399,7 @@ function EditPanel({
     tel: sc.tel || "",
     flags: getFlags(sc),
     isNew: isNewSite(sc),
+    tentative: !!sc.tentative,
     memo: sc.memo || ""
   });
   const [bf, setBf] = useState(sc.buildings.map(b => ({
@@ -6452,6 +6477,7 @@ function EditPanel({
           deliverDate: f.deliverDate,
           end: f.end,
           isNew: !!f.isNew,
+          tentative: !!f.tentative,
           memo: (f.memo || "").trim(),
           tel: (f.tel || "").trim(),
           flags: [...(f.flags || [])],
@@ -6680,6 +6706,45 @@ function EditPanel({
       marginTop: -1
     }
   }, "신규는 보고서 작성에 시간이 더 듭니다"), /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      color: C.t3,
+      fontWeight: 700,
+      marginTop: 6
+    }
+  }, "일정 상태"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6
+    }
+  }, [[true, "◌ 예정", C.orange], [false, "● 확정", C.green]].map(([v, lab, col]) => {
+    const on = !!f.tentative === v;
+    return /*#__PURE__*/React.createElement("button", {
+      key: lab,
+      onClick: () => setF(p => ({
+        ...p,
+        tentative: v
+      })),
+      style: {
+        flex: 1,
+        padding: "10px 6px",
+        borderRadius: 8,
+        fontSize: 14,
+        fontWeight: on ? 800 : 600,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        border: `1.5px solid ${on ? col : C.border}`,
+        background: on ? col + "18" : "transparent",
+        color: on ? col : C.t3
+      }
+    }, on ? "✓ " : "", lab);
+  })), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: C.t4,
+      marginTop: -1
+    }
+  }, f.tentative ? "달력에 빗금과 ? 로 표시됩니다" : "날짜가 아직 조율 중이면 예정으로 두세요"), /*#__PURE__*/React.createElement("label", {
     style: {
       fontSize: 12,
       color: C.t3,
@@ -8516,7 +8581,11 @@ function SitesManager({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, s.school), isNewSite(s) && /*#__PURE__*/React.createElement(Tag, {
+    }, s.school), isTentative(s) && /*#__PURE__*/React.createElement(Tag, {
+      bg: C.orangeL,
+      color: C.orange,
+      border: `1px solid ${C.orange}45`
+    }, "◌ 예정"), isNewSite(s) && /*#__PURE__*/React.createElement(Tag, {
       bg: C.redL,
       color: C.red,
       border: `1px solid ${C.red}45`
@@ -8890,7 +8959,11 @@ function SitesManager({
         fontSize: 16,
         color: C.t1
       }
-    }, s.school), isNewSite(s) && /*#__PURE__*/React.createElement(Tag, {
+    }, s.school), isTentative(s) && /*#__PURE__*/React.createElement(Tag, {
+      bg: C.orangeL,
+      color: C.orange,
+      border: `1px solid ${C.orange}45`
+    }, "◌ 예정"), isNewSite(s) && /*#__PURE__*/React.createElement(Tag, {
       bg: C.redL,
       color: C.red,
       border: `1px solid ${C.red}45`
@@ -12393,7 +12466,18 @@ function ReportCard({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, s.school), isNewSite(s) && /*#__PURE__*/React.createElement("span", {
+    }, s.school), isTentative(s) && /*#__PURE__*/React.createElement("span", {
+      style: {
+        flexShrink: 0,
+        fontSize: 12,
+        fontWeight: 800,
+        color: C.orange,
+        background: C.orangeL,
+        border: `1px solid ${C.orange}45`,
+        borderRadius: 4,
+        padding: "2px 6px"
+      }
+    }, "◌ 예정"), isNewSite(s) && /*#__PURE__*/React.createElement("span", {
       style: {
         flexShrink: 0,
         fontSize: 12,
