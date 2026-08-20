@@ -4777,7 +4777,7 @@ function EvRow({
   const who = sortMembers(e.assignees).join(" · ");
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
-    title: `${e.school}${e.bld > 1 ? ` ${e.bld}동` : ""}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
+    title: `${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
     style: {
       width: "100%",
       textAlign: "left",
@@ -4829,7 +4829,7 @@ function EvRow({
       borderRadius: 4,
       marginRight: 6
     }
-  }, e.region) : null, e.school, e.bld > 1 && /*#__PURE__*/React.createElement("span", {
+  }, e.region) : null, e.school, e.bld > 0 && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       fontWeight: 800,
@@ -4928,7 +4928,7 @@ function WeekChip({
   const who = sortMembers(e.assignees).join("·");
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
-    title: `${e.school}${e.bld > 1 ? ` ${e.bld}동` : ""}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
+    title: `${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
     style: {
       width: "100%",
       textAlign: "left",
@@ -4971,7 +4971,7 @@ function WeekChip({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, e.school, e.bld > 1 && /*#__PURE__*/React.createElement("span", {
+  }, e.school, e.bld > 0 && /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 800,
       color: col,
@@ -5404,7 +5404,7 @@ function Calendar({
           setDragging(null);
           setOverDate(null);
         },
-        title: `${e.school}${e.bld > 1 ? ` ${e.bld}동` : ""} · ${evLabel(e.field)}${e.days > 1 ? ` (${e.days}일 중 ${e.pos || "중간"})` : ""} · ${e.assignees.length ? sortMembers(e.assignees).join(",") : "인원 미배정"}`,
+        title: `${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""} · ${evLabel(e.field)}${e.days > 1 ? ` (${e.days}일 중 ${e.pos || "중간"})` : ""} · ${e.assignees.length ? sortMembers(e.assignees).join(",") : "인원 미배정"}`,
         style: {
           padding: isMobile ? "2px 3px" : "3px 7px",
           borderRadius: 3,
@@ -5431,7 +5431,7 @@ function Calendar({
           }),
           opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
         }
-      }, e.tentative ? "? " : null, isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "", e.bld > 1 && /*#__PURE__*/React.createElement("span", {
+      }, e.tentative ? "? " : null, isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "", e.bld > 0 && /*#__PURE__*/React.createElement("span", {
         style: {
           fontWeight: 800,
           opacity: .75,
