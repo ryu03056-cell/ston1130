@@ -146,6 +146,54 @@ const CATS = [{
   short: "토목소",
   color: "#B58A00"
 }];
+/* 동별 점검종류 — 실제 엑셀 C열에서 쓰이는 값들.
+   정기는 대부분이라 달력에 표시하지 않는다. */
+const BKINDS = [{
+  v: "정기",
+  label: "정기",
+  color: "#5C6879",
+  plain: true
+}, {
+  v: "정밀",
+  label: "정밀",
+  color: "#7C3AED"
+}, {
+  v: "내진",
+  label: "내진",
+  color: "#0D9B6C"
+}, {
+  v: "구조검토",
+  label: "구조검토",
+  color: "#1D6FF2"
+}, {
+  v: "성능평가",
+  label: "성능평가",
+  color: "#B58A00"
+}, {
+  v: "보강설계",
+  label: "보강설계",
+  color: "#D93B2B"
+}];
+const bkindColor = v => (BKINDS.find(x => x.v === v) || BKINDS[0]).color;
+/* 학교 단위 kind 문자열에서 동별 기본값을 뽑는다 (기존 데이터 이관용) */
+const kindToBK = k => {
+  const t = String(k || "");
+  const hit = BKINDS.find(x => !x.plain && t.includes(x.v));
+  return hit ? hit.v : "정기";
+};
+const bldKind = b => {
+  const v = b && b.kind;
+  return BKINDS.some(x => x.v === v) ? v : null;
+};
+/* 이 현장에 걸린 점검종류들 — 정기는 빼고, 나온 순서대로 */
+const siteKinds = s => {
+  const out = [];
+  (s && s.buildings || []).forEach(b => {
+    const k = bldKind(b) || kindToBK(s && s.kind);
+    if (k && k !== "정기" && !out.includes(k)) out.push(k);
+  });
+  return out;
+};
 const bldCat = b => {
   const c = b && b.cat;
   return c === "토목종" || c === "토목소" ? c : "건축";
@@ -1829,8 +1877,10 @@ function parseSheet(ws) {
       const areas = clean(gv(r, col.area)).split(/\r?\n/);
       const jongV = clean(gv(r, col.jong));
       names.forEach((bn, bi) => {
+        const rowKind = kindToBK(clean(gv(r, col.kind)));
         cur.buildings.push({
           b: bn,
+          kind: rowKind,
           cat: (() => {
             const cv = clean(gv(r, col.cat));
             return cv === "건축" || cv === "토목종" || cv === "토목소" ? cv : guessCat(bn, jongV);
@@ -1862,6 +1912,7 @@ function parseSheet(ws) {
       b: s.school,
       /* 시설 행이 없어 학교명으로 만든 기본 동 — 이름만으로 토목으로 단정하지 않는다 */
       cat: "건축",
+      kind: kindToBK(s.kind),
       floor: null,
       area: null,
       height: null,
@@ -2133,7 +2184,15 @@ function buildSheet(schools) {
     const schoolRow = new Array(nC).fill("");
     schoolRow[0] = isNewSite(s) ? "신규" : s.round || "-";
     schoolRow[1] = s.no || "";
-    schoolRow[2] = s.kind || "정기점검";
+    /* 점검종류는 동별 값에서 만든다. 여러 종류면 쉼표로 이어 붙인다 (예: 정밀,정기) */
+    schoolRow[2] = (() => {
+      const ks = [];
+      (s.buildings || []).forEach(b => {
+        const k = bldKind(b) || kindToBK(s.kind);
+        if (k && !ks.includes(k)) ks.push(k);
+      });
+      return ks.length ? ks.join(",") : s.kind || "정기";
+    })();
     schoolRow[3] = s.region || "";
     schoolRow[4] = s.school || "";
     schoolRow[6] = cc.건축 || "";
@@ -2173,7 +2232,7 @@ function buildSheet(schools) {
     const bs = (s.buildings || []).length === 1 && (s.buildings[0].b || "").trim() === (s.school || "").trim() && !s.buildings[0].floor && s.buildings[0].area == null ? [] : s.buildings || [];
     bs.forEach(b => {
       const br = new Array(nC).fill("");
-      br[2] = s.kind || "정기점검";
+      br[2] = bldKind(b) || kindToBK(s.kind);
       br[5] = b.b || "";
       br[9] = b.jong || "";
       br[10] = b.floor || "";
@@ -3692,6 +3751,8 @@ function DayPanel({
       progress: {},
       buildings: [{
         b: "본관",
+        cat: "건축",
+        kind: "정기",
         floor: null,
         area: null,
         fms: null,
@@ -4777,7 +4838,7 @@ function EvRow({
   const who = sortMembers(e.assignees).join(" · ");
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
-    title: `${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
+    title: `${(e.kinds || []).length ? `[${e.kinds.join("·")}] ` : ""}${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
     style: {
       width: "100%",
       textAlign: "left",
@@ -4829,7 +4890,19 @@ function EvRow({
       borderRadius: 4,
       marginRight: 6
     }
-  }, e.region) : null, e.school, e.bld > 0 && /*#__PURE__*/React.createElement("span", {
+  }, e.region) : null, (e.kinds || []).map(k => /*#__PURE__*/React.createElement("span", {
+    key: k,
+    style: {
+      fontSize: 12,
+      fontWeight: 800,
+      color: bkindColor(k),
+      background: bkindColor(k) + "18",
+      border: `1px solid ${bkindColor(k)}40`,
+      borderRadius: 4,
+      padding: "1px 5px",
+      marginRight: 4
+    }
+  }, k)), e.school, e.bld > 0 && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       fontWeight: 800,
@@ -4928,7 +5001,7 @@ function WeekChip({
   const who = sortMembers(e.assignees).join("·");
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
-    title: `${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
+    title: `${(e.kinds || []).length ? `[${e.kinds.join("·")}] ` : ""}${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""}${e.region ? ` (${e.region})` : ""} · ${evLabel(e.field)} · ${who || "인원 미배정"}`,
     style: {
       width: "100%",
       textAlign: "left",
@@ -4971,7 +5044,14 @@ function WeekChip({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, e.school, e.bld > 0 && /*#__PURE__*/React.createElement("span", {
+  }, (e.kinds || []).map(k => /*#__PURE__*/React.createElement("span", {
+    key: k,
+    style: {
+      color: bkindColor(k),
+      fontWeight: 900,
+      marginRight: 4
+    }
+  }, k)), e.school, e.bld > 0 && /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 800,
       color: col,
@@ -5065,7 +5145,8 @@ function Calendar({
           days: f === "field" ? surveyDates(s).length : 1,
           tentative: isTentative(s),
           /* 시설물(동) 수 — 캘린더에서 규모를 바로 가늠할 수 있게 */
-          bld: (s.buildings || []).length
+          bld: (s.buildings || []).length,
+          kinds: siteKinds(s)
         });
       });
     });
@@ -5404,7 +5485,7 @@ function Calendar({
           setDragging(null);
           setOverDate(null);
         },
-        title: `${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""} · ${evLabel(e.field)}${e.days > 1 ? ` (${e.days}일 중 ${e.pos || "중간"})` : ""} · ${e.assignees.length ? sortMembers(e.assignees).join(",") : "인원 미배정"}`,
+        title: `${(e.kinds || []).length ? `[${e.kinds.join("·")}] ` : ""}${e.school}${e.bld > 0 ? ` ${e.bld}동` : ""} · ${evLabel(e.field)}${e.days > 1 ? ` (${e.days}일 중 ${e.pos || "중간"})` : ""} · ${e.assignees.length ? sortMembers(e.assignees).join(",") : "인원 미배정"}`,
         style: {
           padding: isMobile ? "2px 3px" : "3px 7px",
           borderRadius: 3,
@@ -5431,7 +5512,19 @@ function Calendar({
           }),
           opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
         }
-      }, e.tentative ? "? " : null, isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "", e.bld > 0 && /*#__PURE__*/React.createElement("span", {
+      }, e.tentative ? "? " : null, (e.kinds || []).map(k => /*#__PURE__*/React.createElement("span", {
+        key: k,
+        style: {
+          color: bkindColor(k),
+          fontWeight: 900,
+          marginRight: 3,
+          ...(isMobile ? {} : {
+            background: bkindColor(k) + "1e",
+            borderRadius: 3,
+            padding: "0 4px"
+          })
+        }
+      }, k)), isMobile ? null : `${EV_MARK[e.field]} `, e.school, e.pos === "시작" ? "▸" : e.pos === "종료" ? "◂" : "", e.bld > 0 && /*#__PURE__*/React.createElement("span", {
         style: {
           fontWeight: 800,
           opacity: .75,
@@ -6426,6 +6519,8 @@ function EditPanel({
   const [bf, setBf] = useState(sc.buildings.map(b => ({
     b: b.b || "",
     cat: bldCat(b),
+    /* 동별 종류가 없으면 기존 학교 종류를 물려받는다 (지금과 똑같이 보이도록) */
+    kind: bldKind(b) || kindToBK(sc.kind),
     floor: b.floor || "",
     area: b.area ? String(b.area) : "",
     fms: b.fms || "",
@@ -6510,6 +6605,7 @@ function EditPanel({
           buildings: bf.map(b => ({
             b: b.b || "동",
             cat: b.cat || "건축",
+            kind: b.kind || "정기",
             floor: b.floor || null,
             area: b.area ? parseFloat(b.area) : null,
             fms: b.fms || null,
@@ -7303,7 +7399,51 @@ function EditPanel({
         color: on ? ct.color : C.t3
       }
     }, on ? "✓ " : "", ct.label);
-  })), /*#__PURE__*/React.createElement(LI, {
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      gridColumn: isMobile ? "span 2" : "span 3",
+      background: C.surfaceL,
+      border: BD,
+      borderRadius: 8,
+      padding: 9,
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      color: C.t4,
+      marginBottom: 6
+    }
+  }, "점검종류"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 5,
+      flexWrap: "wrap"
+    }
+  }, BKINDS.map(bk => {
+    const on = (b.kind || "정기") === bk.v;
+    return /*#__PURE__*/React.createElement("button", {
+      key: bk.v,
+      onClick: () => setBf(p => p.map((x, i) => i !== bi ? x : {
+        ...x,
+        kind: bk.v
+      })),
+      style: {
+        flex: "1 1 auto",
+        minWidth: 60,
+        padding: "8px 6px",
+        borderRadius: 7,
+        fontSize: 13,
+        fontWeight: on ? 800 : 600,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        border: `1.5px solid ${on ? bk.color : C.border}`,
+        background: on ? bk.color + "18" : C.surface,
+        color: on ? bk.color : C.t3
+      }
+    }, on ? "✓ " : "", bk.label);
+  }))), /*#__PURE__*/React.createElement(LI, {
     label: "동명",
     val: b.b,
     on: v => setBf(p => p.map((x, i) => i !== bi ? x : {
@@ -7387,6 +7527,7 @@ function EditPanel({
     onClick: () => setBf(p => [...p, {
       b: "",
       cat: "건축",
+      kind: kindToBK(sc.kind),
       floor: "",
       area: "",
       fms: "",
@@ -8065,6 +8206,8 @@ function SitesManager({
       progress: {},
       buildings: [{
         b: "본관",
+        cat: "건축",
+        kind: "정기",
         floor: null,
         area: null,
         fms: null,
