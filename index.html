@@ -4827,12 +4827,45 @@ function ListPicker({
   }))));
 }
 
+/* 담당자 이름을 하나씩 그린다 — 로그인한 본인 이름만 눈에 띄게 */
+function WhoList({
+  names,
+  me,
+  sep,
+  size,
+  baseColor
+}) {
+  const list = sortMembers(names);
+  if (!list.length) return null;
+  return list.map((n, i) => /*#__PURE__*/React.createElement(React.Fragment, {
+    key: n
+  }, i > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.t4
+    }
+  }, sep || "·"), /*#__PURE__*/React.createElement("span", {
+    style: n === me ? {
+      color: "#fff",
+      background: C.blue,
+      borderRadius: 4,
+      padding: "1px 5px",
+      fontWeight: 900,
+      fontSize: size
+    } : {
+      color: baseColor || C.t1,
+      fontWeight: 800,
+      fontSize: size
+    }
+  }, n)));
+}
+
 /* 일정 한 줄 (주 세로 목록 · 일 보기) — 어디로 누가 가는지가 한눈에 들어오도록
    현장명 → 지역 → 담당 인원 순으로 쌓는다 */
 function EvRow({
   e,
   compact,
-  onClick
+  onClick,
+  me
 }) {
   const col = evColor(e.field);
   const who = sortMembers(e.assignees).join(" · ");
@@ -4922,7 +4955,12 @@ function EvRow({
       background: who ? C.surfaceD : C.orangeL,
       border: `1px solid ${who ? C.borderD : C.orange + "55"}`
     }
-  }, who ? `👤 ${who}` : `⚠ 인원 미배정 · ${e.headcount}명 예정`)));
+  }, who ? /*#__PURE__*/React.createElement(React.Fragment, null, "👤 ", /*#__PURE__*/React.createElement(WhoList, {
+    names: e.assignees,
+    me: me,
+    sep: " · ",
+    size: compact ? 14 : 15
+  })) : `⚠ 인원 미배정 · ${e.headcount}명 예정`)));
 }
 
 /* 메모 일정 한 줄 — 현장 점검이 아닌 부가 일정 (휴가·회의 등) */
@@ -4995,7 +5033,8 @@ function NoteRow({
 /* 일정 칸 (데스크탑 주 보기 7칸) — 좁으니 세 줄로 압축 */
 function WeekChip({
   e,
-  onClick
+  onClick,
+  me
 }) {
   const col = evColor(e.field);
   const who = sortMembers(e.assignees).join("·");
@@ -5070,7 +5109,13 @@ function WeekChip({
       background: who ? C.surfaceD : C.orangeL,
       border: `1px solid ${who ? C.borderD : C.orange + "55"}`
     }
-  }, who || "인원 미배정"));
+  }, who ? /*#__PURE__*/React.createElement(WhoList, {
+    names: e.assignees,
+    me: me,
+    sep: "·",
+    size: 14,
+    baseColor: C.t2
+  }) : "인원 미배정"));
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -5641,6 +5686,7 @@ function Calendar({
       }, "일정 없음") : null, evs.map((e, i) => /*#__PURE__*/React.createElement(WeekChip, {
         key: i,
         e: e,
+        me: editor,
         onClick: () => setSelDate(ds)
       })), noteOf(ds).map((n, i) => /*#__PURE__*/React.createElement("button", {
         key: `n${i}`,
@@ -5762,6 +5808,7 @@ function Calendar({
         key: i,
         e: e,
         compact: true,
+        me: editor,
         onClick: () => setSelDate(ds)
       })), noteOf(ds).map((n, i) => /*#__PURE__*/React.createElement(NoteRow, {
         key: `n${i}`,
@@ -5860,6 +5907,7 @@ function Calendar({
     }, g.items.length)), g.items.map((e, i) => /*#__PURE__*/React.createElement(EvRow, {
       key: i,
       e: e,
+      me: editor,
       onClick: () => setSelDate(cursor)
     })))));
   };
