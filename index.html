@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <meta name="apple-mobile-web-app-title" content="STON"/>
 <meta name="theme-color" content="#1D6FF2"/>
-<link rel="apple-touch-icon" href="icon-192.png"/>
+<link rel="apple-touch-icon" href="192.png"/>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" rel="stylesheet"/>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -234,7 +234,10 @@ const FLAG_OPTS = [{
 }];
 /* 신규 현장 — 엑셀 A열 '점검회차'가 '신규'이면 표시.
    신규는 보고서 작성에 시간이 더 들어 눈에 띄어야 한다. */
-const isNewSite = s => !!(s && (s.isNew || String(s.round || "").includes("신규")));
+/* 신규 현장 — 그 반기에 처음 들어온 곳.
+   이월본(지난 반기에서 넘어온 것)은 신규가 아니다.
+   이미 저장된 예전 이월본도 여기서 걸러지므로 데이터를 손댈 필요가 없다. */
+const isNewSite = s => !!(s && !s.carried && (s.isNew || String(s.round || "").includes("신규")));
 
 const getFlags = s => {
   if (s && s.flags && typeof s.flags === "object") {
@@ -3695,6 +3698,8 @@ function DayPanel({
   const [noteOpen, setNoteOpen] = useState(false); // 메모 작성
   const [noteEdit, setNoteEdit] = useState(null); // 수정 중인 메모
   const dayNotes = (notes || []).filter(n => noteDates(n).includes(dateStr));
+  /* 관리자는 전부, 일반 사용자는 본인이 쓴 메모만 고치거나 지울 수 있다 */
+  const canEditNote = n => isAdmin || !!(editor && n && n.by === editor);
   const delNote = n => {
     if (!window.confirm(`'${n.text}' 메모를 지울까요?`)) return;
     try {
@@ -4419,7 +4424,7 @@ function DayPanel({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, (n.who || []).length ? `👤 ${sortMembers(n.who).join(" · ")} · ` : "", noteDates(n).length > 1 ? `${noteDates(n).length}일 · ` : "", n.by || "")), isAdmin && /*#__PURE__*/React.createElement("button", {
+  }, (n.who || []).length ? `👤 ${sortMembers(n.who).join(" · ")} · ` : "", noteDates(n).length > 1 ? `${noteDates(n).length}일 · ` : "", n.by || "")), canEditNote(n) && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setNoteOpen(false);
       setNoteEdit(n);
@@ -4435,7 +4440,7 @@ function DayPanel({
       fontWeight: 700,
       cursor: "pointer"
     }
-  }, "수정"), isAdmin && /*#__PURE__*/React.createElement("button", {
+  }, "수정"), canEditNote(n) && /*#__PURE__*/React.createElement("button", {
     onClick: () => delNote(n),
     style: {
       flexShrink: 0,
@@ -6641,6 +6646,9 @@ function EditPanel({
           deliverDate: f.deliverDate,
           end: f.end,
           isNew: !!f.isNew,
+          /* 신규를 끄면 엑셀에서 들어온 '신규' 회차 표시도 함께 지운다.
+             안 지우면 isNewSite 가 round 를 보고 계속 신규로 판정한다. */
+          round: f.isNew ? sc.round || "신규" : String(sc.round || "").includes("신규") ? "" : sc.round || "",
           tentative: !!f.tentative,
           memo: (f.memo || "").trim(),
           tel: (f.tel || "").trim(),
@@ -7813,33 +7821,44 @@ function CopyHalfModal({
       if (sel.has(keyOf(bk, s))) picked.push(s);
     }));
     if (!picked.length) return;
+    const newId = () => `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${Math.floor(Math.random() * 9999)}`;
+    const cleanBld = s => (s.buildings || []).map(b => ({
+      ...b,
+      rep: false,
+      fmsD: false,
+      delivery: null
+    }));
     const copies = picked.map(s => keepOrig ? {
       ...s,
-      id: `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${Math.floor(Math.random() * 9999)}`,
+      id: newId(),
       progress: {},
       // 진행단계 초기화
-      buildings: (s.buildings || []).map(b => ({
-        ...b,
-        rep: false,
-        fmsD: false,
-        delivery: null
-      }))
+      /* 이번 반기에는 더 이상 신규가 아니다 — 지난 반기 표시를 물려받지 않는다 */
+      isNew: false,
+      round: "",
+      lastEdit: null,
+      buildings: cleanBld(s)
     } // 날짜는 유지, 보고서·FMS·납품은 미완으로
     : {
       ...s,
-      id: `copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${Math.floor(Math.random() * 9999)}`,
+      id: newId(),
       field: "",
+      fieldEnd: "",
+      fieldExtra: [],
+      fieldWho: null,
       start: "",
+      deliverDate: "",
       end: "",
       progress: {},
       assignees: [],
       headcount: s.headcount || 1,
-      buildings: (s.buildings || []).map(b => ({
-        ...b,
-        rep: false,
-        fmsD: false,
-        delivery: null
-      }))
+      /* 새 점검이므로 신규·예정 표시와 지난 메모는 가져오지 않는다 */
+      isNew: false,
+      tentative: false,
+      round: "",
+      memo: "",
+      lastEdit: null,
+      buildings: cleanBld(s)
     }); // 새 점검으로 초기화
     setDb(prev => {
       const n = {
@@ -9824,6 +9843,20 @@ function ExportImportPage({
               carried: true,
               progress: {},
               // 진행단계 초기화
+              /* 신규는 그 반기에 처음 들어온 현장이라는 뜻이다.
+                 이월본은 지난 반기에 이미 있던 곳이므로 신규가 아니다. */
+              isNew: false,
+              round: "",
+              /* 상반기 날짜를 그대로 끌고 오면 하반기 달력이 어긋난다 → 비운다 */
+              field: "",
+              fieldEnd: "",
+              fieldExtra: [],
+              fieldWho: null,
+              start: "",
+              deliverDate: "",
+              end: "",
+              /* 일정이 아직 안 잡힌 상태이므로 예정으로 시작한다 */
+              tentative: true,
               buildings: (s.buildings || []).map(b => ({
                 ...b,
                 rep: false,
@@ -9833,13 +9866,25 @@ function ExportImportPage({
             };
             const prev = carriedByName.get(nm);
             if (prev) {
+              /* 이미 하반기에서 손본 값(날짜·인원·상태)은 지우지 않는다.
+                 상반기 정보만 새로 반영하고 나머지는 그대로 둔다. */
               carriedByName.set(nm, {
                 ...fresh,
                 id: prev.id,
-                assignees: prev.assignees || fresh.assignees
+                assignees: prev.assignees || fresh.assignees,
+                field: prev.field || "",
+                fieldEnd: prev.fieldEnd || "",
+                fieldExtra: toArr(prev.fieldExtra),
+                fieldWho: prev.fieldWho || null,
+                start: prev.start || "",
+                deliverDate: prev.deliverDate || "",
+                end: prev.end || "",
+                tentative: prev.tentative !== undefined ? prev.tentative : true,
+                progress: prev.progress || {},
+                memo: prev.memo || fresh.memo || ""
               });
               n++;
-            } // 기존 이월본 갱신(id·인원 유지)
+            } // 기존 이월본 갱신(id·인원·하반기 입력값 유지)
             else {
               const add = {
                 ...fresh,
