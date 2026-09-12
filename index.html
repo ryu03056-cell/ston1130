@@ -178,6 +178,9 @@ const BKINDS = [{
 }];
 const bkindColor = v => (BKINDS.find(x => x.v === v) || BKINDS[0]).color;
 /* 학교 단위 kind 문자열에서 동별 기본값을 뽑는다 (기존 데이터 이관용) */
+/* 토목 시설(옹벽·교량 등)인지 — 층수·연면적 대신 연장·높이를 보여준다 */
+const isCivilB = b => /토목/.test(b && b.cat || "") || /옹벽|교량|터널|축대|담장|육교|암거/.test(b && b.b || "");
+
 /* 시트 점검종류 → 동별 종류. "성능,정기"·"정밀,정기" 처럼 섞여 있으면 정기가 아닌 쪽을 고른다.
    시트에 짧게 쓴 것(성능·구조·보강)도 잡는다. */
 const kindToBK = k => {
@@ -7700,7 +7703,25 @@ function EditPanel({
       b: v
     })),
     locked: sheetLinked
+  }), /*#__PURE__*/(isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(LI, {
+    label: "연장 m",
+    val: b.len ?? "",
+    on: v => setBf(p => p.map((x, i) => i !== bi ? x : {
+      ...x,
+      len: v
+    })),
+    type: "number",
+    locked: sheetLinked
   }), /*#__PURE__*/React.createElement(LI, {
+    label: "높이 m",
+    val: b.height ?? "",
+    on: v => setBf(p => p.map((x, i) => i !== bi ? x : {
+      ...x,
+      height: v
+    })),
+    type: "number",
+    locked: sheetLinked
+  })) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(LI, {
     label: "층수",
     val: b.floor,
     on: v => setBf(p => p.map((x, i) => i !== bi ? x : {
@@ -7717,7 +7738,7 @@ function EditPanel({
     })),
     type: "number",
     locked: sheetLinked
-  })), /*#__PURE__*/React.createElement("div", {
+  })))), /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 8
     }
@@ -9274,7 +9295,17 @@ function SitesManager({
           flex: 1,
           minWidth: 0
         }
-      }, b.b), b.floor && /*#__PURE__*/React.createElement("span", {
+      }, b.b), isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, b.len != null && b.len !== "" && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 12,
+          color: C.t4
+        }
+      }, "연장 ", Number(b.len).toLocaleString(), "m"), b.height != null && b.height !== "" && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 12,
+          color: C.t4
+        }
+      }, "높이 ", Number(b.height).toLocaleString(), "m")) : /*#__PURE__*/React.createElement(React.Fragment, null, b.floor && /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
           color: C.t4
@@ -9284,7 +9315,7 @@ function SitesManager({
           fontSize: 12,
           color: C.t4
         }
-      }, b.area.toLocaleString(), "㎡"), b.fms && /*#__PURE__*/React.createElement("button", {
+      }, b.area.toLocaleString(), "㎡")), b.fms && /*#__PURE__*/React.createElement("button", {
         onClick: () => copy(b.fms, `f-${iid}`),
         style: {
           padding: "4px 9px",
@@ -9630,7 +9661,17 @@ function SitesManager({
           color: C.t1,
           fontWeight: 600
         }
-      }, b.b), b.floor && /*#__PURE__*/React.createElement("span", {
+      }, b.b), isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, b.len != null && b.len !== "" && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 12,
+          color: C.t4
+        }
+      }, "연장 ", Number(b.len).toLocaleString(), "m"), b.height != null && b.height !== "" && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 12,
+          color: C.t4
+        }
+      }, "높이 ", Number(b.height).toLocaleString(), "m")) : /*#__PURE__*/React.createElement(React.Fragment, null, b.floor && /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
           color: C.t4
@@ -9640,7 +9681,7 @@ function SitesManager({
           fontSize: 12,
           color: C.t4
         }
-      }, b.area.toLocaleString(), "㎡")), b.note && /*#__PURE__*/React.createElement("div", {
+      }, b.area.toLocaleString(), "㎡"))), b.note && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: C.t2,
@@ -17236,7 +17277,7 @@ function App() {
             flag: prev.flag || null
           };
         });
-        const same = oldB.length === nb.length && oldB.every((b, i) => b.b === nb[i].b && b.kind === nb[i].kind && b.floor === nb[i].floor && b.area === nb[i].area && b.jong === nb[i].jong);
+        const same = oldB.length === nb.length && oldB.every((b, i) => b.b === nb[i].b && b.kind === nb[i].kind && b.floor === nb[i].floor && b.area === nb[i].area && b.jong === nb[i].jong && (b.len ?? null) === (nb[i].len ?? null) && (b.height ?? null) === (nb[i].height ?? null) && (b.fms || null) === (nb[i].fms || null));
         if (!same) next.buildings = nb;
       }
       /* 워크플로우 — 값이 실제로 다를 때만 (키 순서 무관하게 견줌) */
