@@ -4145,7 +4145,7 @@ function DayPanel({
         color: C.blue,
         whiteSpace: "nowrap"
       }
-    }, `조사 ${surveyDates(s).length}일 중 ${surveyDates(s).indexOf(dateStr) + 1}일차`), s.buildings.map((b, i) => /*#__PURE__*/React.createElement("span", {
+    }, `조사 ${schoolSurveyDates(s).length}일 중 ${schoolSurveyDates(s).indexOf(dateStr) + 1}일차`), buildingsOnDate(s, dateStr).map((b, i) => /*#__PURE__*/React.createElement("span", {
       key: i,
       style: {
         fontSize: 12,
@@ -4725,10 +4725,9 @@ const evLabel = f => f === "field" ? "조사" : f === "start" ? "착수" : f ===
 const surveyDates = s => {
   const out = [];
   const f = s && s.field;
-  if (!f) return out;
-  out.push(f);
+  if (f) out.push(f);
   const fe = s && s.fieldEnd;
-  if (fe && fe > f) {
+  if (f && fe && fe > f) {
     let d = addDays(parseD(f), 1);
     const last = parseD(fe);
     let guard = 0;
@@ -4741,9 +4740,51 @@ const surveyDates = s => {
   toArr(s && s.fieldExtra).forEach(d => {
     if (d && !out.includes(d)) out.push(d);
   });
+  /* 동별 조사일 (시트 시설물 행 R열) — 그 동만 그 날짜에 따로 뜬다 */
+  toArr(s && s.buildings).forEach(b => {
+    if (b && b.field && !out.includes(b.field)) out.push(b.field);
+  });
   return out.sort();
 };
-const isMultiSurvey = s => surveyDates(s).length > 1;
+
+/* 학교 조사 기간(동별 조사일 제외) — 여러 날인지·몇 일차인지는 이걸로 센다 */
+const schoolSurveyDates = s => surveyDates({
+  ...s,
+  buildings: []
+});
+
+/* 어떤 날에 어느 동이 가는지.
+   · 동에 자기 날짜(b.field)가 있으면 그 날에만
+   · 없으면 학교 날짜(첫날·연속·따로) 전부에 */
+const buildingsOnDate = (s, ds) => {
+  const bs = toArr(s && s.buildings).filter(Boolean);
+  const own = bs.filter(b => b.field);
+  const rest = bs.filter(b => !b.field);
+  const schoolDays = (() => {
+    const o = [];
+    const f = s && s.field;
+    if (!f) return o;
+    o.push(f);
+    const fe = s && s.fieldEnd;
+    if (fe && fe > f) {
+      let d = addDays(parseD(f), 1);
+      const last = parseD(fe);
+      let g = 0;
+      while (d <= last && g++ < 120) {
+        o.push(dstr(d));
+        d = addDays(d, 1);
+      }
+    }
+    toArr(s && s.fieldExtra).forEach(d => {
+      if (d && !o.includes(d)) o.push(d);
+    });
+    return o;
+  })();
+  const out = own.filter(b => b.field === ds);
+  if (schoolDays.includes(ds)) out.push(...rest);
+  return out;
+};
+const isMultiSurvey = s => schoolSurveyDates(s).length > 1;
 /* 일정 확정 여부 — 값이 없으면 '확정'으로 본다 (예전 데이터가 그대로 보이도록) */
 const isTentative = s => !!(s && s.tentative);
 /* 그 날 실제로 가는 인원 — 날짜별로 정해둔 게 있으면 그것, 없으면 기본 인원 */
@@ -4754,7 +4795,12 @@ const whoOnDate = (s, ds) => {
 };
 /* 그 날짜가 조사 기간의 어디인지 — 첫날/마지막날/중간 */
 const surveyPos = (s, ds) => {
-  const a = surveyDates(s);
+  /* 시작·종료 표시는 학교 조사 기간(첫날~종료일·따로 날)만 본다.
+     동별 조사일은 별개 일정이라 여기 안 들어간다 */
+  const a = surveyDates({
+    ...s,
+    buildings: []
+  });
   if (a.length <= 1) return "";
   if (ds === a[0]) return "시작";
   if (ds === a[a.length - 1]) return "종료";
@@ -5262,11 +5308,14 @@ function Calendar({
           /* 조사일은 그 날 실제로 가는 인원을 쓴다 (날짜별로 다를 수 있음) */
           assignees: sortMembers(f === "field" ? whoOnDate(s, ds) : s.assignees),
           pos: f === "field" ? surveyPos(s, ds) : "",
-          days: f === "field" ? surveyDates(s).length : 1,
+          days: f === "field" ? schoolSurveyDates(s).length : 1,
           tentative: isTentative(s),
-          /* 시설물(동) 수 — 캘린더에서 규모를 바로 가늠할 수 있게 */
-          bld: (s.buildings || []).length,
-          kinds: siteKinds(s)
+          /* 시설물(동) 수 — 조사일이면 그 날 가는 동만 (동별 조사일이 다를 수 있음) */
+          bld: f === "field" ? buildingsOnDate(s, ds).length : (s.buildings || []).length,
+          kinds: f === "field" ? siteKinds({
+            ...s,
+            buildings: buildingsOnDate(s, ds)
+          }) : siteKinds(s)
         });
       });
     });
@@ -7703,6 +7752,14 @@ function EditPanel({
       b: v
     })),
     locked: sheetLinked
+  }), b.field && /*#__PURE__*/React.createElement(LI, {
+    label: "◆ 이 동만 조사일",
+    val: b.field,
+    on: () => {},
+    type: "date",
+    col: C.blue,
+    hint: "시트 시설물 행에 넣은 날짜 — 이 동은 이 날 따로 갑니다",
+    locked: true
   }), /*#__PURE__*/(isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(LI, {
     label: "연장 m",
     val: b.len ?? "",
@@ -9295,7 +9352,18 @@ function SitesManager({
           flex: 1,
           minWidth: 0
         }
-      }, b.b), isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, b.len != null && b.len !== "" && /*#__PURE__*/React.createElement("span", {
+      }, b.b), b.field && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 11,
+          fontWeight: 800,
+          padding: "1px 6px",
+          borderRadius: 4,
+          background: C.blueL,
+          border: `1px solid ${C.blue}45`,
+          color: C.blue,
+          whiteSpace: "nowrap"
+        }
+      }, "◆ ", b.field.slice(5).replace("-", "/")), isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, b.len != null && b.len !== "" && /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
           color: C.t4
@@ -9661,7 +9729,18 @@ function SitesManager({
           color: C.t1,
           fontWeight: 600
         }
-      }, b.b), isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, b.len != null && b.len !== "" && /*#__PURE__*/React.createElement("span", {
+      }, b.b), b.field && /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 11,
+          fontWeight: 800,
+          padding: "1px 6px",
+          borderRadius: 4,
+          background: C.blueL,
+          border: `1px solid ${C.blue}45`,
+          color: C.blue,
+          whiteSpace: "nowrap"
+        }
+      }, "◆ ", b.field.slice(5).replace("-", "/")), isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, b.len != null && b.len !== "" && /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
           color: C.t4
@@ -10992,6 +11071,7 @@ function siteFromSheetRow(r, flowSteps, yr, half) {
     area: b.area ?? null,
     len: b.len ?? null,
     height: b.height ?? null,
+    field: b.field || null, /* 동별 조사일 — 있으면 이 동만 이 날짜 */
     jong: b.jong || null,
     fms: sheetFms(r),
     flag: null,
@@ -17161,7 +17241,16 @@ function App() {
       taken = {};
 
     /* 이 반기 현장만 — 다른 반기는 애초에 후보에서 뺀다 */
-    const target = allSchools.filter(s => s._year === SHEET_YEAR && s._half === SHEET_HALF);
+    /* 휴지통에 있는 현장도 짝짓기 후보에 넣는다 — 시트에 여전히 있으면 시트가 주인이니 되살린다 */
+    const trashed = [];
+    toArr(db[SHEET_YEAR] && db[SHEET_YEAR][SHEET_HALF]).forEach(x => {
+      if (x && x.deleted) trashed.push({
+        ...x,
+        _year: SHEET_YEAR,
+        _half: SHEET_HALF
+      });
+    });
+    const target = [...allSchools.filter(s => s._year === SHEET_YEAR && s._half === SHEET_HALF), ...trashed];
     const skipped = allSchools.length - target.length;
 
     /* 사람이 직접 고른 것을 먼저 처리해 자리를 잡아준다 */
@@ -17202,7 +17291,7 @@ function App() {
       skipped,
       at: sheet.at /* 어느 시트로 계산했는지 — 자동 반영이 새 시트인지 가릴 때 쓴다 */
     };
-  }, [sheet, allSchools, syncMap]);
+  }, [sheet, allSchools, syncMap, db]);
 
   /* 시트가 주인인 항목은 시트 값을 앱에 자동으로 덮어쓴다.
      착수일·현장조사(첫날)·완수일·계약일·특이사항·지역·워크플로우 16단계.
@@ -17224,12 +17313,22 @@ function App() {
 
     const flow = sheet.flow || {};
     const patch = {};
-    allSchools.forEach(s => {
+    /* 휴지통 현장도 돈다 — 시트에 있으면 되살린다 */
+    const trashedAll = [];
+    toArr(db[SHEET_YEAR] && db[SHEET_YEAR][SHEET_HALF]).forEach(x => {
+      if (x && x.deleted) trashedAll.push({
+        ...x,
+        _year: SHEET_YEAR,
+        _half: SHEET_HALF
+      });
+    });
+    [...allSchools, ...trashedAll].forEach(s => {
       const m = sheetMatch.map[s.id];
       if (!m) return;
       const r = m.row;
       const fl = flow[`${r.region}|${r.school}`];
       const next = {};
+      if (s.deleted) next.deleted = null; /* 시트에 있으니 휴지통에서 꺼낸다 */
       if ((r.start || "") !== (s.start || "")) next.start = r.start || "";
       /* 현장조사 첫날 — 시트가 주인. 여러 날(fieldEnd·fieldExtra)과 날짜별 인원은 앱에만 있으니 건드리지 않는다.
          다만 첫날이 바뀌어 종료일이 첫날보다 앞서게 되면 종료일은 비운다(뒤집힌 기간은 뜻이 없다).
@@ -17268,6 +17367,7 @@ function App() {
             area: b.area ?? null,
             len: b.len ?? null,
             height: b.height ?? null,
+            field: b.field || null,
             jong: b.jong || null,
             fms: sheetFms(r) || prev.fms || null,
             rep: prev.rep || false,
@@ -17277,7 +17377,7 @@ function App() {
             flag: prev.flag || null
           };
         });
-        const same = oldB.length === nb.length && oldB.every((b, i) => b.b === nb[i].b && b.kind === nb[i].kind && b.floor === nb[i].floor && b.area === nb[i].area && b.jong === nb[i].jong && (b.len ?? null) === (nb[i].len ?? null) && (b.height ?? null) === (nb[i].height ?? null) && (b.fms || null) === (nb[i].fms || null));
+        const same = oldB.length === nb.length && oldB.every((b, i) => b.b === nb[i].b && b.kind === nb[i].kind && b.floor === nb[i].floor && b.area === nb[i].area && b.jong === nb[i].jong && (b.len ?? null) === (nb[i].len ?? null) && (b.height ?? null) === (nb[i].height ?? null) && (b.fms || null) === (nb[i].fms || null) && (b.field || null) === (nb[i].field || null));
         if (!same) next.buildings = nb;
       }
       /* 워크플로우 — 값이 실제로 다를 때만 (키 순서 무관하게 견줌) */
@@ -17303,7 +17403,6 @@ function App() {
     toArr(db[SHEET_YEAR] && db[SHEET_YEAR][SHEET_HALF]).forEach(x => {
       if (!x || !x.school) return;
       if (!x.deleted && !matchedIds.has(x.id)) unmatchedNames.add(normName(x.school));
-      if (x.deleted) unmatchedNames.add(normName(x.school)); /* 휴지통 이름은 다시 안 만든다 */
       if (x.no) allNos.add(String(x.no).trim());
     });
     const toCreate = [];
