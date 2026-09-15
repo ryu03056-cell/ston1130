@@ -16708,11 +16708,25 @@ function App() {
     const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = ac ? setTimeout(() => ac.abort(), 20000) : null;
     try {
-      const res = await fetch(`${SHEET_URL}?key=${encodeURIComponent(SHEET_KEY)}&t=${Date.now()}`, ac ? {
-        signal: ac.signal
-      } : undefined);
-      if (!res.ok) throw new Error(`시트 서버 응답 ${res.status}`);
-      const j = await res.json();
+      /* Apps Script 가 가끔 JSON 대신 HTML 오류 페이지를 준다 — 최대 3번 다시 받는다 */
+      let j = null,
+        lastErr = null;
+      for (let tryN = 0; tryN < 3 && !j; tryN++) {
+        if (tryN) await new Promise(r => setTimeout(r, 1500));
+        try {
+          const res = await fetch(`${SHEET_URL}?key=${encodeURIComponent(SHEET_KEY)}&t=${Date.now()}_${tryN}`, ac ? {
+            signal: ac.signal
+          } : undefined);
+          if (!res.ok) throw new Error(`시트 서버 응답 ${res.status}`);
+          const txt = await res.text();
+          if (!txt.trim().startsWith("{")) throw new Error("시트가 잠깐 응답을 못 했습니다");
+          j = JSON.parse(txt);
+        } catch (e) {
+          lastErr = e;
+          if (e && e.name === "AbortError") throw e;
+        }
+      }
+      if (!j) throw lastErr || new Error("시트를 읽지 못했습니다");
       if (!j || !j.ok) throw new Error(j && j.error || "시트를 읽지 못했습니다");
       if (!Array.isArray(j.sites)) throw new Error("시트 내용이 올바르지 않습니다");
       /* 직전에 받은 것과 견줘 무엇이 바뀌었는지 찾는다 (처음 받을 때는 건너뜀) */
