@@ -256,6 +256,19 @@ const deliveryOf = s => {
 /* 토목 시설(옹벽·교량 등)인지 — 층수·연면적 대신 연장·높이를 보여준다 */
 const isCivilB = b => /토목/.test(b && b.cat || "") || /옹벽|교량|터널|축대|담장|육교|암거/.test(b && b.b || "");
 
+/* 시설물 치수 한 줄 — 건물은 "4층 2,500㎡", 토목은 "228m / 12.4m" (연장/높이) */
+const bldSize = b => {
+  if (!b) return "";
+  if (isCivilB(b)) {
+    const l = b.len != null && b.len !== "" ? `${Number(b.len).toLocaleString()}m` : "";
+    const h = b.height != null && b.height !== "" ? `${Number(b.height).toLocaleString()}m` : "";
+    return l && h ? `${l} / ${h}` : l || h;
+  }
+  const fl = b.floor ? `${b.floor}층` : "";
+  const ar = b.area != null && b.area !== "" ? `${Number(b.area).toLocaleString()}㎡` : "";
+  return [fl, ar].filter(Boolean).join(" ");
+};
+
 /* 시트 점검종류 → 동별 종류. "성능,정기"·"정밀,정기" 처럼 섞여 있으면 정기가 아닌 쪽을 고른다.
    시트에 짧게 쓴 것(성능·구조·보강)도 잡는다. */
 const kindToBK = k => {
@@ -4168,31 +4181,30 @@ function DayPanel({
         fontWeight: 600,
         marginBottom: 5
       }
-    }, "인원 선택"), /*#__PURE__*/React.createElement("div", {
+    }, "인원 선택 · 여러 명 이어서 누르세요"), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         flexWrap: "wrap",
         gap: 5
       }
-    }, available.map(name => {
+    }, allMembers().map(name => {
       const mc = memberColor(name);
+      const on = assignees.includes(name);
       return /*#__PURE__*/React.createElement("button", {
         key: name,
-        onClick: () => {
-          toggleAssignee(s.id, name);
-          setPickerId(null);
-        },
+        /* 누를 때마다 목록을 닫지 않는다 — 여러 명을 이어서 고를 수 있게 */
+        onClick: () => toggleAssignee(s.id, name),
         style: {
           padding: "5px 12px",
           borderRadius: 20,
           fontSize: 13,
           fontWeight: 700,
           cursor: "pointer",
-          background: mc + "14",
-          color: mc,
-          border: `1.5px solid ${mc}55`
+          background: on ? mc : mc + "14",
+          color: on ? "#fff" : mc,
+          border: `1.5px solid ${on ? mc : mc + "55"}`
         }
-      }, rankOf(name) ? /*#__PURE__*/React.createElement("span", {
+      }, on ? "✓ " : "", rankOf(name) ? /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 11,
           fontWeight: 600,
@@ -4200,7 +4212,21 @@ function DayPanel({
           marginRight: 4
         }
       }, rankOf(name)) : null, name);
-    })))), /*#__PURE__*/React.createElement(EditLine, {
+    })), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPickerId(null),
+      style: {
+        marginTop: 8,
+        width: "100%",
+        padding: "8px 0",
+        borderRadius: 7,
+        border: "none",
+        background: C.blue,
+        color: "#fff",
+        fontSize: 13,
+        fontWeight: 800,
+        cursor: "pointer"
+      }
+    }, `✓ 완료 · ${assignees.length}명`))), /*#__PURE__*/React.createElement(EditLine, {
       s: s
     }), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4232,7 +4258,13 @@ function DayPanel({
         color: C.t2,
         whiteSpace: "nowrap"
       }
-    }, b.b, b.floor ? ` (${b.floor}층)` : ""))), s.buildings.some(b => b.note) && /*#__PURE__*/React.createElement("div", {
+    }, b.b, bldSize(b) ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 5,
+        color: C.t4,
+        fontWeight: 600
+      }
+    }, bldSize(b)) : null))), s.buildings.some(b => b.note) && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 6,
         fontSize: 12,
@@ -9525,27 +9557,12 @@ function SitesManager({
           color: C.blue,
           whiteSpace: "nowrap"
         }
-      }, "◆ ", b.field.slice(5).replace("-", "/")), isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, b.len != null && b.len !== "" && /*#__PURE__*/React.createElement("span", {
+      }, "◆ ", b.field.slice(5).replace("-", "/")), bldSize(b) && /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
           color: C.t4
         }
-      }, "연장 ", Number(b.len).toLocaleString(), "m"), b.height != null && b.height !== "" && /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 12,
-          color: C.t4
-        }
-      }, "높이 ", Number(b.height).toLocaleString(), "m")) : /*#__PURE__*/React.createElement(React.Fragment, null, b.floor && /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 12,
-          color: C.t4
-        }
-      }, b.floor, "층"), b.area && /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 12,
-          color: C.t4
-        }
-      }, b.area.toLocaleString(), "㎡")), b.fms && /*#__PURE__*/React.createElement("button", {
+      }, isCivilB(b) ? "연장/높이 " : "", bldSize(b)), b.fms && /*#__PURE__*/React.createElement("button", {
         onClick: () => copy(b.fms, `f-${iid}`),
         style: {
           padding: "4px 9px",
@@ -9918,27 +9935,12 @@ function SitesManager({
           color: C.blue,
           whiteSpace: "nowrap"
         }
-      }, "◆ ", b.field.slice(5).replace("-", "/")), isCivilB(b) ? /*#__PURE__*/React.createElement(React.Fragment, null, b.len != null && b.len !== "" && /*#__PURE__*/React.createElement("span", {
+      }, "◆ ", b.field.slice(5).replace("-", "/")), bldSize(b) && /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
           color: C.t4
         }
-      }, "연장 ", Number(b.len).toLocaleString(), "m"), b.height != null && b.height !== "" && /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 12,
-          color: C.t4
-        }
-      }, "높이 ", Number(b.height).toLocaleString(), "m")) : /*#__PURE__*/React.createElement(React.Fragment, null, b.floor && /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 12,
-          color: C.t4
-        }
-      }, b.floor, "층"), b.area && /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 12,
-          color: C.t4
-        }
-      }, b.area.toLocaleString(), "㎡"))), b.note && /*#__PURE__*/React.createElement("div", {
+      }, isCivilB(b) ? "연장/높이 " : "", bldSize(b))), b.note && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: C.t2,
