@@ -178,6 +178,81 @@ const BKINDS = [{
 }];
 const bkindColor = v => (BKINDS.find(x => x.v === v) || BKINDS[0]).color;
 /* 학교 단위 kind 문자열에서 동별 기본값을 뽑는다 (기존 데이터 이관용) */
+/* ── 납품 ──
+   우편 납품 담당: 이 이름들이 납품했으면 우편, 그 외(박두환·한상오·한의영·채승준·이동현 등)는 직납 */
+const MAIL_DELIVERERS = ["함예린", "김유빈", "김도경"];
+
+/* 워크플로우 "납품" 칸 ("0917함예린" · "0828 박두환" · "ex) 0825 김도경") 과
+   시트 납품유무·납품방법·납품일 을 합쳐 하나로 정리한다.
+   → { done, way: "우편"|"직납"|"", by, date } */
+const parseDelivery = (r, flowSteps) => {
+  let raw = String(flowSteps && flowSteps["납품"] || "").replace(/^ex\)\s*/i, "").trim();
+  if (/^(false|true)$/i.test(raw)) raw = ""; /* 체크박스 값은 이름이 아니다 */
+  const m = raw.match(/(\d{2})(\d{2})\s*(.*)$/);
+  const by = m ? m[3].trim() : raw.replace(/[\d\s]/g, "");
+  let date = r.deliver || "";
+  if (!date && m) date = `${SHEET_YEAR}-${m[1]}-${m[2]}`;
+  const sheetWay = String(r.deliverW || "").trim();
+  const way = sheetWay ? /우편/.test(sheetWay) ? "우편" : /직/.test(sheetWay) ? "직납" : sheetWay : by ? MAIL_DELIVERERS.some(n => by.includes(n)) ? "우편" : "직납" : "";
+  const done = /완료/.test(String(r.deliverY || "")) || !!raw && raw !== "false";
+  return {
+    done,
+    way,
+    by,
+    date
+  };
+};
+
+/* 현장의 납품 상태 한 줄 — 시트에서 온 것(deliverDone·deliverWay·deliverBy·deliverDate)을 우선,
+   없으면 동별 납품 버튼(b.delivery)을 본다.
+   → { state: "완료"|"예정"|"미정", way, by, date, label } */
+const deliveryOf = s => {
+  if (!s) return {
+    state: "미정",
+    way: "",
+    by: "",
+    date: "",
+    label: "납품 미정"
+  };
+  if (s.deliverDone || s.deliverBy || s.deliverWay) {
+    const way = s.deliverWay || "";
+    const md = s.deliverDate ? s.deliverDate.slice(5).replace(/^0/, "").replace("-", "/").replace(/\/0/, "/") : "";
+    return {
+      state: "완료",
+      way,
+      by: s.deliverBy || "",
+      date: s.deliverDate || "",
+      label: [way || "납품", md, s.deliverBy].filter(Boolean).join(" ")
+    };
+  }
+  if (s.deliverDate) {
+    const md = s.deliverDate.slice(5).replace(/^0/, "").replace("-", "/").replace(/\/0/, "/");
+    return {
+      state: "예정",
+      way: "",
+      by: "",
+      date: s.deliverDate,
+      label: `납품 예정 ${md}`
+    };
+  }
+  const bs = toArr(s.buildings).filter(Boolean);
+  const ways = [...new Set(bs.map(b => b.delivery).filter(Boolean))];
+  if (ways.length && bs.every(b => b.delivery)) return {
+    state: "완료",
+    way: ways.join("·"),
+    by: "",
+    date: "",
+    label: ways.join("·") + " (동별)"
+  };
+  return {
+    state: "미정",
+    way: "",
+    by: "",
+    date: "",
+    label: "납품 미정"
+  };
+};
+
 /* 토목 시설(옹벽·교량 등)인지 — 층수·연면적 대신 연장·높이를 보여준다 */
 const isCivilB = b => /토목/.test(b && b.cat || "") || /옹벽|교량|터널|축대|담장|육교|암거/.test(b && b.b || "");
 
@@ -8640,7 +8715,8 @@ function SitesManager({
     if (search && !s.school.includes(search) && !(s.region || "").includes(search)) return false;
     if (stF === "보고서 미완") return s.buildings.some(b => !b.rep);
     if (stF === "FMS 미완") return s.buildings.some(b => !b.fmsD);
-    if (stF === "납품 미정") return s.buildings.some(b => b.rep && !b.delivery);
+    if (stF === "납품 미정") return deliveryOf(s).state !== "완료";
+    if (stF === "납품 완료") return deliveryOf(s).state === "완료";
     if (stF === "완료") return s.buildings.every(b => b.rep && b.fmsD);
     return true;
   }).sort((a, b) => {
@@ -8656,7 +8732,8 @@ function SitesManager({
     total: allB.length,
     rep: allB.filter(b => b.rep).length,
     fms: allB.filter(b => b.fmsD).length,
-    noD: allB.filter(b => b.rep && !b.delivery).length
+    noD: filtered.filter(s => deliveryOf(s).state !== "완료").length,
+    done: filtered.filter(s => deliveryOf(s).state === "완료").length
   };
   const years = Object.keys(db).sort((a, b) => b - a);
   const isDraft = !!(draft && draft.id === editId);
@@ -8874,10 +8951,10 @@ function SitesManager({
     c: C.blue,
     f: "FMS 미완"
   }, {
-    label: isMobile ? "납품미정" : "📦 납품 미정",
-    val: st.noD,
-    c: C.orange,
-    f: "납품 미정"
+    label: isMobile ? "납품" : "📦 납품 완료",
+    val: isMobile ? `${st.done}` : `${st.done}/${filtered.length}`,
+    c: C.green,
+    f: "납품 완료"
   }].map(x => /*#__PURE__*/React.createElement("button", {
     key: x.label,
     onClick: () => setStF(x.f),
@@ -8960,7 +9037,7 @@ function SitesManager({
       height: 18,
       background: C.border
     }
-  }), ["전체", "보고서 미완", "FMS 미완", "납품 미정", "완료"].map(ff => /*#__PURE__*/React.createElement(Pill, {
+  }), ["전체", "보고서 미완", "FMS 미완", "납품 미정", "납품 완료", "완료"].map(ff => /*#__PURE__*/React.createElement(Pill, {
     key: ff,
     active: stF === ff,
     ac: C.purple,
@@ -9163,7 +9240,23 @@ function SitesManager({
         fontSize: 13,
         color: C.t4
       }
-    }, s.buildings.length, "동"), getFlags(s).map(fv => {
+    }, s.buildings.length, "동"), (() => {
+      const dv = deliveryOf(s);
+      const col = dv.state === "완료" ? C.green : dv.state === "예정" ? C.blue : C.orange;
+      return /*#__PURE__*/React.createElement("span", {
+        title: dv.state === "완료" ? `납품 완료 · ${dv.way || "방법 미기재"}${dv.date ? " · " + dv.date : ""}${dv.by ? " · " + dv.by : ""}` : dv.label,
+        style: {
+          fontSize: 11,
+          fontWeight: 800,
+          padding: "2px 7px",
+          borderRadius: 4,
+          background: col + "14",
+          border: `1px solid ${col}45`,
+          color: col,
+          whiteSpace: "nowrap"
+        }
+      }, dv.state === "완료" ? (dv.way === "우편" ? "📮 " : dv.way === "직납" ? "🚚 " : "📦 ") + dv.label : dv.state === "예정" ? "📦 " + dv.label : "📦 미정");
+    })(), getFlags(s).map(fv => {
       const o = FLAG_OPTS.find(x => x.v === fv);
       return o ? /*#__PURE__*/React.createElement("span", {
         key: fv,
@@ -9537,7 +9630,23 @@ function SitesManager({
       bg: C.redL,
       color: C.red,
       border: `1px solid ${C.red}30`
-    }, "⚡긴급"), getFlags(s).map(fv => {
+    }, "⚡긴급"), (() => {
+      const dv = deliveryOf(s);
+      const col = dv.state === "완료" ? C.green : dv.state === "예정" ? C.blue : C.orange;
+      return /*#__PURE__*/React.createElement("span", {
+        title: dv.state === "완료" ? `납품 완료 · ${dv.way || "방법 미기재"}${dv.date ? " · " + dv.date : ""}${dv.by ? " · " + dv.by : ""}` : dv.label,
+        style: {
+          fontSize: 11,
+          fontWeight: 800,
+          padding: "2px 7px",
+          borderRadius: 4,
+          background: col + "14",
+          border: `1px solid ${col}45`,
+          color: col,
+          whiteSpace: "nowrap"
+        }
+      }, dv.state === "완료" ? (dv.way === "우편" ? "📮 " : dv.way === "직납" ? "🚚 " : "📦 ") + dv.label : dv.state === "예정" ? "📦 " + dv.label : "📦 미정");
+    })(), getFlags(s).map(fv => {
       const o = FLAG_OPTS.find(x => x.v === fv);
       return o ? /*#__PURE__*/React.createElement("span", {
         key: fv,
@@ -11091,7 +11200,10 @@ function siteFromSheetRow(r, flowSteps, yr, half) {
     start: r.start || "",
     field: r.field || "",
     end: r.end || "",
-    deliverDate: r.deliver || "",
+    deliverDate: parseDelivery(r, flowSteps).date || "",
+    deliverWay: parseDelivery(r, flowSteps).way || "",
+    deliverBy: parseDelivery(r, flowSteps).by || "",
+    deliverDone: !!parseDelivery(r, flowSteps).done,
     headcount: 1,
     assignees: [],
     /* 신규 여부는 시트 A열의 "신규" 로 정한다 */
@@ -17356,7 +17468,14 @@ function App() {
         /* 날짜별 인원에서 옛 첫날 배정은 그대로 두되, 새 첫날에 배정이 없으면 기본 인원이 쓰인다 (whoOnDate) */
       }
       if ((r.end || "") !== (s.end || "")) next.end = r.end || "";
-      if ((r.deliver || "") !== (s.deliverDate || "")) next.deliverDate = r.deliver || "";
+      /* 납품 — 시트 열 + 워크플로우 납품 칸을 합쳐서 */
+      {
+        const dv = parseDelivery(r, fl ? fl.steps : null);
+        if ((dv.date || "") !== (s.deliverDate || "")) next.deliverDate = dv.date || "";
+        if ((dv.way || "") !== (s.deliverWay || "")) next.deliverWay = dv.way || "";
+        if ((dv.by || "") !== (s.deliverBy || "")) next.deliverBy = dv.by || "";
+        if (!!dv.done !== !!s.deliverDone) next.deliverDone = !!dv.done;
+      }
       if ((r.contract || "") !== (s.contract || "")) next.contract = r.contract || "";
       if ((r.memo || "") !== (s.memo || "")) next.memo = r.memo || "";
       if (r.region && r.region !== (s.region || "")) next.region = r.region;
