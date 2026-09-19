@@ -5142,7 +5142,8 @@ function EvRow({
       cursor: "pointer",
       border: `1px solid ${col}38`,
       borderLeft: `4px solid ${col}`,
-      background: e.tentative ? `repeating-linear-gradient(45deg, ${col}12, ${col}12 5px, transparent 5px, transparent 10px)` : col + "0e"
+      background: e.tentative ? `repeating-linear-gradient(45deg, ${col}12, ${col}12 5px, transparent 5px, transparent 10px)` : col + "0e",
+      opacity: e.done ? .55 : 1
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -5193,7 +5194,7 @@ function EvRow({
       padding: "1px 5px",
       marginRight: 4
     }
-  }, k)), e.school, e.way ? `-${e.way}` : "", e.bld > 0 && /*#__PURE__*/React.createElement("span", {
+  }, k)), /*#__PURE__*/React.createElement("span", { style: { fontWeight: e.done ? 500 : undefined, textDecoration: e.done ? "line-through" : undefined } }, e.school, e.way ? `-${e.way}` : ""), e.bld > 0 && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       fontWeight: 800,
@@ -5309,7 +5310,8 @@ function WeekChip({
       cursor: "pointer",
       border: `1px solid ${col}3a`,
       borderLeft: `4px solid ${col}`,
-      background: e.tentative ? `repeating-linear-gradient(45deg, ${col}12, ${col}12 5px, transparent 5px, transparent 10px)` : col + "0e"
+      background: e.tentative ? `repeating-linear-gradient(45deg, ${col}12, ${col}12 5px, transparent 5px, transparent 10px)` : col + "0e",
+      opacity: e.done ? .55 : 1
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5348,7 +5350,7 @@ function WeekChip({
       fontWeight: 900,
       marginRight: 4
     }
-  }, k)), e.school, e.way ? `-${e.way}` : "", e.bld > 0 && /*#__PURE__*/React.createElement("span", {
+  }, k)), /*#__PURE__*/React.createElement("span", { style: { fontWeight: e.done ? 500 : undefined, textDecoration: e.done ? "line-through" : undefined } }, e.school, e.way ? `-${e.way}` : ""), e.bld > 0 && /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 800,
       color: col,
@@ -5451,6 +5453,8 @@ function Calendar({
           bld: f === "field" ? buildingsOnDate(s, ds).length : (s.buildings || []).length,
           /* 납품·완수 칩에 "-직납"/"-우편" 을 붙이려고 */
           way: f === "deliverDate" || f === "end" ? deliveryOf(s).way : "",
+          /* 납품이 끝난 건 굵기를 풀고 흐리게 — 할 일이 아니라 지난 일이니까 */
+          done: (f === "deliverDate" || f === "end") && deliveryOf(s).state === "완료",
           kinds: f === "field" ? siteKinds({
             ...s,
             buildings: buildingsOnDate(s, ds)
@@ -5805,7 +5809,8 @@ function Calendar({
           lineHeight: isMobile ? 1.25 : 1.5,
           letterSpacing: isMobile ? "-0.4px" : 0,
           color: evColor(e.field),
-          fontWeight: 700,
+          fontWeight: e.done ? 500 : 700,
+          textDecoration: e.done ? "line-through" : undefined,
           overflow: "hidden",
           cursor: "grab",
           /* 폰에서는 두 줄까지 보여 8글자 정도가 읽힌다 (넘치면 … 로 잘림) */
@@ -5818,7 +5823,7 @@ function Calendar({
             textOverflow: "ellipsis",
             whiteSpace: "nowrap"
           }),
-          opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : 1
+          opacity: dragging?.schoolId === e.schoolId && dragging?.field === e.field ? .4 : e.done ? .55 : 1
         }
       }, e.tentative ? "? " : null, (e.kinds || []).map(k => /*#__PURE__*/React.createElement("span", {
         key: k,
@@ -9227,9 +9232,9 @@ function SitesManager({
       }
     }, "›"), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontWeight: 800,
+        fontWeight: deliveryOf(s).state === "완료" ? 500 : 800,
         fontSize: 16,
-        color: C.t1,
+        color: deliveryOf(s).state === "완료" ? C.t3 : C.t1,
         flex: 1,
         minWidth: 0,
         overflow: "hidden",
@@ -9654,9 +9659,9 @@ function SitesManager({
       }
     }, "›"), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontWeight: 800,
+        fontWeight: deliveryOf(s).state === "완료" ? 500 : 800,
         fontSize: 16,
-        color: C.t1
+        color: deliveryOf(s).state === "완료" ? C.t3 : C.t1
       }
     }, s.school), isTentative(s) && /*#__PURE__*/React.createElement(Tag, {
       bg: C.orangeL,
