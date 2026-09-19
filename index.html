@@ -13555,11 +13555,29 @@ function SettingsPage({
    · 카드에서 보고서·FMS·납품을 바로 눌러 처리 (수정 화면 안 들어가도 됨)
    · 완료에서 체크를 풀면 기준이 같아 긴급 쪽으로 다시 나타남
    ══════════════════════════════════════════════════════════════ */
-/* 완수 판정 — 업무 진행 단계의 '완수' 체크가 기준.
-   엑셀 S열(완수유무)과 같은 값을 쓰기 위해 앱 전체가 이 함수를 따른다. */
-const siteDone = s => !!(s && s.progress && s.progress["완수"]);
-/* 납품 판정 — 진행 단계의 '납품' 체크 (엑셀 T열) */
-const siteDelivered = s => !!(s && s.progress && s.progress["납품"]);
+/* ── 완수·납품 판정 — 시트가 주인 ──
+   시트 연동 현장은 워크플로우 16단계와 시트 완수유무·납품유무를 본다.
+   시트에 없는 앱 전용 현장만 옛 8단계(progress)를 쓴다. */
+const siteDone = s => {
+  if (!s) return false;
+  const fl = s.flow || {};
+  if (Object.keys(fl).length) {
+    /* 제본·납품이 끝나고 완수계까지 나갔으면 완료.
+       완수계가 아직이어도 납품까지 끝났으면 실무상 마무리로 본다. */
+    if (flowDone(fl["완수계발송"])) return true;
+    if (flowDone(fl["납품"]) && flowDone(fl["제본"])) return true;
+  }
+  if (s.deliverDone) return true; /* 시트 납품유무 완료 */
+  return !!(s.progress && s.progress["완수"]);
+};
+/* 납품 판정 — 앞서 만든 deliveryOf 와 같은 기준 */
+const siteDelivered = s => {
+  if (!s) return false;
+  if (s.deliverDone) return true;
+  const fl = s.flow || {};
+  if (Object.keys(fl).length && flowDone(fl["납품"])) return true;
+  return !!(s.progress && s.progress["납품"]);
+};
 const doneAt = s => {
   // 완료로 볼 기준 날짜(완수일)
   return s && s.end ? s.end : "";
@@ -13698,42 +13716,72 @@ function ReportCard({
         flexWrap: "wrap",
         alignItems: "center"
       }
-    }, [{
-      f: "rep",
-      l: "보고서",
-      c: C.purple
-    }, {
-      f: "fmsD",
-      l: "FMS",
-      c: C.blue
-    }, {
-      f: "delivery",
-      l: "납품",
-      c: C.green
-    }].map(x => {
-      const n = cnt(x.f),
-        all = bs.length > 0 && n === bs.length;
-      return /*#__PURE__*/React.createElement("button", {
-        key: x.f,
-        onClick: () => setAllB(s, x.f),
+    }, (() => {
+      const fl = s.flow || {};
+      const linked = Object.keys(fl).length > 0;
+      /* 시트 연동 현장은 워크플로우 16단계를, 앱 전용은 옛 동별 체크를 쓴다 */
+      const items = linked ? [{
+        l: "보고서",
+        ok: flowDone(fl["PDF"]) || flowDone(fl["워드수정"]),
+        c: C.purple,
+        by: fl["PDF"] || fl["워드수정"]
+      }, {
+        l: "검수",
+        ok: flowDone(fl["검수"]) || flowDone(fl["검토"]),
+        c: C.blue,
+        by: fl["검수"] || fl["검토"]
+      }, {
+        l: "제본",
+        ok: flowDone(fl["제본"]),
+        c: C.orange,
+        by: fl["제본"]
+      }, {
+        l: "납품",
+        ok: siteDelivered(s),
+        c: C.green,
+        by: deliveryOf(s).label
+      }, {
+        l: "완수계",
+        ok: flowDone(fl["완수계발송"]),
+        c: C.t2,
+        by: fl["완수계발송"]
+      }] : [{
+        l: "보고서",
+        ok: bs.length > 0 && cnt("rep") === bs.length,
+        c: C.purple,
+        n: cnt("rep")
+      }, {
+        l: "FMS",
+        ok: bs.length > 0 && cnt("fmsD") === bs.length,
+        c: C.blue,
+        n: cnt("fmsD")
+      }, {
+        l: "납품",
+        ok: bs.length > 0 && cnt("delivery") === bs.length,
+        c: C.green,
+        n: cnt("delivery")
+      }];
+      return items.map(x => /*#__PURE__*/React.createElement("span", {
+        key: x.l,
+        title: x.ok && typeof x.by === "string" && x.by !== "true" ? `${x.l} · ${x.by}` : x.l + (x.ok ? " 완료" : " 아직"),
         style: {
-          padding: "7px 12px",
+          padding: "6px 11px",
           borderRadius: 7,
-          fontSize: 14,
+          fontSize: 13,
           fontWeight: 700,
-          cursor: "pointer",
           whiteSpace: "nowrap",
-          border: `1.5px solid ${all ? x.c + "70" : C.border}`,
-          background: all ? x.c + "14" : C.surfaceL,
-          color: all ? x.c : C.t3
+          border: `1.5px solid ${x.ok ? x.c + "70" : C.border}`,
+          background: x.ok ? x.c + "14" : C.surfaceL,
+          color: x.ok ? x.c : C.t4
         }
-      }, all ? "✓ " : "", x.l, " ", /*#__PURE__*/React.createElement("span", {
+      }, x.ok ? "✓ " : "○ ", x.l, x.n !== undefined ? /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
-          opacity: .75
+          opacity: .75,
+          marginLeft: 4
         }
-      }, n, "/", bs.length));
-    }), !isUrgent && done && /*#__PURE__*/React.createElement("span", {
+      }, x.n, "/", bs.length) : null));
+    })(), !isUrgent && done && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
         color: C.t4
