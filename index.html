@@ -3103,6 +3103,52 @@ function crewSheetByDate(recs) {
   ws["!freeze"] = { xSplit: 0, ySplit: 1 };
   return ws;
 }
+/* 동별 담당 — 한 줄 = 그날 · 그 현장 · 그 동 하나 */
+function crewBldRecords(entries) {
+  const out = [];
+  (entries || []).forEach(({ schools }) => {
+    (schools || []).filter(s => s && !s.deleted).forEach(s => {
+      surveyDates(s).forEach(ds => {
+        const who = sortMembers(whoOnDate(s, ds));
+        if (!who.length) return;
+        const bs = buildingsOnDate(s, ds);
+        bs.forEach(b => {
+          const own = sortMembers(bldWhoOf(s, b.b));
+          out.push({
+            ds, dow: crewDow(ds),
+            region: s.region || "",
+            school: s.school || "",
+            bld: b.b || "",
+            size: (typeof bldSize === "function" ? bldSize(b) : "") || "",
+            kind: b.kind || "",
+            who: own.length ? own.join(", ") : who.join(", "),
+            how: own.length ? "동 담당" : "전체",
+            tentative: s.tentative ? "예정" : "확정"
+          });
+        });
+        /* 협의 담당도 한 줄로 남긴다 */
+        const con = sortMembers(consultOf(s));
+        if (con.length) out.push({
+          ds, dow: crewDow(ds),
+          region: s.region || "",
+          school: s.school || "",
+          bld: "협의", size: "", kind: "",
+          who: con.join(", "), how: "협의",
+          tentative: s.tentative ? "예정" : "확정"
+        });
+      });
+    });
+  });
+  return out.sort((a, b) => a.ds.localeCompare(b.ds) || a.school.localeCompare(b.school) || a.bld.localeCompare(b.bld));
+}
+function crewSheetByBuilding(rows) {
+  const aoa = [["날짜", "요일", "지역", "학교명", "동", "규모", "점검종류", "담당", "배정", "확정"]];
+  rows.forEach(r => aoa.push([r.ds, r.dow, r.region, r.school, r.bld, r.size, r.kind, r.who, r.how, r.tentative]));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{ wch: 12 }, { wch: 5 }, { wch: 9 }, { wch: 26 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 9 }, { wch: 7 }];
+  return ws;
+}
+
 function crewSheetByPerson(recs) {
   const rows = [["인원", "날짜", "요일", "지역", "학교명", "담당 동", "확정"]];
   recs.slice().sort((a, b) => byRank(a.name, b.name) || a.ds.localeCompare(b.ds) || a.school.localeCompare(b.school)).forEach(r => rows.push([r.name, r.ds, r.dow, r.region, r.school, r.duty, r.tentative]));
@@ -10857,6 +10903,7 @@ function ExportImportPage({
     }
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, crewSheetByDate(recs), "일자별 배치");
+    XLSX.utils.book_append_sheet(wb, crewSheetByBuilding(crewBldRecords(entries)), "동별 담당");
     XLSX.utils.book_append_sheet(wb, crewSheetByPerson(recs), "인원별 기록");
     XLSX.utils.book_append_sheet(wb, crewSheetSummary(recs), "인원 집계");
     XLSX.writeFile(wb, `인원_배치기록_${dstr(new Date())}.xlsx`);
