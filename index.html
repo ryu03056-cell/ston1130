@@ -436,6 +436,10 @@ function mergeSites(a, b) {
       ...(other.fieldWho || {}),
       ...(base.fieldWho || {})
     },
+    bldWho: {
+      ...(other.bldWho || {}),
+      ...(base.bldWho || {})
+    },
     deliverDate: pick("deliverDate") || "",
     isNew: !!(base.isNew || other.isNew),
     tentative: !!(base.tentative && other.tentative),
@@ -4012,7 +4016,10 @@ function DayPanel({
         const cur = bldWhoOf(s, bname);
         const upd = sortMembers(cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name]);
         const bw = { ...(s.bldWho || {}) };
-        if (upd.length) bw[bname] = upd; else delete bw[bname];
+        const bk = fbKey(bname); /* 저장도 찾기와 같은 열쇠로 */
+        delete bw[bname];
+        delete bw[bk];
+        if (upd.length) bw[bk] = upd;
         return stampEdit({ ...s, bldWho: bw }, `${bname === CONSULT_KEY ? "협의" : bname} · ${name} ${had ? "제외" : "배정"}`);
       });
       return next;
@@ -4991,7 +4998,16 @@ const isTentative = s => !!(s && s.tentative);
    s.bldWho = { "<동이름>": ["한상오"], "__협의": ["한의영"] }
    · 동에 아무도 없으면 그 날 가는 인원 전체가 맡는 것으로 본다 */
 const CONSULT_KEY = "__협의";
-const bldWhoOf = (s, bname) => toArr(s && s.bldWho && s.bldWho[bname]).filter(Boolean);
+/* 동 이름을 서버 열쇠로 쓸 때의 규칙 — 저장할 때와 찾을 때가 반드시 같아야 한다.
+   (Firebase 가 . $ # [ ] / 를 키로 받지 않아 _ 로 바꿔 올리기 때문) */
+const fbKey = k => String(k).replace(/[.$#\[\]\/\u0000-\u001F\u007F]/g, "_");
+const bldWhoOf = (s, bname) => {
+  const w = s && s.bldWho;
+  if (!w) return [];
+  const raw = toArr(w[bname]).filter(Boolean);
+  if (raw.length) return raw;
+  return toArr(w[fbKey(bname)]).filter(Boolean); /* 예전에 바뀐 열쇠로 저장된 것도 찾아낸다 */
+};
 const consultOf = s => toArr(s && s.bldWho && s.bldWho[CONSULT_KEY]).filter(Boolean);
 
 const whoOnDate = (s, ds) => {
@@ -11825,6 +11841,17 @@ function fbToDb(raw) {
           const o = {};
           Object.entries(w).forEach(([d, v]) => {
             o[d] = toArr(v).filter(Boolean);
+          });
+          return Object.keys(o).length ? o : null;
+        })(),
+        /* 동별 담당도 배열로 되돌린다 — 빠뜨리면 새로고침 뒤 배정이 사라진다 */
+        bldWho: (() => {
+          const w = s.bldWho;
+          if (!w || typeof w !== "object") return null;
+          const o = {};
+          Object.entries(w).forEach(([k, v]) => {
+            const a = toArr(v).filter(Boolean);
+            if (a.length) o[k] = a;
           });
           return Object.keys(o).length ? o : null;
         })(),
