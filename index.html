@@ -3046,6 +3046,97 @@ function buildNotesSheet(entries) {
 }
 
 /* 현장일정 시트 — 학교별 현장조사·착수·완수일 + 담당자, 일정 순 정렬. entries:[{yr,half,schools}] */
+/* ── 인원 배치 엑셀 (기존 내보내기와 완전히 분리된 별도 기능) ──
+   어느 날 누가 어느 현장에 나갔는지를 세 장으로 뽑는다.
+   기존 buildSheet / buildScheduleSheet 등에는 손대지 않는다. */
+const CREW_DOW = ["일", "월", "화", "수", "목", "금", "토"];
+function crewDow(ds) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ds || "");
+  if (!m) return "";
+  return CREW_DOW[new Date(+m[1], +m[2] - 1, +m[3]).getDay()];
+}
+/* 한 줄 = 그 날 · 그 현장 · 그 사람 하나 */
+function crewRecords(entries) {
+  const out = [];
+  (entries || []).forEach(({ yr, half, schools }) => {
+    (schools || []).filter(s => s && !s.deleted).forEach(s => {
+      surveyDates(s).forEach(ds => {
+        const who = sortMembers(whoOnDate(s, ds));
+        if (!who.length) return;
+        const bs = buildingsOnDate(s, ds);
+        const kinds = [];
+        bs.forEach(b => {
+          const k = b && b.kind;
+          if (k && !kinds.includes(k)) kinds.push(k);
+        });
+        who.forEach(name => {
+          const mine = bs.filter(b => bldWhoOf(s, b.b).includes(name)).map(b => b.b);
+          out.push({
+            yr, half, ds,
+            dow: crewDow(ds),
+            region: s.region || "",
+            school: s.school || "",
+            kind: kinds.join(", "),
+            bcount: bs.length,
+            name,
+            duty: mine.length ? mine.join(", ") : bs.length > 1 ? "전체" : (bs[0] && bs[0].b) || "",
+            tentative: s.tentative ? "예정" : "확정",
+            crew: who.join(", "),
+            crewN: who.length
+          });
+        });
+      });
+    });
+  });
+  return out.sort((a, b) => a.ds.localeCompare(b.ds) || a.school.localeCompare(b.school) || byRank(a.name, b.name));
+}
+function crewSheetByDate(recs) {
+  const seen = new Map();
+  recs.forEach(r => {
+    const k = r.ds + "|" + r.school;
+    if (!seen.has(k)) seen.set(k, r);
+  });
+  const rows = [["날짜", "요일", "지역", "학교명", "점검종류", "동수", "인원수", "인원", "확정"]];
+  [...seen.values()].forEach(r => rows.push([r.ds, r.dow, r.region, r.school, r.kind, r.bcount, r.crewN, r.crew, r.tentative]));
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 12 }, { wch: 5 }, { wch: 9 }, { wch: 26 }, { wch: 16 }, { wch: 6 }, { wch: 7 }, { wch: 34 }, { wch: 7 }];
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+  return ws;
+}
+function crewSheetByPerson(recs) {
+  const rows = [["인원", "날짜", "요일", "지역", "학교명", "담당 동", "확정"]];
+  recs.slice().sort((a, b) => byRank(a.name, b.name) || a.ds.localeCompare(b.ds) || a.school.localeCompare(b.school)).forEach(r => rows.push([r.name, r.ds, r.dow, r.region, r.school, r.duty, r.tentative]));
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 5 }, { wch: 9 }, { wch: 26 }, { wch: 24 }, { wch: 7 }];
+  return ws;
+}
+function crewSheetSummary(recs) {
+  const months = [];
+  recs.forEach(r => {
+    const m = r.ds.slice(0, 7);
+    if (m && !months.includes(m)) months.push(m);
+  });
+  months.sort();
+  const per = new Map();
+  recs.forEach(r => {
+    if (!per.has(r.name)) per.set(r.name, { days: new Set(), visits: 0, mon: {} });
+    const p = per.get(r.name);
+    p.days.add(r.ds);
+    p.visits++;
+    const m = r.ds.slice(0, 7);
+    if (!p.mon[m]) p.mon[m] = new Set();
+    p.mon[m].add(r.ds);
+  });
+  const rows = [["인원", "출장 일수", "현장 방문 건수", ...months.map(m => `${+m.slice(5)}월`)]];
+  [...per.keys()].sort(byRank).forEach(n => {
+    const p = per.get(n);
+    rows.push([n, p.days.size, p.visits, ...months.map(m => p.mon[m] ? p.mon[m].size : 0)]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 10 }, { wch: 10 }, { wch: 14 }, ...months.map(() => ({ wch: 7 }))];
+  return ws;
+}
+
 function buildScheduleSheet(entries) {
   const multi = entries.length > 1;
   const today = new Date();
@@ -10752,6 +10843,24 @@ function ExportImportPage({
     XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항"); // 전체 특이사항
     XLSX.writeFile(wb, "시설물_리스트_전체.xlsx");
   };
+  /* 인원 배치 엑셀 — 어느 날 누가 어디로 나갔는지 (별도 기능) */
+  const doExportCrew = () => {
+    const entries = [];
+    Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => {
+      const schools = (arr || []).filter(s => !s.deleted);
+      if (schools.length) entries.push({ yr, half, schools });
+    }));
+    const recs = crewRecords(entries);
+    if (!recs.length) {
+      alert("내보낼 현장조사 배치가 없습니다.");
+      return;
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, crewSheetByDate(recs), "일자별 배치");
+    XLSX.utils.book_append_sheet(wb, crewSheetByPerson(recs), "인원별 기록");
+    XLSX.utils.book_append_sheet(wb, crewSheetSummary(recs), "인원 집계");
+    XLSX.writeFile(wb, `인원_배치기록_${dstr(new Date())}.xlsx`);
+  };
   const totalS = Object.values(db).flatMap(h => Object.values(h)).flatMap(s => s).length;
   const totalB = Object.values(db).flatMap(h => Object.values(h)).flatMap(s => s).flatMap(s => s.buildings).length;
   return /*#__PURE__*/React.createElement("div", {
@@ -11320,7 +11429,9 @@ function ExportImportPage({
       color: C.t3,
       marginTop: 1
     }
-  }, "현장일정 · 예산표 · 특이사항 시트로 저장"))), /*#__PURE__*/React.createElement("button", {
+  }, "현장일정 · 예산표 · 특이사항 시트로 저장"))), /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }
+  }, /*#__PURE__*/React.createElement("button", {
     onClick: doExportAll,
     style: {
       padding: "9px 18px",
@@ -11333,7 +11444,21 @@ function ExportImportPage({
       cursor: "pointer",
       boxShadow: `0 4px 12px ${C.green}40`
     }
-  }, "↗ 전체 다운로드")), /*#__PURE__*/React.createElement("div", {
+  }, "↗ 전체 다운로드"), /*#__PURE__*/React.createElement("button", {
+    onClick: doExportCrew,
+    title: "어느 날 누가 어느 현장에 나갔는지 (일자별 · 인원별 · 집계)",
+    style: {
+      padding: "9px 16px",
+      background: C.blue,
+      border: "none",
+      borderRadius: 9,
+      color: "#fff",
+      fontSize: 15,
+      fontWeight: 700,
+      cursor: "pointer",
+      boxShadow: `0 4px 12px ${C.blue}40`
+    }
+  }, "\uD83D\uDC65 인원 배치"))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "16px 20px",
       display: "flex",
