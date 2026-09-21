@@ -186,15 +186,27 @@ const MAIL_DELIVERERS = ["함예린", "김유빈", "김도경"];
    시트 납품유무·납품방법·납품일 을 합쳐 하나로 정리한다.
    → { done, way: "우편"|"직납"|"", by, date } */
 const parseDelivery = (r, flowSteps) => {
-  let raw = String(flowSteps && flowSteps["납품"] || "").replace(/^ex\)\s*/i, "").trim();
+  /* 납품 판정 규칙 (2026-09 정정)
+     · 완료 = 실제 기록이 있을 때만: 시트 납품유무 "완료" / 납품 칸 체크 / 납품 칸에 "0917함예린" 같은 기록(날짜가 오늘 이후면 아직 예정)
+     · "ex) 0825 김도경" 은 시트 예시 문구 — 기록이 아니다
+     · 납품방법(우편/직납)은 시트 '납품방법' 열에 적힌 것만 쓴다. 사람 이름으로 추측하지 않는다 */
+  const rawV = flowSteps ? flowSteps["납품"] : null;
+  const src = rawV === true ? "true" : String(rawV == null ? "" : rawV).trim();
+  const isExample = /^ex\)/i.test(src);
+  const checked = !isExample && /^true$/i.test(src);
+  let raw = isExample ? "" : src;
   if (/^(false|true)$/i.test(raw)) raw = ""; /* 체크박스 값은 이름이 아니다 */
   const m = raw.match(/(\d{2})(\d{2})\s*(.*)$/);
+  const okMD = !!m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31;
+  const recDate = okMD ? `${SHEET_YEAR}-${m[1]}-${m[2]}` : "";
   const by = m ? m[3].trim() : raw.replace(/[\d\s]/g, "");
   let date = r.deliver || "";
-  if (!date && m) date = `${SHEET_YEAR}-${m[1]}-${m[2]}`;
+  if (!date && recDate) date = recDate;
   const sheetWay = String(r.deliverW || "").trim();
-  const way = sheetWay ? /우편/.test(sheetWay) ? "우편" : /직/.test(sheetWay) ? "직납" : sheetWay : by ? MAIL_DELIVERERS.some(n => by.includes(n)) ? "우편" : "직납" : "";
-  const done = /완료/.test(String(r.deliverY || "")) || !!raw && raw !== "false";
+  const way = sheetWay ? /우편/.test(sheetWay) ? "우편" : /직/.test(sheetWay) ? "직납" : sheetWay : "";
+  const today = dstr(new Date());
+  const recorded = checked || !!raw && (!recDate || recDate <= today);
+  const done = /완료/.test(String(r.deliverY || "")) || recorded;
   return {
     done,
     way,
@@ -214,7 +226,7 @@ const deliveryOf = s => {
     date: "",
     label: "납품 미정"
   };
-  if (s.deliverDone || s.deliverBy || s.deliverWay) {
+  if (s.deliverDone) { /* 실제 납품 기록이 있을 때만 완료 (방법만 적어둔 건 예정) */
     const way = s.deliverWay || "";
     const md = s.deliverDate ? s.deliverDate.slice(5).replace(/^0/, "").replace("-", "/").replace(/\/0/, "/") : "";
     return {
@@ -225,14 +237,14 @@ const deliveryOf = s => {
       label: [way || "납품", md, s.deliverBy].filter(Boolean).join(" ")
     };
   }
-  if (s.deliverDate) {
-    const md = s.deliverDate.slice(5).replace(/^0/, "").replace("-", "/").replace(/\/0/, "/");
+  if (s.deliverDate || s.deliverWay) {
+    const md = s.deliverDate ? s.deliverDate.slice(5).replace(/^0/, "").replace("-", "/").replace(/\/0/, "/") : "";
     return {
       state: "예정",
-      way: "",
+      way: s.deliverWay || "",
       by: "",
-      date: s.deliverDate,
-      label: `납품 예정 ${md}`
+      date: s.deliverDate || "",
+      label: `${s.deliverWay || "납품"} 예정${md ? " " + md : ""}`
     };
   }
   const bs = toArr(s.buildings).filter(Boolean);
