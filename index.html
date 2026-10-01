@@ -4212,7 +4212,7 @@ function DayPanel({
       fontSize: 12,
       color: C.t3
     }
-  }, s.region), /*#__PURE__*/React.createElement(TelBtn, {
+  }, s.region), TelBtn({
     tel: siteTel(s)
   }), /*#__PURE__*/React.createElement("button", {
     onClick: e => {
@@ -4272,7 +4272,7 @@ function DayPanel({
         borderLeft: `3px solid ${C.blue}`,
         marginBottom: 6
       }
-    }, /*#__PURE__*/React.createElement(CardHead, {
+    }, CardHead({
       s: s
     }), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4412,7 +4412,7 @@ function DayPanel({
       assignees: assignees,
       dateStr: dateStr,
       onToggle: toggleBldWho
-    }), /*#__PURE__*/React.createElement(EditLine, {
+    }), EditLine({
       s: s
     }), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4476,14 +4476,14 @@ function DayPanel({
       borderLeft: `3px solid ${C.green}`,
       marginBottom: 6
     }
-  }, /*#__PURE__*/React.createElement(CardHead, {
+  }, CardHead({
     s: s
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: C.t2
     }
-  }, "▶ 용역 착수 · ", s.buildings.length, "동 · 완수 ", fd(s.end), " (", ddL(calcDday(s.end)), ")"), /*#__PURE__*/React.createElement(EditLine, {
+  }, "▶ 용역 착수 · ", s.buildings.length, "동 · 완수 ", fd(s.end), " (", ddL(calcDday(s.end)), ")"), EditLine({
     s: s
   })), [allSchools, setDb, dateStr, pickerId, isMobile, isAdmin, editor]);
   const EndCard = React.useCallback(({
@@ -4497,7 +4497,7 @@ function DayPanel({
       borderLeft: `3px solid ${C.orange}`,
       marginBottom: 6
     }
-  }, /*#__PURE__*/React.createElement(CardHead, {
+  }, CardHead({
     s: s
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4507,7 +4507,7 @@ function DayPanel({
   }, "🏁 완수 예정 · ", s.buildings.length, "동", (() => {
     const dv = deliveryOf(s);
     return dv.state === "완료" ? ` · ${dv.way === "우편" ? "📮" : "🚚"} ${dv.label}` : dv.state === "예정" ? ` · 📦 ${dv.label}` : " · 📦 납품 미정";
-  })(), (s.assignees || []).length ? ` · ${sortMembers(s.assignees).join("·")}` : ""), /*#__PURE__*/React.createElement(EditLine, {
+  })(), (s.assignees || []).length ? ` · ${sortMembers(s.assignees).join("·")}` : ""), EditLine({
     s: s
   })), [allSchools, setDb, dateStr, pickerId, isMobile, isAdmin, editor]);
   /* 납품 카드 — 납품일이 이 날인 현장 */
@@ -4522,7 +4522,7 @@ function DayPanel({
       borderLeft: `3px solid ${C.purple}`,
       marginBottom: 6
     }
-  }, /*#__PURE__*/React.createElement(CardHead, {
+  }, CardHead({
     s: s
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4532,7 +4532,7 @@ function DayPanel({
   }, (() => {
     const dv = deliveryOf(s);
     return dv.state === "완료" ? `${dv.way === "우편" ? "📮 우편" : dv.way === "직납" ? "🚚 직납" : "📦 납품"} 완료${dv.by ? " · " + dv.by : ""}` : "📦 납품 예정";
-  })(), " · ", s.buildings.length, "동"), /*#__PURE__*/React.createElement(EditLine, {
+  })(), " · ", s.buildings.length, "동"), EditLine({
     s: s
   })), [allSchools, setDb, dateStr, pickerId, isMobile, isAdmin, editor]);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -4569,7 +4569,7 @@ function DayPanel({
       top: 0,
       right: 0,
       height: "100vh",
-      width: 460,
+      width: "max(460px, 50vw)",
       maxWidth: "96vw",
       background: C.surface,
       borderLeft: `4px solid ${C.blue}`,
@@ -4922,10 +4922,7 @@ function DayPanel({
       fontSize: 13,
       fontWeight: 700
     }
-  }, fieldSchools.length)), fieldSchools.map(s => /*#__PURE__*/React.createElement(FieldCard, {
-    key: s.id,
-    s: s
-  }))), startSchools.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, fieldSchools.length)), fieldSchools.map(s => /*#__PURE__*/React.createElement(React.Fragment, { key: s.id }, FieldCard({ s: s })))), startSchools.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 16
     }
@@ -4959,10 +4956,7 @@ function DayPanel({
       fontSize: 13,
       fontWeight: 700
     }
-  }, startSchools.length)), startSchools.map(s => /*#__PURE__*/React.createElement(StartCard, {
-    key: s.id,
-    s: s
-  }))), endSchools.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, startSchools.length)), startSchools.map(s => /*#__PURE__*/React.createElement(React.Fragment, { key: s.id }, StartCard({ s: s })))), endSchools.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -4992,10 +4986,7 @@ function DayPanel({
       fontSize: 13,
       fontWeight: 700
     }
-  }, endSchools.length)), endSchools.map(s => /*#__PURE__*/React.createElement(EndCard, {
-    key: s.id,
-    s: s
-  }))), deliverSchools.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, endSchools.length)), endSchools.map(s => /*#__PURE__*/React.createElement(React.Fragment, { key: s.id }, EndCard({ s: s })))), deliverSchools.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -5025,10 +5016,7 @@ function DayPanel({
       fontSize: 13,
       fontWeight: 700
     }
-  }, deliverSchools.length)), deliverSchools.map(s => /*#__PURE__*/React.createElement(DeliverCard, {
-    key: s.id,
-    s: s
-  }))))), editSc && /*#__PURE__*/React.createElement(EditPanel, {
+  }, deliverSchools.length)), deliverSchools.map(s => /*#__PURE__*/React.createElement(React.Fragment, { key: s.id }, DeliverCard({ s: s })))))), editSc && /*#__PURE__*/React.createElement(EditPanel, {
     sc: editSc,
     yr: editSc._year,
     half: editSc._half,
@@ -5165,6 +5153,52 @@ const whoOnDate = (s, ds) => {
   return toArr(s && s.assignees);
 };
 
+/* ── 학교에서 빠진 인원은 동별 담당·협의에서도 자동으로 뺀다 (별도 추가 기능) ──
+   그 학교 조사일 중 어느 날에도 가지 않는 사람이 동별 담당에 남아 있으면 지운다.
+   여러 날 조사면 하루라도 가는 날이 남아 있으면 그대로 둔다. */
+const sitePeople = s => {
+  const set = new Set();
+  const ds = surveyDates(s);
+  if (ds.length) ds.forEach(d => whoOnDate(s, d).forEach(n => set.add(n)));
+  else toArr(s && s.assignees).filter(Boolean).forEach(n => set.add(n));
+  return set;
+};
+const pruneSiteBldWho = s => {
+  if (!s || s.deleted || !s.bldWho || typeof s.bldWho !== "object") return s;
+  const people = sitePeople(s);
+  let changed = false;
+  const bw = {};
+  Object.entries(s.bldWho).forEach(([k, v]) => {
+    const a = toArr(v).filter(Boolean);
+    const keep = a.filter(n => people.has(n));
+    if (keep.length !== a.length) changed = true;
+    if (keep.length) bw[k] = keep;
+  });
+  if (!changed) return s;
+  return { ...s, bldWho: Object.keys(bw).length ? bw : null };
+};
+/* 바뀐 게 없으면 같은 객체를 그대로 돌려준다 → 저장·화면에 영향 없음 */
+const pruneDbBldWho = db => {
+  if (!db || typeof db !== "object") return db;
+  let dbChanged = false;
+  const next = {};
+  Object.entries(db).forEach(([yr, halves]) => {
+    if (!halves || typeof halves !== "object" || Array.isArray(halves)) { next[yr] = halves; return; }
+    let yrChanged = false;
+    const nh = {};
+    Object.entries(halves).forEach(([half, list]) => {
+      if (!Array.isArray(list)) { nh[half] = list; return; }
+      let ch = false;
+      const nl = list.map(x => { const p = pruneSiteBldWho(x); if (p !== x) ch = true; return p; });
+      nh[half] = ch ? nl : list;
+      if (ch) yrChanged = true;
+    });
+    next[yr] = yrChanged ? nh : halves;
+    if (yrChanged) dbChanged = true;
+  });
+  return dbChanged ? next : db;
+};
+
 /* 동별 담당 배정 — 평소엔 결과만 한 줄씩 보이고, 고칠 때만 펼친다.
    동이 2개 이상일 때만 나오며, 펼쳐도 한 번에 한 동만 열려 버튼이 쏟아지지 않는다. */
 function BldAssign({
@@ -5176,7 +5210,7 @@ function BldAssign({
   const [open, setOpen] = useState(false);
   const [openRow, setOpenRow] = useState(null);
   const bs = buildingsOnDate(s, dateStr);
-  if (!assignees.length || bs.length < 2) return null;
+  if (!assignees.length || bs.length < 1) return null; /* 1동짜리도 담당·협의를 넣을 수 있게 */
   const rows = [...bs.map(b => ({
     key: b.b,
     label: b.b,
@@ -17254,7 +17288,7 @@ function BottomTabs({
 function App() {
   const isMobile = useIsMobile();
   const [authUser, setAuthUser] = useState(undefined); // undefined=확인중, null=미로그인, obj=로그인
-  const [db, setDb] = useState(() => {
+  const [db, setDbRaw] = useState(() => {
     try {
       if (localStorage.getItem("ston_fresh")) {
         localStorage.removeItem("ston_fresh");
@@ -17268,6 +17302,17 @@ function App() {
     } catch {}
     return DB;
   });
+  /* 모든 변경이 여기를 지난다 — 학교에서 빠진 인원은 동별 담당에서도 같이 뺀다.
+     정리하다 오류가 나면 원래 변경을 그대로 반영한다 */
+  const setDb = React.useCallback(u => setDbRaw(prev => {
+    const nx = typeof u === "function" ? u(prev) : u;
+    try {
+      return pruneDbBldWho(nx);
+    } catch (e) {
+      console.error("[동별 담당 정리] 실패:", e);
+      return nx;
+    }
+  }), []);
   const [sideOpen, setSideOpen] = useState(typeof window !== "undefined" ? window.innerWidth >= 820 : true);
   const [menu, setMenuRaw] = useState("schedule");
   // 모바일에서 메뉴 선택 시 사이드바 자동 닫힘
