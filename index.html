@@ -3250,14 +3250,23 @@ function wansuRecords(entries) {
     if (!s || s.deleted || !/^\d{4}-\d{2}-\d{2}$/.test(String(s.end || ""))) return;
     if (typeof siteDone === "function" && siteDone(s)) return;
     const nm = (s.school || "").trim();
-    const k = `${nm}|${s.end}`;
+    /* 같은 학교라도 시트에서 줄(No.)이 다르면 따로 계약된 별개 현장 → 둘 다 남긴다 */
+    const k = `${s.region || ""}|${nm}|${String(s.no || "").trim()}|${s.end}`;
     if (seen.has(k)) return;
     seen.add(k);
     const t = wansuTarget(s.end);
-    out.push({ s, school: nm, region: s.region || "", end: s.end, target: t.date, first: t.first, note: t.note, moved: !!t.note,
+    const cc = catCounts(s);
+    const cat = [cc.건축 ? `건축${cc.건축}` : "", cc.토목종 ? `토목${cc.토목종}` : "", cc.토목소 ? `소규모${cc.토목소}` : ""].filter(Boolean).join("·");
+    out.push({ s, school: nm, region: s.region || "", end: s.end, no: String(s.no || "").trim(), cat, target: t.date, first: t.first, note: t.note, moved: !!t.note,
       who: sortMembers(toArr(s.assignees).filter(Boolean)).join(", ") });
   }));
-  return out.sort((a, b) => a.target.localeCompare(b.target) || a.school.localeCompare(b.school));
+  /* 같은 이름이 두 번 이상이면 달력에서 구분되게 No.·구분을 붙인다 */
+  const cnt = {};
+  out.forEach(r => { cnt[r.school] = (cnt[r.school] || 0) + 1; });
+  out.forEach(r => {
+    r.label = cnt[r.school] > 1 ? `${r.school} [${[r.no ? `No.${r.no}` : "", r.cat].filter(Boolean).join(" ")}]` : r.school;
+  });
+  return out.sort((a, b) => a.target.localeCompare(b.target) || a.school.localeCompare(b.school) || (+a.no || 0) - (+b.no || 0));
 }
 const WX = {
   bd: { top: { style: "thin", color: { rgb: "FF000000" } }, bottom: { style: "thin", color: { rgb: "FF000000" } }, left: { style: "thin", color: { rgb: "FF000000" } }, right: { style: "thin", color: { rgb: "FF000000" } } },
@@ -3266,26 +3275,26 @@ const WX = {
 };
 function wansuListSheet(recs) {
   const today = dstr(new Date());
-  const rows = [["목표일", "요일", "지역", "학교명", "완수일", "요일", "목표까지", "인원", "당김 사유"]];
+  const rows = [["목표일", "요일", "No.", "지역", "학교명", "구분", "완수일", "요일", "목표까지", "인원", "당김 사유"]];
   recs.forEach(r => {
     const dd = Math.round((parseD(r.target) - parseD(today)) / 86400000);
-    rows.push([r.target, wansuDow(r.target), r.region, r.school, r.end, wansuDow(r.end), dd === 0 ? "오늘" : dd > 0 ? `D-${dd}` : `${-dd}일 지남`, r.who, r.note]);
+    rows.push([r.target, wansuDow(r.target), r.no, r.region, r.school, r.cat, r.end, wansuDow(r.end), dd === 0 ? "오늘" : dd > 0 ? `D-${dd}` : `${-dd}일 지남`, r.who, r.note]);
   });
   const late = recs.some(r => !WANSU_HOLI_YEARS.includes(r.target.slice(0, 4)));
   if (late) rows.push([], ["※ " + WANSU_HOLI_YEARS[WANSU_HOLI_YEARS.length - 1] + "년 이후는 설·추석·대체공휴일이 목록에 없어 날짜가 고정된 공휴일만 피했습니다."]);
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 12 }, { wch: 5 }, { wch: 8 }, { wch: 26 }, { wch: 12 }, { wch: 5 }, { wch: 10 }, { wch: 22 }, { wch: 40 }];
+  ws["!cols"] = [{ wch: 12 }, { wch: 5 }, { wch: 6 }, { wch: 8 }, { wch: 26 }, { wch: 12 }, { wch: 12 }, { wch: 5 }, { wch: 10 }, { wch: 22 }, { wch: 40 }];
   ws["!freeze"] = { xSplit: 0, ySplit: 1 };
   const range = XLSX.utils.decode_range(ws["!ref"]);
-  for (let c = 0; c <= 8; c++) {
+  for (let c = 0; c <= 10; c++) {
     const a = XLSX.utils.encode_cell({ r: 0, c });
     if (ws[a]) ws[a].s = { font: { bold: true }, fill: WX.fill(WX.head), border: WX.bd, alignment: { horizontal: "center" } };
   }
   recs.forEach((r, i) => {
-    for (let c = 0; c <= 8; c++) {
+    for (let c = 0; c <= 10; c++) {
       const a = XLSX.utils.encode_cell({ r: i + 1, c });
       if (!ws[a]) ws[a] = { t: "s", v: "" };
-      ws[a].s = { border: WX.bd, fill: r.moved ? WX.fill(WX.moved) : undefined, alignment: { vertical: "center", horizontal: c === 3 || c === 7 || c === 8 ? "left" : "center" } };
+      ws[a].s = { border: WX.bd, fill: r.moved ? WX.fill(WX.moved) : undefined, alignment: { vertical: "center", horizontal: c === 4 || c === 9 || c === 10 ? "left" : "center" } };
     }
   });
   void range;
@@ -3335,7 +3344,7 @@ function wansuCalSheet(recs, y, m) {
         const side = { left: WX.bd.left, right: WX.bd.right, top: { style: "hair", color: { rgb: "FFBFBFBF" } }, bottom: last ? WX.bd.bottom : { style: "hair", color: { rgb: "FFBFBFBF" } } };
         S(r, c, { font: { sz: 10 }, border: side, alignment: { vertical: "center" },
           fill: it ? WX.fill(it.moved ? WX.moved : WX.item) : x.off ? WX.fill(WX.wk) : undefined });
-        return it ? `${it.moved ? "↩ " : ""}${it.school} (완수 ${wansuMD(it.end)})` : "";
+        return it ? `${it.moved ? "↩ " : ""}${it.label} (완수 ${wansuMD(it.end)})` : "";
       }));
       rowH.push({ hpt: 16 });
     }
