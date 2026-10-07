@@ -3195,6 +3195,169 @@ function crewSheetSummary(recs) {
   return ws;
 }
 
+/* ── 완수용 캘린더 엑셀 (기존 내보내기와 완전히 분리된 별도 기능) ──
+   목표일 = 완수일 − 5일. 그 날이 토·일·공휴일이면 평일이 나올 때까지 하루씩 앞당긴다.
+   기존 buildSheet / buildCalendarSheet 등에는 손대지 않는다. */
+/* 공휴일 (대체공휴일 포함) — 해가 바뀌면 여기 한 덩어리만 추가하면 된다.
+   2026년부터 노동절(5/1)·제헌절(7/17) 공휴일 지정 반영 */
+const WANSU_HOLIDAYS = {
+  "2025-01-01": "신정", "2025-01-27": "임시공휴일", "2025-01-28": "설날", "2025-01-29": "설날", "2025-01-30": "설날",
+  "2025-03-01": "삼일절", "2025-03-03": "대체공휴일", "2025-05-05": "어린이날", "2025-05-06": "대체공휴일",
+  "2025-06-03": "대통령선거", "2025-06-06": "현충일", "2025-08-15": "광복절", "2025-10-03": "개천절",
+  "2025-10-05": "추석", "2025-10-06": "추석", "2025-10-07": "추석", "2025-10-08": "대체공휴일",
+  "2025-10-09": "한글날", "2025-12-25": "성탄절",
+  "2026-01-01": "신정", "2026-02-16": "설날", "2026-02-17": "설날", "2026-02-18": "설날",
+  "2026-03-01": "삼일절", "2026-03-02": "대체공휴일", "2026-05-01": "노동절", "2026-05-05": "어린이날",
+  "2026-05-24": "부처님오신날", "2026-05-25": "대체공휴일", "2026-06-03": "지방선거", "2026-06-06": "현충일",
+  "2026-07-17": "제헌절", "2026-08-15": "광복절", "2026-08-17": "대체공휴일",
+  "2026-09-24": "추석", "2026-09-25": "추석", "2026-09-26": "추석",
+  "2026-10-03": "개천절", "2026-10-05": "대체공휴일", "2026-10-09": "한글날", "2026-12-25": "성탄절",
+  "2027-01-01": "신정", "2027-02-06": "설날", "2027-02-07": "설날", "2027-02-08": "설날", "2027-02-09": "대체공휴일",
+  "2027-03-01": "삼일절", "2027-05-01": "노동절", "2027-05-03": "대체공휴일", "2027-05-05": "어린이날",
+  "2027-05-13": "부처님오신날", "2027-06-06": "현충일", "2027-07-17": "제헌절", "2027-07-19": "대체공휴일",
+  "2027-08-15": "광복절", "2027-08-16": "대체공휴일", "2027-09-14": "추석", "2027-09-15": "추석", "2027-09-16": "추석",
+  "2027-10-03": "개천절", "2027-10-04": "대체공휴일", "2027-10-09": "한글날", "2027-10-11": "대체공휴일",
+  "2027-12-25": "성탄절", "2027-12-27": "대체공휴일"
+};
+const WANSU_HOLI_YEARS = ["2025", "2026", "2027"];
+/* 목록에 없는 해는 날짜가 고정된 공휴일만이라도 본다 (설·추석·대체공휴일은 빠짐) */
+const WANSU_FIXED = { "01-01": "신정", "03-01": "삼일절", "05-01": "노동절", "05-05": "어린이날", "06-06": "현충일", "07-17": "제헌절", "08-15": "광복절", "10-03": "개천절", "10-09": "한글날", "12-25": "성탄절" };
+const wansuHoliday = ds => WANSU_HOLIDAYS[ds] || (!WANSU_HOLI_YEARS.includes(ds.slice(0, 4)) && WANSU_FIXED[ds.slice(5)]) || "";
+const WANSU_DOW = ["일", "월", "화", "수", "목", "금", "토"];
+const wansuDow = ds => WANSU_DOW[parseD(ds).getDay()];
+const wansuMD = ds => `${+ds.slice(5, 7)}/${+ds.slice(8, 10)}`;
+/* 목표일 계산 — { date, note } . note 는 당겼을 때만 */
+function wansuTarget(end) {
+  const first = dstr(addDays(parseD(end), -5));
+  let d = first;
+  const why = [];
+  let guard = 0;
+  while (guard++ < 20) {
+    const dw = parseD(d).getDay();
+    const h = wansuHoliday(d);
+    if (h) why.push(`${wansuMD(d)} ${h}`);
+    else if (dw === 0 || dw === 6) why.push(`${wansuMD(d)} ${WANSU_DOW[dw]}요일`);
+    else break;
+    d = dstr(addDays(parseD(d), -1));
+  }
+  return { date: d, first, note: why.length ? `${why.join(" · ")} → ${wansuMD(d)}(${wansuDow(d)})` : "" };
+}
+/* 완수 안 된 현장만 · 같은 현장이 두 반기에 있으면 한 번만 */
+function wansuRecords(entries) {
+  const out = [];
+  const seen = new Set();
+  (entries || []).forEach(({ schools }) => (schools || []).forEach(s => {
+    if (!s || s.deleted || !/^\d{4}-\d{2}-\d{2}$/.test(String(s.end || ""))) return;
+    if (typeof siteDone === "function" && siteDone(s)) return;
+    const nm = (s.school || "").trim();
+    const k = `${nm}|${s.end}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    const t = wansuTarget(s.end);
+    out.push({ s, school: nm, region: s.region || "", end: s.end, target: t.date, first: t.first, note: t.note, moved: !!t.note,
+      who: sortMembers(toArr(s.assignees).filter(Boolean)).join(", ") });
+  }));
+  return out.sort((a, b) => a.target.localeCompare(b.target) || a.school.localeCompare(b.school));
+}
+const WX = {
+  bd: { top: { style: "thin", color: { rgb: "FF000000" } }, bottom: { style: "thin", color: { rgb: "FF000000" } }, left: { style: "thin", color: { rgb: "FF000000" } }, right: { style: "thin", color: { rgb: "FF000000" } } },
+  fill: rgb => ({ patternType: "solid", fgColor: { rgb } }),
+  head: "FFD9D9D9", item: "FFEBF3FF", moved: "FFFFF2CC", wk: "FFF2F2F2", sat: "FF0070C0", sun: "FFFF0000"
+};
+function wansuListSheet(recs) {
+  const today = dstr(new Date());
+  const rows = [["목표일", "요일", "지역", "학교명", "완수일", "요일", "목표까지", "인원", "당김 사유"]];
+  recs.forEach(r => {
+    const dd = Math.round((parseD(r.target) - parseD(today)) / 86400000);
+    rows.push([r.target, wansuDow(r.target), r.region, r.school, r.end, wansuDow(r.end), dd === 0 ? "오늘" : dd > 0 ? `D-${dd}` : `${-dd}일 지남`, r.who, r.note]);
+  });
+  const late = recs.some(r => !WANSU_HOLI_YEARS.includes(r.target.slice(0, 4)));
+  if (late) rows.push([], ["※ " + WANSU_HOLI_YEARS[WANSU_HOLI_YEARS.length - 1] + "년 이후는 설·추석·대체공휴일이 목록에 없어 날짜가 고정된 공휴일만 피했습니다."]);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 12 }, { wch: 5 }, { wch: 8 }, { wch: 26 }, { wch: 12 }, { wch: 5 }, { wch: 10 }, { wch: 22 }, { wch: 40 }];
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for (let c = 0; c <= 8; c++) {
+    const a = XLSX.utils.encode_cell({ r: 0, c });
+    if (ws[a]) ws[a].s = { font: { bold: true }, fill: WX.fill(WX.head), border: WX.bd, alignment: { horizontal: "center" } };
+  }
+  recs.forEach((r, i) => {
+    for (let c = 0; c <= 8; c++) {
+      const a = XLSX.utils.encode_cell({ r: i + 1, c });
+      if (!ws[a]) ws[a] = { t: "s", v: "" };
+      ws[a].s = { border: WX.bd, fill: r.moved ? WX.fill(WX.moved) : undefined, alignment: { vertical: "center", horizontal: c === 3 || c === 7 || c === 8 ? "left" : "center" } };
+    }
+  });
+  void range;
+  return ws;
+}
+/* 한 달 달력 — 월요일 시작. 한 주 = 날짜 줄 + 내용 줄 */
+function wansuCalSheet(recs, y, m) {
+  const by = {};
+  recs.forEach(r => (by[r.target] = by[r.target] || []).push(r));
+  const first = new Date(y, m - 1, 1, 12);
+  const start = addDays(first, -((first.getDay() + 6) % 7));
+  const aoa = [], st = {}, rowH = [];
+  const S = (r, c, s) => { st[`${r}_${c}`] = s; };
+  aoa.push([`${y}년 ${m}월 완수 목표일`, "", "", "", "", "", ""]);
+  S(0, 0, { font: { bold: true, sz: 14 } });
+  rowH.push({ hpt: 24 });
+  aoa.push(["목표일 = 완수일 − 5일 · 토·일·공휴일이면 앞 평일로 당김 · 노란 칸 = 당긴 날 (↩)", "", "", "", "", "", ""]);
+  S(1, 0, { font: { sz: 9, color: { rgb: "FF595959" } } });
+  rowH.push({ hpt: 16 });
+  const hdr = ["월", "화", "수", "목", "금", "토", "일"];
+  aoa.push(hdr);
+  hdr.forEach((h, c) => S(2, c, { font: { bold: true, color: { rgb: c === 5 ? WX.sat : c === 6 ? WX.sun : "FF000000" } }, fill: WX.fill(WX.head), border: WX.bd, alignment: { horizontal: "center" } }));
+  rowH.push({ hpt: 18 });
+  for (let w = 0; w < 6; w++) {
+    const days = [...Array(7)].map((_, i) => addDays(start, w * 7 + i));
+    if (w > 0 && days[0].getMonth() !== m - 1) break;
+    const dRow = aoa.length, cRow = dRow + 1;
+    const dr = [], cr = [];
+    let maxLines = 1;
+    days.forEach((d, c) => {
+      const ds = dstr(d);
+      const inMonth = d.getMonth() === m - 1;
+      const h = wansuHoliday(ds);
+      dr.push(`${inMonth ? d.getDate() : `${d.getMonth() + 1}/${d.getDate()}`}${h ? ` ${h}` : ""}`);
+      const items = inMonth ? by[ds] || [] : [];
+      const lines = items.map(r => `${r.moved ? "↩ " : ""}${r.school} (완수 ${wansuMD(r.end)})`);
+      maxLines = Math.max(maxLines, lines.length);
+      cr.push(lines.join("\n"));
+      const red = h || c === 6, blue = !h && c === 5;
+      S(dRow, c, { font: { bold: true, color: { rgb: !inMonth ? "FFBFBFBF" : red ? WX.sun : blue ? WX.sat : "FF000000" } }, fill: WX.fill(WX.head), border: WX.bd, alignment: { horizontal: "left" } });
+      const anyMoved = items.some(r => r.moved);
+      S(cRow, c, { font: { sz: 10 }, border: WX.bd, alignment: { vertical: "top", wrapText: true },
+        fill: items.length ? WX.fill(anyMoved ? WX.moved : WX.item) : c >= 5 || h ? WX.fill(WX.wk) : undefined });
+    });
+    aoa.push(dr, cr);
+    rowH.push({ hpt: 16 }, { hpt: Math.max(48, maxLines * 14 + 8) });
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  Object.entries(st).forEach(([k, s]) => {
+    const [r, c] = k.split("_").map(Number);
+    const a = XLSX.utils.encode_cell({ r, c });
+    if (!ws[a]) ws[a] = { t: "s", v: "" };
+    ws[a].s = s;
+  });
+  ws["!cols"] = [...Array(7)].map(() => ({ wch: 20 }));
+  ws["!rows"] = rowH;
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } }];
+  return ws;
+}
+function buildWansuWorkbook(entries) {
+  const recs = wansuRecords(entries);
+  if (!recs.length) return null;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wansuListSheet(recs), "완수목표 목록");
+  const months = [...new Set(recs.map(r => r.target.slice(0, 7)))].sort();
+  months.forEach(ym => {
+    const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
+    XLSX.utils.book_append_sheet(wb, wansuCalSheet(recs, y, m), `${String(y).slice(2)}.${m}월 완수`);
+  });
+  return wb;
+}
+
 function buildScheduleSheet(entries) {
   const multi = entries.length > 1;
   const today = new Date();
@@ -10954,6 +11117,20 @@ function ExportImportPage({
     XLSX.utils.book_append_sheet(wb, crewSheetSummary(recs), "인원 집계");
     XLSX.writeFile(wb, `인원_배치기록_${dstr(new Date())}.xlsx`);
   };
+  /* 완수용 캘린더 — 완수일 5일 전(주말·공휴일이면 앞 평일) 목표 달력 (별도 기능) */
+  const doExportWansu = () => {
+    const entries = [];
+    Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => {
+      const schools = (arr || []).filter(s => !s.deleted);
+      if (schools.length) entries.push({ yr, half, schools });
+    }));
+    const wb = buildWansuWorkbook(entries);
+    if (!wb) {
+      alert("완수일이 잡힌 미완수 현장이 없습니다.");
+      return;
+    }
+    XLSX.writeFile(wb, `완수용_캘린더_${dstr(new Date())}.xlsx`);
+  };
   const totalS = Object.values(db).flatMap(h => Object.values(h)).flatMap(s => s).length;
   const totalB = Object.values(db).flatMap(h => Object.values(h)).flatMap(s => s).flatMap(s => s.buildings).length;
   return /*#__PURE__*/React.createElement("div", {
@@ -11551,7 +11728,21 @@ function ExportImportPage({
       cursor: "pointer",
       boxShadow: `0 4px 12px ${C.blue}40`
     }
-  }, "\uD83D\uDC65 인원 배치"))), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDC65 인원 배치"), /*#__PURE__*/React.createElement("button", {
+    onClick: doExportWansu,
+    title: "완수일 5일 전을 목표일로 (토·일·공휴일이면 앞 평일로 당김)",
+    style: {
+      padding: "9px 16px",
+      background: C.purple,
+      border: "none",
+      borderRadius: 9,
+      color: "#fff",
+      fontSize: 15,
+      fontWeight: 700,
+      cursor: "pointer",
+      boxShadow: `0 4px 12px ${C.purple}40`
+    }
+  }, "\u2705 완수용 캘린더"))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "16px 20px",
       display: "flex",
