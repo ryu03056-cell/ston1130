@@ -3198,14 +3198,16 @@ function crewSheetSummary(recs) {
 /* ── 동별 점검 인원 JSON (기존 내보내기와 완전히 분리된 별도 기능) ──
    현장 하나 = 학교 하나, 그 안에 동별로 누가 점검했는지.
    동 담당을 정했으면 그 사람들, 안 정했으면 그날 간 인원 전체(assigned:false). */
-function crewJsonData(entries) {
+function crewJsonData(entries, range) {
+  /* range = { from, to } 이면 그 기간 조사일만 (주별·월별), 없으면 전체 */
+  const inMonth = ds => !range || String(ds) >= range.from && String(ds) <= range.to;
   const sites = [];
   (entries || []).forEach(({ yr, half, schools }) => {
     (schools || []).filter(s => s && !s.deleted).forEach(s => {
       const dates = [];
       const crewAll = new Set();
       const bmap = new Map();
-      surveyDates(s).forEach(ds => {
+      surveyDates(s).filter(inMonth).forEach(ds => {
         const who = sortMembers(whoOnDate(s, ds));
         if (!who.length) return;
         dates.push({ date: ds, dow: crewDow(ds), crew: who });
@@ -3256,9 +3258,29 @@ function crewJsonData(entries) {
     exportedBy: typeof CURRENT_USER !== "undefined" && (CURRENT_USER.name || CURRENT_USER.email) || "",
     note: "buildings[].assigned=true 면 동 담당으로 정한 인원, false 면 그날 현장에 간 인원 전체",
     siteCount: sites.length,
+    period: range ? { from: range.from, to: range.to, label: range.label || "" } : "전체",
     sites
   };
 }
+/* 기간 선택값 → { from, to, label } . "w:2026-10-05" = 그 월요일부터 일요일까지, "m:2026-10" = 그 달 */
+function crewJsonRange(v) {
+  if (!v || v === "all") return null;
+  if (v.startsWith("w:")) {
+    const mon = v.slice(2);
+    const sun = dstr(addDays(parseD(mon), 6));
+    return { from: mon, to: sun, label: `${mon} ~ ${sun}`, file: `${mon}_주간` };
+  }
+  if (v.startsWith("m:")) {
+    const ym = v.slice(2);
+    const last = new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate();
+    return { from: `${ym}-01`, to: `${ym}-${String(last).padStart(2, "0")}`, label: `${+ym.slice(0, 4)}년 ${+ym.slice(5, 7)}월`, file: `${ym}_월간` };
+  }
+  return null;
+}
+const crewWeekMon = ds => {
+  const d = parseD(ds);
+  return dstr(addDays(d, -((d.getDay() + 6) % 7)));
+};
 function downloadJson(obj, filename) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -11211,19 +11233,33 @@ function ExportImportPage({
     XLSX.utils.book_append_sheet(wb, crewSheetSummary(recs), "인원 집계");
     XLSX.writeFile(wb, `인원_배치기록_${dstr(new Date())}.xlsx`);
   };
-  /* 동별 점검 인원 JSON (별도 기능) */
+  /* 동별 점검 인원 JSON (별도 기능) — 전체 · 주별 · 월별 */
+  const [crewJsonMonth, setCrewJsonMonth] = useState("all");
+  const crewJsonMonths = useMemo(() => {
+    const months = new Set(), weeks = new Set();
+    Object.values(db || {}).forEach(hs => Object.values(hs || {}).forEach(arr => (arr || []).forEach(s => {
+      if (!s || s.deleted) return;
+      surveyDates(s).forEach(ds => {
+        if (!whoOnDate(s, ds).length) return;
+        months.add(String(ds).slice(0, 7));
+        weeks.add(crewWeekMon(ds));
+      });
+    })));
+    return { months: [...months].sort().reverse(), weeks: [...weeks].sort().reverse() };
+  }, [db]);
   const doExportCrewJson = () => {
     const entries = [];
     Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => {
       const schools = (arr || []).filter(s => !s.deleted);
       if (schools.length) entries.push({ yr, half, schools });
     }));
-    const data = crewJsonData(entries);
+    const range = crewJsonRange(crewJsonMonth);
+    const data = crewJsonData(entries, range);
     if (!data.sites.length) {
-      alert("내보낼 현장조사 인원이 없습니다.");
+      alert(range ? `${range.label} 에는 내보낼 현장조사 인원이 없습니다.` : "내보낼 현장조사 인원이 없습니다.");
       return;
     }
-    downloadJson(data, `동별_점검인원_${dstr(new Date())}.json`);
+    downloadJson(data, range ? `동별_점검인원_${range.file}.json` : `동별_점검인원_전체_${dstr(new Date())}.json`);
   };
   /* 완수용 캘린더 — 완수일 5일 전(주말·공휴일이면 앞 평일) 목표 달력 (별도 기능) */
   const doExportWansu = () => {
@@ -11850,7 +11886,37 @@ function ExportImportPage({
       cursor: "pointer",
       boxShadow: "0 4px 12px #33415540"
     }
-  }, "{ } 동별 인원 JSON"), /*#__PURE__*/React.createElement("button", {
+  }, "{ } 동별 인원 JSON"), /*#__PURE__*/React.createElement("select", {
+    value: crewJsonMonth,
+    onChange: e => setCrewJsonMonth(e.target.value),
+    title: "JSON으로 뺄 기간 (주는 월~일)",
+    style: {
+      padding: "8px 10px",
+      border: "1px solid #334155",
+      borderRadius: 9,
+      fontSize: 14,
+      fontWeight: 700,
+      color: "#334155",
+      background: "#fff",
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "all"
+  }, "전체 기간"), /*#__PURE__*/React.createElement("optgroup", {
+    label: "주별 (월~일)"
+  }, crewJsonMonths.weeks.map(w => {
+    const sun = dstr(addDays(parseD(w), 6));
+    const thisWeek = w === crewWeekMon(dstr(new Date()));
+    return /*#__PURE__*/React.createElement("option", {
+      key: "w" + w,
+      value: "w:" + w
+    }, `${+w.slice(5, 7)}/${+w.slice(8, 10)}(월) ~ ${+sun.slice(5, 7)}/${+sun.slice(8, 10)}(일)${thisWeek ? " · 이번 주" : ""}`);
+  })), /*#__PURE__*/React.createElement("optgroup", {
+    label: "월별"
+  }, crewJsonMonths.months.map(m => /*#__PURE__*/React.createElement("option", {
+    key: "m" + m,
+    value: "m:" + m
+  }, `${m.slice(0, 4)}년 ${+m.slice(5, 7)}월`)))), /*#__PURE__*/React.createElement("button", {
     onClick: doExportWansu,
     title: "완수일 5일 전을 목표일로 (토·일·공휴일이면 앞 평일로 당김)",
     style: {
