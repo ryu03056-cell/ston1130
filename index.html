@@ -3312,26 +3312,33 @@ function wansuCalSheet(recs, y, m) {
   for (let w = 0; w < 6; w++) {
     const days = [...Array(7)].map((_, i) => addDays(start, w * 7 + i));
     if (w > 0 && days[0].getMonth() !== m - 1) break;
-    const dRow = aoa.length, cRow = dRow + 1;
-    const dr = [], cr = [];
-    let maxLines = 1;
-    days.forEach((d, c) => {
+    /* 한 칸에 몰아넣으면 행 높이 한도(409)를 넘어서, 학교 하나 = 한 줄로 아래로 늘린다 */
+    const dRow = aoa.length;
+    const dr = [];
+    const cols = days.map((d, c) => {
       const ds = dstr(d);
       const inMonth = d.getMonth() === m - 1;
       const h = wansuHoliday(ds);
-      dr.push(`${inMonth ? d.getDate() : `${d.getMonth() + 1}/${d.getDate()}`}${h ? ` ${h}` : ""}`);
-      const items = inMonth ? by[ds] || [] : [];
-      const lines = items.map(r => `${r.moved ? "↩ " : ""}${r.school} (완수 ${wansuMD(r.end)})`);
-      maxLines = Math.max(maxLines, lines.length);
-      cr.push(lines.join("\n"));
+      dr.push(`${inMonth ? d.getDate() : `${d.getMonth() + 1}/${d.getDate()}`}${h ? ` ${h}` : ""}${inMonth && (by[ds] || []).length > 1 ? `  (${by[ds].length}곳)` : ""}`);
       const red = h || c === 6, blue = !h && c === 5;
       S(dRow, c, { font: { bold: true, color: { rgb: !inMonth ? "FFBFBFBF" : red ? WX.sun : blue ? WX.sat : "FF000000" } }, fill: WX.fill(WX.head), border: WX.bd, alignment: { horizontal: "left" } });
-      const anyMoved = items.some(r => r.moved);
-      S(cRow, c, { font: { sz: 10 }, border: WX.bd, alignment: { vertical: "top", wrapText: true },
-        fill: items.length ? WX.fill(anyMoved ? WX.moved : WX.item) : c >= 5 || h ? WX.fill(WX.wk) : undefined });
+      return { items: inMonth ? by[ds] || [] : [], off: c >= 5 || !!h };
     });
-    aoa.push(dr, cr);
-    rowH.push({ hpt: 16 }, { hpt: Math.max(48, maxLines * 14 + 8) });
+    aoa.push(dr);
+    rowH.push({ hpt: 16 });
+    const n = Math.max(3, ...cols.map(x => x.items.length));
+    for (let i = 0; i < n; i++) {
+      const r = aoa.length;
+      const last = i === n - 1;
+      aoa.push(cols.map((x, c) => {
+        const it = x.items[i];
+        const side = { left: WX.bd.left, right: WX.bd.right, top: { style: "hair", color: { rgb: "FFBFBFBF" } }, bottom: last ? WX.bd.bottom : { style: "hair", color: { rgb: "FFBFBFBF" } } };
+        S(r, c, { font: { sz: 10 }, border: side, alignment: { vertical: "center" },
+          fill: it ? WX.fill(it.moved ? WX.moved : WX.item) : x.off ? WX.fill(WX.wk) : undefined });
+        return it ? `${it.moved ? "↩ " : ""}${it.school} (완수 ${wansuMD(it.end)})` : "";
+      }));
+      rowH.push({ hpt: 16 });
+    }
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   Object.entries(st).forEach(([k, s]) => {
