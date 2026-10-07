@@ -3195,6 +3195,84 @@ function crewSheetSummary(recs) {
   return ws;
 }
 
+/* ── 동별 점검 인원 JSON (기존 내보내기와 완전히 분리된 별도 기능) ──
+   현장 하나 = 학교 하나, 그 안에 동별로 누가 점검했는지.
+   동 담당을 정했으면 그 사람들, 안 정했으면 그날 간 인원 전체(assigned:false). */
+function crewJsonData(entries) {
+  const sites = [];
+  (entries || []).forEach(({ yr, half, schools }) => {
+    (schools || []).filter(s => s && !s.deleted).forEach(s => {
+      const dates = [];
+      const crewAll = new Set();
+      const bmap = new Map();
+      surveyDates(s).forEach(ds => {
+        const who = sortMembers(whoOnDate(s, ds));
+        if (!who.length) return;
+        dates.push({ date: ds, dow: crewDow(ds), crew: who });
+        who.forEach(n => crewAll.add(n));
+        buildingsOnDate(s, ds).forEach(b => {
+          const key = b.b || "";
+          if (!bmap.has(key)) {
+            const own = sortMembers(bldWhoOf(s, key));
+            bmap.set(key, {
+              name: key,
+              category: bldCat(b),
+              kind: b.kind || "",
+              size: (typeof bldSize === "function" ? bldSize(b) : "") || "",
+              dates: [],
+              assigned: own.length > 0,
+              inspectors: own.slice(),
+              _day: new Set()
+            });
+          }
+          const e = bmap.get(key);
+          if (!e.dates.includes(ds)) e.dates.push(ds);
+          if (!e.assigned) who.forEach(n => e._day.add(n));
+        });
+      });
+      if (!dates.length) return;
+      const buildings = [...bmap.values()].map(e => {
+        const { _day, ...rest } = e;
+        if (!rest.assigned) rest.inspectors = sortMembers([..._day]);
+        return rest;
+      });
+      sites.push({
+        year: yr,
+        half,
+        no: String(s.no || "").trim(),
+        region: s.region || "",
+        school: s.school || "",
+        status: s.tentative ? "예정" : "확정",
+        surveyDates: dates,
+        crew: sortMembers([...crewAll]),
+        consult: sortMembers(consultOf(s)),
+        buildings
+      });
+    });
+  });
+  sites.sort((a, b) => (a.surveyDates[0].date || "").localeCompare(b.surveyDates[0].date || "") || a.school.localeCompare(b.school));
+  return {
+    exportedAt: new Date().toISOString(),
+    exportedBy: typeof CURRENT_USER !== "undefined" && (CURRENT_USER.name || CURRENT_USER.email) || "",
+    note: "buildings[].assigned=true 면 동 담당으로 정한 인원, false 면 그날 현장에 간 인원 전체",
+    siteCount: sites.length,
+    sites
+  };
+}
+function downloadJson(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 1000);
+}
+
 /* ── 완수용 캘린더 엑셀 (기존 내보내기와 완전히 분리된 별도 기능) ──
    목표일 = 완수일 − 5일. 그 날이 토·일·공휴일이면 평일이 나올 때까지 하루씩 앞당긴다.
    기존 buildSheet / buildCalendarSheet 등에는 손대지 않는다. */
@@ -11133,6 +11211,20 @@ function ExportImportPage({
     XLSX.utils.book_append_sheet(wb, crewSheetSummary(recs), "인원 집계");
     XLSX.writeFile(wb, `인원_배치기록_${dstr(new Date())}.xlsx`);
   };
+  /* 동별 점검 인원 JSON (별도 기능) */
+  const doExportCrewJson = () => {
+    const entries = [];
+    Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => {
+      const schools = (arr || []).filter(s => !s.deleted);
+      if (schools.length) entries.push({ yr, half, schools });
+    }));
+    const data = crewJsonData(entries);
+    if (!data.sites.length) {
+      alert("내보낼 현장조사 인원이 없습니다.");
+      return;
+    }
+    downloadJson(data, `동별_점검인원_${dstr(new Date())}.json`);
+  };
   /* 완수용 캘린더 — 완수일 5일 전(주말·공휴일이면 앞 평일) 목표 달력 (별도 기능) */
   const doExportWansu = () => {
     const entries = [];
@@ -11745,6 +11837,20 @@ function ExportImportPage({
       boxShadow: `0 4px 12px ${C.blue}40`
     }
   }, "\uD83D\uDC65 인원 배치"), /*#__PURE__*/React.createElement("button", {
+    onClick: doExportCrewJson,
+    title: "동별로 누가 점검했는지 JSON 파일로",
+    style: {
+      padding: "9px 16px",
+      background: "#334155",
+      border: "none",
+      borderRadius: 9,
+      color: "#fff",
+      fontSize: 15,
+      fontWeight: 700,
+      cursor: "pointer",
+      boxShadow: "0 4px 12px #33415540"
+    }
+  }, "{ } 동별 인원 JSON"), /*#__PURE__*/React.createElement("button", {
     onClick: doExportWansu,
     title: "완수일 5일 전을 목표일로 (토·일·공휴일이면 앞 평일로 당김)",
     style: {
