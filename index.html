@@ -66,6 +66,18 @@ const isOwnerEmail = e => !!OWNER_EMAIL && String(e || "").trim().toLowerCase() 
    Firebase 는 배열을 {0:…,1:…} 객체로 돌려주므로 어디서든 이걸 거쳐 배열로 만든다. */
 const toArr = v => Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v) : [];
 
+/* 지역 → 학교명 순 — 같은 지역이 연속해서 나오게 (캘린더 칩·날짜 상세 공용) */
+const byRegionThenName = (a, b) => {
+  const ra = String(a.region || "").trim(),
+    rb = String(b.region || "").trim();
+  if (ra !== rb) {
+    if (!ra) return 1; /* 지역 없는 건 맨 뒤 */
+    if (!rb) return -1;
+    return ra.localeCompare(rb, "ko");
+  }
+  return String(a.school || "").localeCompare(String(b.school || ""), "ko");
+};
+
 /* ── 색상 시스템 ── */
 const C = {
   bg: "#F0F2F5",
@@ -3894,10 +3906,11 @@ function DayPanel({
     return [...m.values()];
   };
   /* 조사가 며칠에 걸치면 그 기간의 모든 날에 나타난다 */
-  const fieldSchools = showK("field") ? dedup(allSchools.filter(s => surveyDates(s).includes(dateStr))) : [];
-  const startSchools = showK("start") ? dedup(allSchools.filter(s => s.start === dateStr)) : [];
-  const endSchools = showK("end") ? dedup(allSchools.filter(s => s.end === dateStr)) : [];
-  const deliverSchools = showK("deliverDate") ? dedup(allSchools.filter(s => s.deliverDate === dateStr)) : [];
+  /* 지역별로 묶어 보이게 — 같은 지역이 연속해서 나온다 */
+  const fieldSchools = showK("field") ? dedup(allSchools.filter(s => surveyDates(s).includes(dateStr))).sort(byRegionThenName) : [];
+  const startSchools = showK("start") ? dedup(allSchools.filter(s => s.start === dateStr)).sort(byRegionThenName) : [];
+  const endSchools = showK("end") ? dedup(allSchools.filter(s => s.end === dateStr)).sort(byRegionThenName) : [];
+  const deliverSchools = showK("deliverDate") ? dedup(allSchools.filter(s => s.deliverDate === dateStr)).sort(byRegionThenName) : [];
   const total = fieldSchools.length + startSchools.length + endSchools.length + deliverSchools.length;
   const isDraft = !!(draft && draft.id === editId);
   const editSc = isDraft ? draft : editId ? allSchools.find(s => s.id === editId) : null;
@@ -4988,7 +5001,10 @@ const buildingsOnDate = (s, ds) => {
 };
 const isMultiSurvey = s => schoolSurveyDates(s).length > 1;
 /* 일정 확정 여부 — 값이 없으면 '확정'으로 본다 (예전 데이터가 그대로 보이도록) */
-const isTentative = s => !!(s && s.tentative);
+/* 예정/확정 구분은 2026-11-02 부로 없앴다 — 전부 확정으로 본다.
+   옛 데이터의 tentative 값은 남아 있어도 무시한다. */
+const isTentative = s => false;
+
 /* 그 날 실제로 가는 인원 — 날짜별로 정해둔 게 있으면 그것, 없으면 기본 인원 */
 /* ── 동별 배정 ──
    s.bldWho = { "<동이름>": ["한상오"], "__협의": ["한의영"] }
@@ -5014,7 +5030,8 @@ function BldAssign({
   const [open, setOpen] = useState(false);
   const [openRow, setOpenRow] = useState(null);
   const bs = buildingsOnDate(s, dateStr);
-  if (!assignees.length || bs.length < 2) return null;
+  /* 동이 2개 이상이거나, 동은 하나여도 인원이 2명 이상이면(협의만 가는 사람 표시) 나온다 */
+  if (!assignees.length || !bs.length || bs.length < 2 && assignees.length < 2) return null;
   const rows = [...bs.map(b => ({
     key: b.b,
     label: b.b,
@@ -5734,7 +5751,8 @@ function Calendar({
       start: 1,
       end: 2
     };
-    Object.values(map).forEach(a => a.sort((x, y2) => ord[x.field] - ord[y2.field]));
+    /* 종류(조사→착수→완수) 먼저, 그 안에서 지역 → 학교명 */
+    Object.values(map).forEach(a => a.sort((x, y2) => ord[x.field] - ord[y2.field] || byRegionThenName(x, y2)));
     return map;
   }, [allSchools]);
 
@@ -5939,22 +5957,7 @@ function Calendar({
         background: on ? c : C.borderD
       }
     }), lab);
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOnlyTent(v => !v),
-    title: "아직 확정되지 않은 일정만 보기",
-    style: {
-      flexShrink: 0,
-      padding: "11px 13px",
-      borderRadius: 9,
-      cursor: "pointer",
-      border: `1.5px solid ${onlyTent ? C.orange : C.border}`,
-      background: onlyTent ? C.orange + "18" : C.surface,
-      color: onlyTent ? C.orange : C.t4,
-      fontSize: 15,
-      fontWeight: onlyTent ? 800 : 600,
-      whiteSpace: "nowrap"
-    }
-  }, "◌ 예정만"));
+  }));
 
   /* ── 월 보기 ── */
   const monthGrid = () => {
@@ -7438,45 +7441,6 @@ function EditPanel({
       marginTop: -1
     }
   }, "신규는 보고서 작성에 시간이 더 듭니다"), /*#__PURE__*/React.createElement("label", {
-    style: {
-      fontSize: 12,
-      color: C.t3,
-      fontWeight: 700,
-      marginTop: 6
-    }
-  }, "일정 상태"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6
-    }
-  }, [[true, "◌ 예정", C.orange], [false, "● 확정", C.green]].map(([v, lab, col]) => {
-    const on = !!f.tentative === v;
-    return /*#__PURE__*/React.createElement("button", {
-      key: lab,
-      onClick: () => setF(p => ({
-        ...p,
-        tentative: v
-      })),
-      style: {
-        flex: 1,
-        padding: "10px 6px",
-        borderRadius: 8,
-        fontSize: 14,
-        fontWeight: on ? 800 : 600,
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        border: `1.5px solid ${on ? col : C.border}`,
-        background: on ? col + "18" : "transparent",
-        color: on ? col : C.t3
-      }
-    }, on ? "✓ " : "", lab);
-  })), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: C.t4,
-      marginTop: -1
-    }
-  }, f.tentative ? "달력에 빗금과 ? 로 표시됩니다" : "날짜가 아직 조율 중이면 예정으로 두세요"), /*#__PURE__*/React.createElement("label", {
     style: {
       fontSize: 12,
       color: C.t3,
@@ -10610,8 +10574,7 @@ function ExportImportPage({
               start: "",
               deliverDate: "",
               end: "",
-              /* 일정이 아직 안 잡힌 상태이므로 예정으로 시작한다 */
-              tentative: true,
+              tentative: false,
               buildings: (s.buildings || []).map(b => ({
                 ...b,
                 rep: false,
@@ -11515,7 +11478,7 @@ function siteFromSheetRow(r, flowSteps, yr, half) {
     assignees: [],
     /* 신규 여부는 시트 A열의 "신규" 로 정한다 */
     isNew: !!r.isNew,
-    tentative: true,
+    tentative: false,
     progress: {},
     flow: flowSteps || {},
     buildings: blds.length ? blds : [{
