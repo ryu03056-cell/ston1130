@@ -178,6 +178,9 @@ const BKINDS = [{
 }];
 const bkindColor = v => (BKINDS.find(x => x.v === v) || BKINDS[0]).color;
 /* 학교 단위 kind 문자열에서 동별 기본값을 뽑는다 (기존 데이터 이관용) */
+/* 시트 예시 칸("ex) 0825 김도경" · "예) …")은 안 한 것으로 본다 */
+const isExampleVal = v => typeof v === "string" && /^\s*(ex\)|예\)|예시)/i.test(v);
+
 /* ── 납품 ──
    우편 납품 담당: 이 이름들이 납품했으면 우편, 그 외(박두환·한상오·한의영·채승준·이동현 등)는 직납 */
 const MAIL_DELIVERERS = ["함예린", "김유빈", "김도경"];
@@ -186,27 +189,15 @@ const MAIL_DELIVERERS = ["함예린", "김유빈", "김도경"];
    시트 납품유무·납품방법·납품일 을 합쳐 하나로 정리한다.
    → { done, way: "우편"|"직납"|"", by, date } */
 const parseDelivery = (r, flowSteps) => {
-  /* 납품 판정 규칙 (2026-09 정정)
-     · 완료 = 실제 기록이 있을 때만: 시트 납품유무 "완료" / 납품 칸 체크 / 납품 칸에 "0917함예린" 같은 기록(날짜가 오늘 이후면 아직 예정)
-     · "ex) 0825 김도경" 은 시트 예시 문구 — 기록이 아니다
-     · 납품방법(우편/직납)은 시트 '납품방법' 열에 적힌 것만 쓴다. 사람 이름으로 추측하지 않는다 */
-  const rawV = flowSteps ? flowSteps["납품"] : null;
-  const src = rawV === true ? "true" : String(rawV == null ? "" : rawV).trim();
-  const isExample = /^ex\)/i.test(src);
-  const checked = !isExample && /^true$/i.test(src);
-  let raw = isExample ? "" : src;
-  if (/^(false|true)$/i.test(raw)) raw = ""; /* 체크박스 값은 이름이 아니다 */
+  let raw = String(flowSteps && flowSteps["납품"] || "").trim();
+  if (/^(false|true)$/i.test(raw) || isExampleVal(raw)) raw = ""; /* 체크박스 값·예시값은 이름이 아니다 */
   const m = raw.match(/(\d{2})(\d{2})\s*(.*)$/);
-  const okMD = !!m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31;
-  const recDate = okMD ? `${SHEET_YEAR}-${m[1]}-${m[2]}` : "";
   const by = m ? m[3].trim() : raw.replace(/[\d\s]/g, "");
   let date = r.deliver || "";
-  if (!date && recDate) date = recDate;
+  if (!date && m) date = `${SHEET_YEAR}-${m[1]}-${m[2]}`;
   const sheetWay = String(r.deliverW || "").trim();
-  const way = sheetWay ? /우편/.test(sheetWay) ? "우편" : /직/.test(sheetWay) ? "직납" : sheetWay : "";
-  const today = dstr(new Date());
-  const recorded = checked || !!raw && (!recDate || recDate <= today);
-  const done = /완료/.test(String(r.deliverY || "")) || recorded;
+  const way = sheetWay ? /우편/.test(sheetWay) ? "우편" : /직/.test(sheetWay) ? "직납" : sheetWay : by ? MAIL_DELIVERERS.some(n => by.includes(n)) ? "우편" : "직납" : "";
+  const done = /완료/.test(String(r.deliverY || "")) || !!raw && raw !== "false";
   return {
     done,
     way,
@@ -226,7 +217,7 @@ const deliveryOf = s => {
     date: "",
     label: "납품 미정"
   };
-  if (s.deliverDone) { /* 실제 납품 기록이 있을 때만 완료 (방법만 적어둔 건 예정) */
+  if (s.deliverDone || s.deliverBy || s.deliverWay) {
     const way = s.deliverWay || "";
     const md = s.deliverDate ? s.deliverDate.slice(5).replace(/^0/, "").replace("-", "/").replace(/\/0/, "/") : "";
     return {
@@ -237,14 +228,14 @@ const deliveryOf = s => {
       label: [way || "납품", md, s.deliverBy].filter(Boolean).join(" ")
     };
   }
-  if (s.deliverDate || s.deliverWay) {
-    const md = s.deliverDate ? s.deliverDate.slice(5).replace(/^0/, "").replace("-", "/").replace(/\/0/, "/") : "";
+  if (s.deliverDate) {
+    const md = s.deliverDate.slice(5).replace(/^0/, "").replace("-", "/").replace(/\/0/, "/");
     return {
       state: "예정",
-      way: s.deliverWay || "",
+      way: "",
       by: "",
-      date: s.deliverDate || "",
-      label: `${s.deliverWay || "납품"} 예정${md ? " " + md : ""}`
+      date: s.deliverDate,
+      label: `납품 예정 ${md}`
     };
   }
   const bs = toArr(s.buildings).filter(Boolean);
@@ -447,10 +438,6 @@ function mergeSites(a, b) {
     fieldWho: {
       ...(other.fieldWho || {}),
       ...(base.fieldWho || {})
-    },
-    bldWho: {
-      ...(other.bldWho || {}),
-      ...(base.bldWho || {})
     },
     deliverDate: pick("deliverDate") || "",
     isNew: !!(base.isNew || other.isNew),
@@ -3058,422 +3045,6 @@ function buildNotesSheet(entries) {
 }
 
 /* 현장일정 시트 — 학교별 현장조사·착수·완수일 + 담당자, 일정 순 정렬. entries:[{yr,half,schools}] */
-/* ── 인원 배치 엑셀 (기존 내보내기와 완전히 분리된 별도 기능) ──
-   어느 날 누가 어느 현장에 나갔는지를 세 장으로 뽑는다.
-   기존 buildSheet / buildScheduleSheet 등에는 손대지 않는다. */
-const CREW_DOW = ["일", "월", "화", "수", "목", "금", "토"];
-function crewDow(ds) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ds || "");
-  if (!m) return "";
-  return CREW_DOW[new Date(+m[1], +m[2] - 1, +m[3]).getDay()];
-}
-/* 한 줄 = 그 날 · 그 현장 · 그 사람 하나 */
-function crewRecords(entries) {
-  const out = [];
-  (entries || []).forEach(({ yr, half, schools }) => {
-    (schools || []).filter(s => s && !s.deleted).forEach(s => {
-      surveyDates(s).forEach(ds => {
-        const who = sortMembers(whoOnDate(s, ds));
-        if (!who.length) return;
-        const bs = buildingsOnDate(s, ds);
-        const kinds = [];
-        bs.forEach(b => {
-          const k = b && b.kind;
-          if (k && !kinds.includes(k)) kinds.push(k);
-        });
-        who.forEach(name => {
-          const mine = bs.filter(b => bldWhoOf(s, b.b).includes(name)).map(b => b.b);
-          out.push({
-            yr, half, ds,
-            dow: crewDow(ds),
-            region: s.region || "",
-            school: s.school || "",
-            kind: kinds.join(", "),
-            bcount: bs.length,
-            name,
-            duty: mine.length ? mine.join(", ") : bs.length > 1 ? "전체" : (bs[0] && bs[0].b) || "",
-            tentative: s.tentative ? "예정" : "확정",
-            crew: who.join(", "),
-            crewN: who.length
-          });
-        });
-      });
-    });
-  });
-  return out.sort((a, b) => a.ds.localeCompare(b.ds) || a.school.localeCompare(b.school) || byRank(a.name, b.name));
-}
-function crewSheetByDate(recs) {
-  const seen = new Map();
-  recs.forEach(r => {
-    const k = r.ds + "|" + r.school;
-    if (!seen.has(k)) seen.set(k, r);
-  });
-  const rows = [["날짜", "요일", "지역", "학교명", "점검종류", "동수", "인원수", "인원", "확정"]];
-  [...seen.values()].forEach(r => rows.push([r.ds, r.dow, r.region, r.school, r.kind, r.bcount, r.crewN, r.crew, r.tentative]));
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 12 }, { wch: 5 }, { wch: 9 }, { wch: 26 }, { wch: 16 }, { wch: 6 }, { wch: 7 }, { wch: 34 }, { wch: 7 }];
-  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
-  return ws;
-}
-/* 동별 담당 — 한 줄 = 그날 · 그 현장 · 그 동 하나 */
-function crewBldRecords(entries) {
-  const out = [];
-  (entries || []).forEach(({ schools }) => {
-    (schools || []).filter(s => s && !s.deleted).forEach(s => {
-      surveyDates(s).forEach(ds => {
-        const who = sortMembers(whoOnDate(s, ds));
-        if (!who.length) return;
-        const bs = buildingsOnDate(s, ds);
-        bs.forEach(b => {
-          const own = sortMembers(bldWhoOf(s, b.b));
-          out.push({
-            ds, dow: crewDow(ds),
-            region: s.region || "",
-            school: s.school || "",
-            bld: b.b || "",
-            size: (typeof bldSize === "function" ? bldSize(b) : "") || "",
-            kind: b.kind || "",
-            who: own.length ? own.join(", ") : who.join(", "),
-            how: own.length ? "동 담당" : "전체",
-            tentative: s.tentative ? "예정" : "확정"
-          });
-        });
-        /* 협의 담당도 한 줄로 남긴다 */
-        const con = sortMembers(consultOf(s));
-        if (con.length) out.push({
-          ds, dow: crewDow(ds),
-          region: s.region || "",
-          school: s.school || "",
-          bld: "협의", size: "", kind: "",
-          who: con.join(", "), how: "협의",
-          tentative: s.tentative ? "예정" : "확정"
-        });
-      });
-    });
-  });
-  return out.sort((a, b) => a.ds.localeCompare(b.ds) || a.school.localeCompare(b.school) || a.bld.localeCompare(b.bld));
-}
-function crewSheetByBuilding(rows) {
-  const aoa = [["날짜", "요일", "지역", "학교명", "동", "규모", "점검종류", "담당", "배정", "확정"]];
-  rows.forEach(r => aoa.push([r.ds, r.dow, r.region, r.school, r.bld, r.size, r.kind, r.who, r.how, r.tentative]));
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 12 }, { wch: 5 }, { wch: 9 }, { wch: 26 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 9 }, { wch: 7 }];
-  return ws;
-}
-
-function crewSheetByPerson(recs) {
-  const rows = [["인원", "날짜", "요일", "지역", "학교명", "담당 동", "확정"]];
-  recs.slice().sort((a, b) => byRank(a.name, b.name) || a.ds.localeCompare(b.ds) || a.school.localeCompare(b.school)).forEach(r => rows.push([r.name, r.ds, r.dow, r.region, r.school, r.duty, r.tentative]));
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 5 }, { wch: 9 }, { wch: 26 }, { wch: 24 }, { wch: 7 }];
-  return ws;
-}
-function crewSheetSummary(recs) {
-  const months = [];
-  recs.forEach(r => {
-    const m = r.ds.slice(0, 7);
-    if (m && !months.includes(m)) months.push(m);
-  });
-  months.sort();
-  const per = new Map();
-  recs.forEach(r => {
-    if (!per.has(r.name)) per.set(r.name, { days: new Set(), visits: 0, mon: {} });
-    const p = per.get(r.name);
-    p.days.add(r.ds);
-    p.visits++;
-    const m = r.ds.slice(0, 7);
-    if (!p.mon[m]) p.mon[m] = new Set();
-    p.mon[m].add(r.ds);
-  });
-  const rows = [["인원", "출장 일수", "현장 방문 건수", ...months.map(m => `${+m.slice(5)}월`)]];
-  [...per.keys()].sort(byRank).forEach(n => {
-    const p = per.get(n);
-    rows.push([n, p.days.size, p.visits, ...months.map(m => p.mon[m] ? p.mon[m].size : 0)]);
-  });
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 10 }, { wch: 10 }, { wch: 14 }, ...months.map(() => ({ wch: 7 }))];
-  return ws;
-}
-
-/* ── 동별 점검 인원 JSON (기존 내보내기와 완전히 분리된 별도 기능) ──
-   현장 하나 = 학교 하나, 그 안에 동별로 누가 점검했는지.
-   동 담당을 정했으면 그 사람들, 안 정했으면 그날 간 인원 전체(assigned:false). */
-function crewJsonData(entries, range) {
-  /* range = { from, to } 이면 그 기간 조사일만 (주별·월별), 없으면 전체 */
-  const inMonth = ds => !range || String(ds) >= range.from && String(ds) <= range.to;
-  const sites = [];
-  (entries || []).forEach(({ yr, half, schools }) => {
-    (schools || []).filter(s => s && !s.deleted).forEach(s => {
-      const dates = [];
-      const crewAll = new Set();
-      const bmap = new Map();
-      surveyDates(s).filter(inMonth).forEach(ds => {
-        const who = sortMembers(whoOnDate(s, ds));
-        if (!who.length) return;
-        dates.push({ date: ds, dow: crewDow(ds), crew: who });
-        who.forEach(n => crewAll.add(n));
-        buildingsOnDate(s, ds).forEach(b => {
-          const key = b.b || "";
-          if (!bmap.has(key)) {
-            const own = sortMembers(bldWhoOf(s, key));
-            bmap.set(key, {
-              name: key,
-              category: bldCat(b),
-              kind: b.kind || "",
-              size: (typeof bldSize === "function" ? bldSize(b) : "") || "",
-              dates: [],
-              assigned: own.length > 0,
-              inspectors: own.slice(),
-              _day: new Set()
-            });
-          }
-          const e = bmap.get(key);
-          if (!e.dates.includes(ds)) e.dates.push(ds);
-          if (!e.assigned) who.forEach(n => e._day.add(n));
-        });
-      });
-      if (!dates.length) return;
-      const buildings = [...bmap.values()].map(e => {
-        const { _day, ...rest } = e;
-        if (!rest.assigned) rest.inspectors = sortMembers([..._day]);
-        return rest;
-      });
-      sites.push({
-        year: yr,
-        half,
-        no: String(s.no || "").trim(),
-        region: s.region || "",
-        school: s.school || "",
-        status: s.tentative ? "예정" : "확정",
-        surveyDates: dates,
-        crew: sortMembers([...crewAll]),
-        consult: sortMembers(consultOf(s)),
-        buildings
-      });
-    });
-  });
-  sites.sort((a, b) => (a.surveyDates[0].date || "").localeCompare(b.surveyDates[0].date || "") || a.school.localeCompare(b.school));
-  return {
-    exportedAt: new Date().toISOString(),
-    exportedBy: typeof CURRENT_USER !== "undefined" && (CURRENT_USER.name || CURRENT_USER.email) || "",
-    note: "buildings[].assigned=true 면 동 담당으로 정한 인원, false 면 그날 현장에 간 인원 전체",
-    siteCount: sites.length,
-    period: range ? { from: range.from, to: range.to, label: range.label || "" } : "전체",
-    sites
-  };
-}
-/* 기간 선택값 → { from, to, label } . "w:2026-10-05" = 그 월요일부터 일요일까지, "m:2026-10" = 그 달 */
-function crewJsonRange(v) {
-  if (!v || v === "all") return null;
-  if (v.startsWith("w:")) {
-    const mon = v.slice(2);
-    const sun = dstr(addDays(parseD(mon), 6));
-    return { from: mon, to: sun, label: `${mon} ~ ${sun}`, file: `${mon}_주간` };
-  }
-  if (v.startsWith("m:")) {
-    const ym = v.slice(2);
-    const last = new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate();
-    return { from: `${ym}-01`, to: `${ym}-${String(last).padStart(2, "0")}`, label: `${+ym.slice(0, 4)}년 ${+ym.slice(5, 7)}월`, file: `${ym}_월간` };
-  }
-  return null;
-}
-const crewWeekMon = ds => {
-  const d = parseD(ds);
-  return dstr(addDays(d, -((d.getDay() + 6) % 7)));
-};
-function downloadJson(obj, filename) {
-  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-    a.remove();
-  }, 1000);
-}
-
-/* ── 완수용 캘린더 엑셀 (기존 내보내기와 완전히 분리된 별도 기능) ──
-   목표일 = 완수일 − 5일. 그 날이 토·일·공휴일이면 평일이 나올 때까지 하루씩 앞당긴다.
-   기존 buildSheet / buildCalendarSheet 등에는 손대지 않는다. */
-/* 공휴일 (대체공휴일 포함) — 해가 바뀌면 여기 한 덩어리만 추가하면 된다.
-   2026년부터 노동절(5/1)·제헌절(7/17) 공휴일 지정 반영 */
-const WANSU_HOLIDAYS = {
-  "2025-01-01": "신정", "2025-01-27": "임시공휴일", "2025-01-28": "설날", "2025-01-29": "설날", "2025-01-30": "설날",
-  "2025-03-01": "삼일절", "2025-03-03": "대체공휴일", "2025-05-05": "어린이날", "2025-05-06": "대체공휴일",
-  "2025-06-03": "대통령선거", "2025-06-06": "현충일", "2025-08-15": "광복절", "2025-10-03": "개천절",
-  "2025-10-05": "추석", "2025-10-06": "추석", "2025-10-07": "추석", "2025-10-08": "대체공휴일",
-  "2025-10-09": "한글날", "2025-12-25": "성탄절",
-  "2026-01-01": "신정", "2026-02-16": "설날", "2026-02-17": "설날", "2026-02-18": "설날",
-  "2026-03-01": "삼일절", "2026-03-02": "대체공휴일", "2026-05-01": "노동절", "2026-05-05": "어린이날",
-  "2026-05-24": "부처님오신날", "2026-05-25": "대체공휴일", "2026-06-03": "지방선거", "2026-06-06": "현충일",
-  "2026-07-17": "제헌절", "2026-08-15": "광복절", "2026-08-17": "대체공휴일",
-  "2026-09-24": "추석", "2026-09-25": "추석", "2026-09-26": "추석",
-  "2026-10-03": "개천절", "2026-10-05": "대체공휴일", "2026-10-09": "한글날", "2026-12-25": "성탄절",
-  "2027-01-01": "신정", "2027-02-06": "설날", "2027-02-07": "설날", "2027-02-08": "설날", "2027-02-09": "대체공휴일",
-  "2027-03-01": "삼일절", "2027-05-01": "노동절", "2027-05-03": "대체공휴일", "2027-05-05": "어린이날",
-  "2027-05-13": "부처님오신날", "2027-06-06": "현충일", "2027-07-17": "제헌절", "2027-07-19": "대체공휴일",
-  "2027-08-15": "광복절", "2027-08-16": "대체공휴일", "2027-09-14": "추석", "2027-09-15": "추석", "2027-09-16": "추석",
-  "2027-10-03": "개천절", "2027-10-04": "대체공휴일", "2027-10-09": "한글날", "2027-10-11": "대체공휴일",
-  "2027-12-25": "성탄절", "2027-12-27": "대체공휴일"
-};
-const WANSU_HOLI_YEARS = ["2025", "2026", "2027"];
-/* 목록에 없는 해는 날짜가 고정된 공휴일만이라도 본다 (설·추석·대체공휴일은 빠짐) */
-const WANSU_FIXED = { "01-01": "신정", "03-01": "삼일절", "05-01": "노동절", "05-05": "어린이날", "06-06": "현충일", "07-17": "제헌절", "08-15": "광복절", "10-03": "개천절", "10-09": "한글날", "12-25": "성탄절" };
-const wansuHoliday = ds => WANSU_HOLIDAYS[ds] || (!WANSU_HOLI_YEARS.includes(ds.slice(0, 4)) && WANSU_FIXED[ds.slice(5)]) || "";
-const WANSU_DOW = ["일", "월", "화", "수", "목", "금", "토"];
-const wansuDow = ds => WANSU_DOW[parseD(ds).getDay()];
-const wansuMD = ds => `${+ds.slice(5, 7)}/${+ds.slice(8, 10)}`;
-/* 목표일 계산 — { date, note } . note 는 당겼을 때만 */
-function wansuTarget(end) {
-  const first = dstr(addDays(parseD(end), -5));
-  let d = first;
-  const why = [];
-  let guard = 0;
-  while (guard++ < 20) {
-    const dw = parseD(d).getDay();
-    const h = wansuHoliday(d);
-    if (h) why.push(`${wansuMD(d)} ${h}`);
-    else if (dw === 0 || dw === 6) why.push(`${wansuMD(d)} ${WANSU_DOW[dw]}요일`);
-    else break;
-    d = dstr(addDays(parseD(d), -1));
-  }
-  return { date: d, first, note: why.length ? `${why.join(" · ")} → ${wansuMD(d)}(${wansuDow(d)})` : "" };
-}
-/* 완수 안 된 현장만 · 같은 현장이 두 반기에 있으면 한 번만 */
-function wansuRecords(entries) {
-  const out = [];
-  const seen = new Set();
-  (entries || []).forEach(({ schools }) => (schools || []).forEach(s => {
-    if (!s || s.deleted || !/^\d{4}-\d{2}-\d{2}$/.test(String(s.end || ""))) return;
-    if (typeof siteDone === "function" && siteDone(s)) return;
-    const nm = (s.school || "").trim();
-    /* 같은 학교라도 시트에서 줄(No.)이 다르면 따로 계약된 별개 현장 → 둘 다 남긴다 */
-    const k = `${s.region || ""}|${nm}|${String(s.no || "").trim()}|${s.end}`;
-    if (seen.has(k)) return;
-    seen.add(k);
-    const t = wansuTarget(s.end);
-    const cc = catCounts(s);
-    const cat = [cc.건축 ? `건축${cc.건축}` : "", cc.토목종 ? `토목${cc.토목종}` : "", cc.토목소 ? `소규모${cc.토목소}` : ""].filter(Boolean).join("·");
-    out.push({ s, school: nm, region: s.region || "", end: s.end, no: String(s.no || "").trim(), cat, target: t.date, first: t.first, note: t.note, moved: !!t.note,
-      who: sortMembers(toArr(s.assignees).filter(Boolean)).join(", ") });
-  }));
-  /* 같은 이름이 두 번 이상이면 달력에서 구분되게 No.·구분을 붙인다 */
-  const cnt = {};
-  out.forEach(r => { cnt[r.school] = (cnt[r.school] || 0) + 1; });
-  out.forEach(r => {
-    r.label = cnt[r.school] > 1 ? `${r.school} [${[r.no ? `No.${r.no}` : "", r.cat].filter(Boolean).join(" ")}]` : r.school;
-  });
-  return out.sort((a, b) => a.target.localeCompare(b.target) || a.school.localeCompare(b.school) || (+a.no || 0) - (+b.no || 0));
-}
-const WX = {
-  bd: { top: { style: "thin", color: { rgb: "FF000000" } }, bottom: { style: "thin", color: { rgb: "FF000000" } }, left: { style: "thin", color: { rgb: "FF000000" } }, right: { style: "thin", color: { rgb: "FF000000" } } },
-  fill: rgb => ({ patternType: "solid", fgColor: { rgb } }),
-  head: "FFD9D9D9", item: "FFEBF3FF", moved: "FFFFF2CC", wk: "FFF2F2F2", sat: "FF0070C0", sun: "FFFF0000"
-};
-function wansuListSheet(recs) {
-  const today = dstr(new Date());
-  const rows = [["목표일", "요일", "No.", "지역", "학교명", "구분", "완수일", "요일", "목표까지", "인원", "당김 사유"]];
-  recs.forEach(r => {
-    const dd = Math.round((parseD(r.target) - parseD(today)) / 86400000);
-    rows.push([r.target, wansuDow(r.target), r.no, r.region, r.school, r.cat, r.end, wansuDow(r.end), dd === 0 ? "오늘" : dd > 0 ? `D-${dd}` : `${-dd}일 지남`, r.who, r.note]);
-  });
-  const late = recs.some(r => !WANSU_HOLI_YEARS.includes(r.target.slice(0, 4)));
-  if (late) rows.push([], ["※ " + WANSU_HOLI_YEARS[WANSU_HOLI_YEARS.length - 1] + "년 이후는 설·추석·대체공휴일이 목록에 없어 날짜가 고정된 공휴일만 피했습니다."]);
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 12 }, { wch: 5 }, { wch: 6 }, { wch: 8 }, { wch: 26 }, { wch: 12 }, { wch: 12 }, { wch: 5 }, { wch: 10 }, { wch: 22 }, { wch: 40 }];
-  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
-  const range = XLSX.utils.decode_range(ws["!ref"]);
-  for (let c = 0; c <= 10; c++) {
-    const a = XLSX.utils.encode_cell({ r: 0, c });
-    if (ws[a]) ws[a].s = { font: { bold: true }, fill: WX.fill(WX.head), border: WX.bd, alignment: { horizontal: "center" } };
-  }
-  recs.forEach((r, i) => {
-    for (let c = 0; c <= 10; c++) {
-      const a = XLSX.utils.encode_cell({ r: i + 1, c });
-      if (!ws[a]) ws[a] = { t: "s", v: "" };
-      ws[a].s = { border: WX.bd, fill: r.moved ? WX.fill(WX.moved) : undefined, alignment: { vertical: "center", horizontal: c === 4 || c === 9 || c === 10 ? "left" : "center" } };
-    }
-  });
-  void range;
-  return ws;
-}
-/* 한 달 달력 — 월요일 시작. 한 주 = 날짜 줄 + 내용 줄 */
-function wansuCalSheet(recs, y, m) {
-  const by = {};
-  recs.forEach(r => (by[r.target] = by[r.target] || []).push(r));
-  const first = new Date(y, m - 1, 1, 12);
-  const start = addDays(first, -((first.getDay() + 6) % 7));
-  const aoa = [], st = {}, rowH = [];
-  const S = (r, c, s) => { st[`${r}_${c}`] = s; };
-  aoa.push([`${y}년 ${m}월 완수 목표일`, "", "", "", "", "", ""]);
-  S(0, 0, { font: { bold: true, sz: 14 } });
-  rowH.push({ hpt: 24 });
-  aoa.push(["목표일 = 완수일 − 5일 · 토·일·공휴일이면 앞 평일로 당김 · 노란 칸 = 당긴 날 (↩)", "", "", "", "", "", ""]);
-  S(1, 0, { font: { sz: 9, color: { rgb: "FF595959" } } });
-  rowH.push({ hpt: 16 });
-  const hdr = ["월", "화", "수", "목", "금", "토", "일"];
-  aoa.push(hdr);
-  hdr.forEach((h, c) => S(2, c, { font: { bold: true, color: { rgb: c === 5 ? WX.sat : c === 6 ? WX.sun : "FF000000" } }, fill: WX.fill(WX.head), border: WX.bd, alignment: { horizontal: "center" } }));
-  rowH.push({ hpt: 18 });
-  for (let w = 0; w < 6; w++) {
-    const days = [...Array(7)].map((_, i) => addDays(start, w * 7 + i));
-    if (w > 0 && days[0].getMonth() !== m - 1) break;
-    /* 한 칸에 몰아넣으면 행 높이 한도(409)를 넘어서, 학교 하나 = 한 줄로 아래로 늘린다 */
-    const dRow = aoa.length;
-    const dr = [];
-    const cols = days.map((d, c) => {
-      const ds = dstr(d);
-      const inMonth = d.getMonth() === m - 1;
-      const h = wansuHoliday(ds);
-      dr.push(`${inMonth ? d.getDate() : `${d.getMonth() + 1}/${d.getDate()}`}${h ? ` ${h}` : ""}${inMonth && (by[ds] || []).length > 1 ? `  (${by[ds].length}곳)` : ""}`);
-      const red = h || c === 6, blue = !h && c === 5;
-      S(dRow, c, { font: { bold: true, color: { rgb: !inMonth ? "FFBFBFBF" : red ? WX.sun : blue ? WX.sat : "FF000000" } }, fill: WX.fill(WX.head), border: WX.bd, alignment: { horizontal: "left" } });
-      return { items: inMonth ? by[ds] || [] : [], off: c >= 5 || !!h };
-    });
-    aoa.push(dr);
-    rowH.push({ hpt: 16 });
-    const n = Math.max(3, ...cols.map(x => x.items.length));
-    for (let i = 0; i < n; i++) {
-      const r = aoa.length;
-      const last = i === n - 1;
-      aoa.push(cols.map((x, c) => {
-        const it = x.items[i];
-        const side = { left: WX.bd.left, right: WX.bd.right, top: { style: "hair", color: { rgb: "FFBFBFBF" } }, bottom: last ? WX.bd.bottom : { style: "hair", color: { rgb: "FFBFBFBF" } } };
-        S(r, c, { font: { sz: 10 }, border: side, alignment: { vertical: "center" },
-          fill: it ? WX.fill(it.moved ? WX.moved : WX.item) : x.off ? WX.fill(WX.wk) : undefined });
-        return it ? `${it.moved ? "↩ " : ""}${it.label} (완수 ${wansuMD(it.end)})` : "";
-      }));
-      rowH.push({ hpt: 16 });
-    }
-  }
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  Object.entries(st).forEach(([k, s]) => {
-    const [r, c] = k.split("_").map(Number);
-    const a = XLSX.utils.encode_cell({ r, c });
-    if (!ws[a]) ws[a] = { t: "s", v: "" };
-    ws[a].s = s;
-  });
-  ws["!cols"] = [...Array(7)].map(() => ({ wch: 20 }));
-  ws["!rows"] = rowH;
-  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } }];
-  return ws;
-}
-function buildWansuWorkbook(entries) {
-  const recs = wansuRecords(entries);
-  if (!recs.length) return null;
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, wansuListSheet(recs), "완수목표 목록");
-  const months = [...new Set(recs.map(r => r.target.slice(0, 7)))].sort();
-  months.forEach(ym => {
-    const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
-    XLSX.utils.book_append_sheet(wb, wansuCalSheet(recs, y, m), `${String(y).slice(2)}.${m}월 완수`);
-  });
-  return wb;
-}
-
 function buildScheduleSheet(entries) {
   const multi = entries.length > 1;
   const today = new Date();
@@ -4444,10 +4015,7 @@ function DayPanel({
         const cur = bldWhoOf(s, bname);
         const upd = sortMembers(cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name]);
         const bw = { ...(s.bldWho || {}) };
-        const bk = fbKey(bname); /* 저장도 찾기와 같은 열쇠로 */
-        delete bw[bname];
-        delete bw[bk];
-        if (upd.length) bw[bk] = upd;
+        if (upd.length) bw[bname] = upd; else delete bw[bname];
         return stampEdit({ ...s, bldWho: bw }, `${bname === CONSULT_KEY ? "협의" : bname} · ${name} ${had ? "제외" : "배정"}`);
       });
       return next;
@@ -4491,7 +4059,7 @@ function DayPanel({
       fontSize: 12,
       color: C.t3
     }
-  }, s.region), TelBtn({
+  }, s.region), /*#__PURE__*/React.createElement(TelBtn, {
     tel: siteTel(s)
   }), /*#__PURE__*/React.createElement("button", {
     onClick: e => {
@@ -4551,7 +4119,7 @@ function DayPanel({
         borderLeft: `3px solid ${C.blue}`,
         marginBottom: 6
       }
-    }, CardHead({
+    }, /*#__PURE__*/React.createElement(CardHead, {
       s: s
     }), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4691,7 +4259,7 @@ function DayPanel({
       assignees: assignees,
       dateStr: dateStr,
       onToggle: toggleBldWho
-    }), EditLine({
+    }), /*#__PURE__*/React.createElement(EditLine, {
       s: s
     }), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4755,14 +4323,14 @@ function DayPanel({
       borderLeft: `3px solid ${C.green}`,
       marginBottom: 6
     }
-  }, CardHead({
+  }, /*#__PURE__*/React.createElement(CardHead, {
     s: s
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: C.t2
     }
-  }, "▶ 용역 착수 · ", s.buildings.length, "동 · 완수 ", fd(s.end), " (", ddL(calcDday(s.end)), ")"), EditLine({
+  }, "▶ 용역 착수 · ", s.buildings.length, "동 · 완수 ", fd(s.end), " (", ddL(calcDday(s.end)), ")"), /*#__PURE__*/React.createElement(EditLine, {
     s: s
   })), [allSchools, setDb, dateStr, pickerId, isMobile, isAdmin, editor]);
   const EndCard = React.useCallback(({
@@ -4776,7 +4344,7 @@ function DayPanel({
       borderLeft: `3px solid ${C.orange}`,
       marginBottom: 6
     }
-  }, CardHead({
+  }, /*#__PURE__*/React.createElement(CardHead, {
     s: s
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4786,7 +4354,7 @@ function DayPanel({
   }, "🏁 완수 예정 · ", s.buildings.length, "동", (() => {
     const dv = deliveryOf(s);
     return dv.state === "완료" ? ` · ${dv.way === "우편" ? "📮" : "🚚"} ${dv.label}` : dv.state === "예정" ? ` · 📦 ${dv.label}` : " · 📦 납품 미정";
-  })(), (s.assignees || []).length ? ` · ${sortMembers(s.assignees).join("·")}` : ""), EditLine({
+  })(), (s.assignees || []).length ? ` · ${sortMembers(s.assignees).join("·")}` : ""), /*#__PURE__*/React.createElement(EditLine, {
     s: s
   })), [allSchools, setDb, dateStr, pickerId, isMobile, isAdmin, editor]);
   /* 납품 카드 — 납품일이 이 날인 현장 */
@@ -4801,7 +4369,7 @@ function DayPanel({
       borderLeft: `3px solid ${C.purple}`,
       marginBottom: 6
     }
-  }, CardHead({
+  }, /*#__PURE__*/React.createElement(CardHead, {
     s: s
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4811,7 +4379,7 @@ function DayPanel({
   }, (() => {
     const dv = deliveryOf(s);
     return dv.state === "완료" ? `${dv.way === "우편" ? "📮 우편" : dv.way === "직납" ? "🚚 직납" : "📦 납품"} 완료${dv.by ? " · " + dv.by : ""}` : "📦 납품 예정";
-  })(), " · ", s.buildings.length, "동"), EditLine({
+  })(), " · ", s.buildings.length, "동"), /*#__PURE__*/React.createElement(EditLine, {
     s: s
   })), [allSchools, setDb, dateStr, pickerId, isMobile, isAdmin, editor]);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -4848,7 +4416,7 @@ function DayPanel({
       top: 0,
       right: 0,
       height: "100vh",
-      width: "max(460px, 50vw)",
+      width: 460,
       maxWidth: "96vw",
       background: C.surface,
       borderLeft: `4px solid ${C.blue}`,
@@ -5201,7 +4769,10 @@ function DayPanel({
       fontSize: 13,
       fontWeight: 700
     }
-  }, fieldSchools.length)), fieldSchools.map(s => /*#__PURE__*/React.createElement(React.Fragment, { key: s.id }, FieldCard({ s: s })))), startSchools.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, fieldSchools.length)), fieldSchools.map(s => /*#__PURE__*/React.createElement(FieldCard, {
+    key: s.id,
+    s: s
+  }))), startSchools.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 16
     }
@@ -5235,7 +4806,10 @@ function DayPanel({
       fontSize: 13,
       fontWeight: 700
     }
-  }, startSchools.length)), startSchools.map(s => /*#__PURE__*/React.createElement(React.Fragment, { key: s.id }, StartCard({ s: s })))), endSchools.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, startSchools.length)), startSchools.map(s => /*#__PURE__*/React.createElement(StartCard, {
+    key: s.id,
+    s: s
+  }))), endSchools.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -5265,7 +4839,10 @@ function DayPanel({
       fontSize: 13,
       fontWeight: 700
     }
-  }, endSchools.length)), endSchools.map(s => /*#__PURE__*/React.createElement(React.Fragment, { key: s.id }, EndCard({ s: s })))), deliverSchools.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, endSchools.length)), endSchools.map(s => /*#__PURE__*/React.createElement(EndCard, {
+    key: s.id,
+    s: s
+  }))), deliverSchools.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -5295,7 +4872,10 @@ function DayPanel({
       fontSize: 13,
       fontWeight: 700
     }
-  }, deliverSchools.length)), deliverSchools.map(s => /*#__PURE__*/React.createElement(React.Fragment, { key: s.id }, DeliverCard({ s: s })))))), editSc && /*#__PURE__*/React.createElement(EditPanel, {
+  }, deliverSchools.length)), deliverSchools.map(s => /*#__PURE__*/React.createElement(DeliverCard, {
+    key: s.id,
+    s: s
+  }))))), editSc && /*#__PURE__*/React.createElement(EditPanel, {
     sc: editSc,
     yr: editSc._year,
     half: editSc._half,
@@ -5414,68 +4994,13 @@ const isTentative = s => !!(s && s.tentative);
    s.bldWho = { "<동이름>": ["한상오"], "__협의": ["한의영"] }
    · 동에 아무도 없으면 그 날 가는 인원 전체가 맡는 것으로 본다 */
 const CONSULT_KEY = "__협의";
-/* 동 이름을 서버 열쇠로 쓸 때의 규칙 — 저장할 때와 찾을 때가 반드시 같아야 한다.
-   (Firebase 가 . $ # [ ] / 를 키로 받지 않아 _ 로 바꿔 올리기 때문) */
-const fbKey = k => String(k).replace(/[.$#\[\]\/\u0000-\u001F\u007F]/g, "_");
-const bldWhoOf = (s, bname) => {
-  const w = s && s.bldWho;
-  if (!w) return [];
-  const raw = toArr(w[bname]).filter(Boolean);
-  if (raw.length) return raw;
-  return toArr(w[fbKey(bname)]).filter(Boolean); /* 예전에 바뀐 열쇠로 저장된 것도 찾아낸다 */
-};
+const bldWhoOf = (s, bname) => toArr(s && s.bldWho && s.bldWho[bname]).filter(Boolean);
 const consultOf = s => toArr(s && s.bldWho && s.bldWho[CONSULT_KEY]).filter(Boolean);
 
 const whoOnDate = (s, ds) => {
   const w = s && s.fieldWho && s.fieldWho[ds];
   if (w && typeof w === "object") return toArr(w).filter(Boolean);
   return toArr(s && s.assignees);
-};
-
-/* ── 학교에서 빠진 인원은 동별 담당·협의에서도 자동으로 뺀다 (별도 추가 기능) ──
-   그 학교 조사일 중 어느 날에도 가지 않는 사람이 동별 담당에 남아 있으면 지운다.
-   여러 날 조사면 하루라도 가는 날이 남아 있으면 그대로 둔다. */
-const sitePeople = s => {
-  const set = new Set();
-  const ds = surveyDates(s);
-  if (ds.length) ds.forEach(d => whoOnDate(s, d).forEach(n => set.add(n)));
-  else toArr(s && s.assignees).filter(Boolean).forEach(n => set.add(n));
-  return set;
-};
-const pruneSiteBldWho = s => {
-  if (!s || s.deleted || !s.bldWho || typeof s.bldWho !== "object") return s;
-  const people = sitePeople(s);
-  let changed = false;
-  const bw = {};
-  Object.entries(s.bldWho).forEach(([k, v]) => {
-    const a = toArr(v).filter(Boolean);
-    const keep = a.filter(n => people.has(n));
-    if (keep.length !== a.length) changed = true;
-    if (keep.length) bw[k] = keep;
-  });
-  if (!changed) return s;
-  return { ...s, bldWho: Object.keys(bw).length ? bw : null };
-};
-/* 바뀐 게 없으면 같은 객체를 그대로 돌려준다 → 저장·화면에 영향 없음 */
-const pruneDbBldWho = db => {
-  if (!db || typeof db !== "object") return db;
-  let dbChanged = false;
-  const next = {};
-  Object.entries(db).forEach(([yr, halves]) => {
-    if (!halves || typeof halves !== "object" || Array.isArray(halves)) { next[yr] = halves; return; }
-    let yrChanged = false;
-    const nh = {};
-    Object.entries(halves).forEach(([half, list]) => {
-      if (!Array.isArray(list)) { nh[half] = list; return; }
-      let ch = false;
-      const nl = list.map(x => { const p = pruneSiteBldWho(x); if (p !== x) ch = true; return p; });
-      nh[half] = ch ? nl : list;
-      if (ch) yrChanged = true;
-    });
-    next[yr] = yrChanged ? nh : halves;
-    if (yrChanged) dbChanged = true;
-  });
-  return dbChanged ? next : db;
 };
 
 /* 동별 담당 배정 — 평소엔 결과만 한 줄씩 보이고, 고칠 때만 펼친다.
@@ -5489,7 +5014,7 @@ function BldAssign({
   const [open, setOpen] = useState(false);
   const [openRow, setOpenRow] = useState(null);
   const bs = buildingsOnDate(s, dateStr);
-  if (!assignees.length || bs.length < 1) return null; /* 1동짜리도 담당·협의를 넣을 수 있게 */
+  if (!assignees.length || bs.length < 2) return null;
   const rows = [...bs.map(b => ({
     key: b.b,
     label: b.b,
@@ -5670,6 +5195,79 @@ function BldAssign({
       }, on ? "✓ " : "", name);
     })));
   }));
+}
+ {
+  const bs = buildingsOnDate(s, dateStr);
+  if (!assignees.length || bs.length < 2) return null;
+  const rows = [...bs.map(b => ({
+    key: b.b,
+    label: b.b,
+    size: bldSize(b),
+    col: C.blue
+  })), {
+    key: CONSULT_KEY,
+    label: "🤝 협의",
+    size: "",
+    col: C.orange
+  }];
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 8,
+      padding: "8px 9px",
+      background: C.surfaceL,
+      borderRadius: 8,
+      border: BD
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.t4,
+      fontWeight: 700,
+      marginBottom: 6
+    }
+  }, "동별 담당 · 이름을 눌러 정하세요 (안 고르면 다 같이)"), rows.map(row => /*#__PURE__*/React.createElement("div", {
+    key: row.key,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 5,
+      flexWrap: "wrap",
+      padding: "4px 0",
+      borderTop: row.key === CONSULT_KEY ? `1px dashed ${C.border}` : "none",
+      marginTop: row.key === CONSULT_KEY ? 4 : 0,
+      paddingTop: row.key === CONSULT_KEY ? 7 : 4
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      color: C.t2,
+      minWidth: 92
+    }
+  }, row.label, row.size ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 4,
+      color: C.t4,
+      fontWeight: 600,
+      fontSize: 11
+    }
+  }, row.size) : null), assignees.map(name => {
+    const on = bldWhoOf(s, row.key).includes(name);
+    return /*#__PURE__*/React.createElement("button", {
+      key: name,
+      onClick: () => onToggle(s.id, row.key, name),
+      style: {
+        padding: "3px 9px",
+        borderRadius: 12,
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        background: on ? row.col : "transparent",
+        color: on ? "#fff" : C.t4,
+        border: `1px solid ${on ? row.col : C.border}`
+      }
+    }, on ? "✓ " : "", name);
+  }))));
 }
 
 /* 그 날짜가 조사 기간의 어디인지 — 첫날/마지막날/중간 */
@@ -11214,67 +10812,6 @@ function ExportImportPage({
     XLSX.utils.book_append_sheet(wb, buildNotesSheet(entries), "특이사항"); // 전체 특이사항
     XLSX.writeFile(wb, "시설물_리스트_전체.xlsx");
   };
-  /* 인원 배치 엑셀 — 어느 날 누가 어디로 나갔는지 (별도 기능) */
-  const doExportCrew = () => {
-    const entries = [];
-    Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => {
-      const schools = (arr || []).filter(s => !s.deleted);
-      if (schools.length) entries.push({ yr, half, schools });
-    }));
-    const recs = crewRecords(entries);
-    if (!recs.length) {
-      alert("내보낼 현장조사 배치가 없습니다.");
-      return;
-    }
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, crewSheetByDate(recs), "일자별 배치");
-    XLSX.utils.book_append_sheet(wb, crewSheetByBuilding(crewBldRecords(entries)), "동별 담당");
-    XLSX.utils.book_append_sheet(wb, crewSheetByPerson(recs), "인원별 기록");
-    XLSX.utils.book_append_sheet(wb, crewSheetSummary(recs), "인원 집계");
-    XLSX.writeFile(wb, `인원_배치기록_${dstr(new Date())}.xlsx`);
-  };
-  /* 동별 점검 인원 JSON (별도 기능) — 전체 · 주별 · 월별 */
-  const [crewJsonMonth, setCrewJsonMonth] = useState("all");
-  const crewJsonMonths = useMemo(() => {
-    const months = new Set(), weeks = new Set();
-    Object.values(db || {}).forEach(hs => Object.values(hs || {}).forEach(arr => (arr || []).forEach(s => {
-      if (!s || s.deleted) return;
-      surveyDates(s).forEach(ds => {
-        if (!whoOnDate(s, ds).length) return;
-        months.add(String(ds).slice(0, 7));
-        weeks.add(crewWeekMon(ds));
-      });
-    })));
-    return { months: [...months].sort().reverse(), weeks: [...weeks].sort().reverse() };
-  }, [db]);
-  const doExportCrewJson = () => {
-    const entries = [];
-    Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => {
-      const schools = (arr || []).filter(s => !s.deleted);
-      if (schools.length) entries.push({ yr, half, schools });
-    }));
-    const range = crewJsonRange(crewJsonMonth);
-    const data = crewJsonData(entries, range);
-    if (!data.sites.length) {
-      alert(range ? `${range.label} 에는 내보낼 현장조사 인원이 없습니다.` : "내보낼 현장조사 인원이 없습니다.");
-      return;
-    }
-    downloadJson(data, range ? `동별_점검인원_${range.file}.json` : `동별_점검인원_전체_${dstr(new Date())}.json`);
-  };
-  /* 완수용 캘린더 — 완수일 5일 전(주말·공휴일이면 앞 평일) 목표 달력 (별도 기능) */
-  const doExportWansu = () => {
-    const entries = [];
-    Object.entries(db).forEach(([yr, hs]) => Object.entries(hs).forEach(([half, arr]) => {
-      const schools = (arr || []).filter(s => !s.deleted);
-      if (schools.length) entries.push({ yr, half, schools });
-    }));
-    const wb = buildWansuWorkbook(entries);
-    if (!wb) {
-      alert("완수일이 잡힌 미완수 현장이 없습니다.");
-      return;
-    }
-    XLSX.writeFile(wb, `완수용_캘린더_${dstr(new Date())}.xlsx`);
-  };
   const totalS = Object.values(db).flatMap(h => Object.values(h)).flatMap(s => s).length;
   const totalB = Object.values(db).flatMap(h => Object.values(h)).flatMap(s => s).flatMap(s => s.buildings).length;
   return /*#__PURE__*/React.createElement("div", {
@@ -11843,9 +11380,7 @@ function ExportImportPage({
       color: C.t3,
       marginTop: 1
     }
-  }, "현장일정 · 예산표 · 특이사항 시트로 저장"))), /*#__PURE__*/React.createElement("div", {
-    style: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, "현장일정 · 예산표 · 특이사항 시트로 저장"))), /*#__PURE__*/React.createElement("button", {
     onClick: doExportAll,
     style: {
       padding: "9px 18px",
@@ -11858,79 +11393,7 @@ function ExportImportPage({
       cursor: "pointer",
       boxShadow: `0 4px 12px ${C.green}40`
     }
-  }, "↗ 전체 다운로드"), /*#__PURE__*/React.createElement("button", {
-    onClick: doExportCrew,
-    title: "어느 날 누가 어느 현장에 나갔는지 (일자별 · 인원별 · 집계)",
-    style: {
-      padding: "9px 16px",
-      background: C.blue,
-      border: "none",
-      borderRadius: 9,
-      color: "#fff",
-      fontSize: 15,
-      fontWeight: 700,
-      cursor: "pointer",
-      boxShadow: `0 4px 12px ${C.blue}40`
-    }
-  }, "\uD83D\uDC65 인원 배치"), /*#__PURE__*/React.createElement("button", {
-    onClick: doExportCrewJson,
-    title: "동별로 누가 점검했는지 JSON 파일로",
-    style: {
-      padding: "9px 16px",
-      background: "#334155",
-      border: "none",
-      borderRadius: 9,
-      color: "#fff",
-      fontSize: 15,
-      fontWeight: 700,
-      cursor: "pointer",
-      boxShadow: "0 4px 12px #33415540"
-    }
-  }, "{ } 동별 인원 JSON"), /*#__PURE__*/React.createElement("select", {
-    value: crewJsonMonth,
-    onChange: e => setCrewJsonMonth(e.target.value),
-    title: "JSON으로 뺄 기간 (주는 월~일)",
-    style: {
-      padding: "8px 10px",
-      border: "1px solid #334155",
-      borderRadius: 9,
-      fontSize: 14,
-      fontWeight: 700,
-      color: "#334155",
-      background: "#fff",
-      cursor: "pointer"
-    }
-  }, /*#__PURE__*/React.createElement("option", {
-    value: "all"
-  }, "전체 기간"), /*#__PURE__*/React.createElement("optgroup", {
-    label: "주별 (월~일)"
-  }, crewJsonMonths.weeks.map(w => {
-    const sun = dstr(addDays(parseD(w), 6));
-    const thisWeek = w === crewWeekMon(dstr(new Date()));
-    return /*#__PURE__*/React.createElement("option", {
-      key: "w" + w,
-      value: "w:" + w
-    }, `${+w.slice(5, 7)}/${+w.slice(8, 10)}(월) ~ ${+sun.slice(5, 7)}/${+sun.slice(8, 10)}(일)${thisWeek ? " · 이번 주" : ""}`);
-  })), /*#__PURE__*/React.createElement("optgroup", {
-    label: "월별"
-  }, crewJsonMonths.months.map(m => /*#__PURE__*/React.createElement("option", {
-    key: "m" + m,
-    value: "m:" + m
-  }, `${m.slice(0, 4)}년 ${+m.slice(5, 7)}월`)))), /*#__PURE__*/React.createElement("button", {
-    onClick: doExportWansu,
-    title: "완수일 5일 전을 목표일로 (토·일·공휴일이면 앞 평일로 당김)",
-    style: {
-      padding: "9px 16px",
-      background: C.purple,
-      border: "none",
-      borderRadius: 9,
-      color: "#fff",
-      fontSize: 15,
-      fontWeight: 700,
-      cursor: "pointer",
-      boxShadow: `0 4px 12px ${C.purple}40`
-    }
-  }, "\u2705 완수용 캘린더"))), /*#__PURE__*/React.createElement("div", {
+  }, "↗ 전체 다운로드")), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "16px 20px",
       display: "flex",
@@ -12057,7 +11520,7 @@ const FLOW16_LABEL = {
   계산서발행: "계산서"
 };
 /* 단계 값이 "됐다"로 볼 수 있는지 — 체크박스 true 또는 날짜/글자가 있으면 */
-const flowDone = v => v === true || typeof v === "string" && v.trim() !== "" && v !== "false" && v !== "FALSE";
+const flowDone = v => v === true || typeof v === "string" && v.trim() !== "" && v !== "false" && v !== "FALSE" && !isExampleVal(v);
 /* 워크플로우 한 줄 → {done: 개수, pos: 연속완료 위치, arr: 16개 true/false} */
 const flowProgress = st => {
   const arr = FLOW16.map(k => flowDone(st && st[k]));
@@ -12148,7 +11611,7 @@ function siteFromSheetRow(r, flowSteps, yr, half) {
 
 /* 시트 한 줄을 찾는다 — 단계별로 좁혀간다.
    같은 학교가 두 번 나오면 점검종류·동 이름·FMS 로 갈라낸다. */
-function matchSheetRow(site, rows, saved) {
+function matchSheetRow(site, rows, saved, appNames) {
   const memo = saved && saved[site.id];
   if (memo === "none") return {
     row: null,
@@ -12166,9 +11629,12 @@ function matchSheetRow(site, rows, saved) {
     /* 이름으로 못 찾음 — 시트에서 학교명이 바뀐 경우일 수 있다.
        No. 가 있고 시트에서 그 No. 가 하나뿐이면 그걸로 잇는다 (이름이 바뀌어도 같은 현장) */
     const no = String(site.no || "").trim();
-    if (no) {
+    /* 안전장치 — 앱의 No. 가 틀린 경우가 있어서:
+       · 휴지통 현장은 No. 로 잇지 않는다 (이름이 다른 행으로 되살아나는 사고 방지)
+       · 그 행의 이름이 앱의 다른 현장 이름이면 잇지 않는다 (이름 주인이 가져가야 함) */
+    if (no && !site.deleted) {
       const byNo = rows.filter(r => String(r.no || "").trim() === no);
-      if (byNo.length === 1) return {
+      if (byNo.length === 1 && !(appNames && normName(byNo[0].school) !== normName(site.school) && appNames.has(normName(byNo[0].school)))) return {
         row: byNo[0],
         by: "No.로 연결 (이름 바뀜)"
       };
@@ -12438,17 +11904,6 @@ function fbToDb(raw) {
           const o = {};
           Object.entries(w).forEach(([d, v]) => {
             o[d] = toArr(v).filter(Boolean);
-          });
-          return Object.keys(o).length ? o : null;
-        })(),
-        /* 동별 담당도 배열로 되돌린다 — 빠뜨리면 새로고침 뒤 배정이 사라진다 */
-        bldWho: (() => {
-          const w = s.bldWho;
-          if (!w || typeof w !== "object") return null;
-          const o = {};
-          Object.entries(w).forEach(([k, v]) => {
-            const a = toArr(v).filter(Boolean);
-            if (a.length) o[k] = a;
           });
           return Object.keys(o).length ? o : null;
         })(),
@@ -17667,7 +17122,7 @@ function BottomTabs({
 function App() {
   const isMobile = useIsMobile();
   const [authUser, setAuthUser] = useState(undefined); // undefined=확인중, null=미로그인, obj=로그인
-  const [db, setDbRaw] = useState(() => {
+  const [db, setDb] = useState(() => {
     try {
       if (localStorage.getItem("ston_fresh")) {
         localStorage.removeItem("ston_fresh");
@@ -17681,17 +17136,6 @@ function App() {
     } catch {}
     return DB;
   });
-  /* 모든 변경이 여기를 지난다 — 학교에서 빠진 인원은 동별 담당에서도 같이 뺀다.
-     정리하다 오류가 나면 원래 변경을 그대로 반영한다 */
-  const setDb = React.useCallback(u => setDbRaw(prev => {
-    const nx = typeof u === "function" ? u(prev) : u;
-    try {
-      return pruneDbBldWho(nx);
-    } catch (e) {
-      console.error("[동별 담당 정리] 실패:", e);
-      return nx;
-    }
-  }), []);
   const [sideOpen, setSideOpen] = useState(typeof window !== "undefined" ? window.innerWidth >= 820 : true);
   const [menu, setMenuRaw] = useState("schedule");
   // 모바일에서 메뉴 선택 시 사이드바 자동 닫힘
@@ -18366,10 +17810,12 @@ function App() {
     const target = [...allSchools.filter(s => s._year === SHEET_YEAR && s._half === SHEET_HALF), ...trashed];
     const skipped = allSchools.length - target.length;
 
+    /* 살아있는 앱 현장 이름들 — No. 로 이을 때 "그 이름의 주인이 따로 있는지" 보려고 */
+    const appNames = new Set(target.filter(s => !s.deleted).map(s => normName(s.school)));
     /* 사람이 직접 고른 것을 먼저 처리해 자리를 잡아준다 */
     const ordered = [...target].sort((a, b) => (syncMap[b.id] ? 1 : 0) - (syncMap[a.id] ? 1 : 0));
     ordered.forEach(s => {
-      const m = matchSheetRow(s, rows, syncMap);
+      const m = matchSheetRow(s, rows, syncMap, appNames);
       if (m.row) {
         const rk = String(m.row.row);
         /* 이미 다른 현장이 차지한 줄이면 사람이 확인하게 넘긴다 */
@@ -18394,6 +17840,25 @@ function App() {
         });
       }
     });
+
+    /* 이름 경쟁에서 밀린 현장("다른 현장이 사용 중")은 No. 로 한 번 더 잇는다.
+       같은 학교가 앱에 둘인데 시트에서 한쪽 이름이 바뀐 경우(예: 은혜고 No.247 → 율곡연수원) —
+       시트에 그 No. 가 하나뿐이고 그 줄이 아직 비어 있을 때만 */
+    for (let i = unmatched.length - 1; i >= 0; i--) {
+      const u = unmatched[i];
+      if (u.by !== "다른 현장이 사용 중" || u.site.deleted) continue;
+      const no = String(u.site.no || "").trim();
+      if (!no) continue;
+      const byNo = rows.filter(r => String(r.no || "").trim() === no);
+      if (byNo.length !== 1 || taken[String(byNo[0].row)]) continue;
+      if (normName(byNo[0].school) !== normName(u.site.school) && appNames.has(normName(byNo[0].school))) continue;
+      taken[String(byNo[0].row)] = u.site.id;
+      map[u.site.id] = {
+        row: byNo[0],
+        by: "No.로 연결 (이름 바뀜)"
+      };
+      unmatched.splice(i, 1);
+    }
 
     return {
       map,
@@ -18523,7 +17988,8 @@ function App() {
     toArr(db[SHEET_YEAR] && db[SHEET_YEAR][SHEET_HALF]).forEach(x => {
       if (!x || !x.school) return;
       if (!x.deleted && !matchedIds.has(x.id)) unmatchedNames.add(normName(x.school));
-      if (x.no) allNos.add(String(x.no).trim());
+      /* 이미 다른 행에 붙은 현장의 No. 는 소모된 것 — 짝 없는 현장의 No. 만 차단 근거로 */
+      if (x.no && !matchedIds.has(x.id)) allNos.add(String(x.no).trim());
     });
     const toCreate = [];
     sheet.sites.forEach(r => {
